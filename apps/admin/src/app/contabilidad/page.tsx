@@ -35,6 +35,7 @@ const fmt = (n: number) => n === 0 ? '—' : `S/ ${n.toFixed(2)}`;
 export default function ContabilidadPage() {
   const [startDate, setStartDate] = useState<string>(firstOfMonth);
   const [endDate, setEndDate] = useState<string>(today);
+  const posUrl = (process.env.NEXT_PUBLIC_POS_URL || "http://localhost:3001").replace(/\/$/, "");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewRows, setPreviewRows] = useState<ExcelRow[] | null>(null);
@@ -127,7 +128,7 @@ export default function ContabilidadPage() {
         <header className="bg-white border-b border-gray-200 sticky top-0 z-20 shadow-sm">
           <div className="px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <Link href="http://localhost:3001/hub" className="text-gray-400 hover:text-indigo-600 transition-colors p-1.5 rounded-lg hover:bg-indigo-50">
+            <Link href={`${posUrl}/hub`} className="text-gray-400 hover:text-indigo-600 transition-colors p-1.5 rounded-lg hover:bg-indigo-50">
               <ArrowLeft className="w-5 h-5" />
             </Link>
             <div className="flex items-center gap-3">

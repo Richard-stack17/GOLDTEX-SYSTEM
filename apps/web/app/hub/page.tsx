@@ -186,7 +186,7 @@ export default function HubPage() {
 
         {/* Contabilidad - Acceso: ADMIN, CAJERA */}
         {(role === 'ADMIN' || role === 'CAJERA') ? (
-          <button onClick={() => window.open('http://localhost:3002/contabilidad', '_blank')} className="block group text-left w-full">
+          <button onClick={() => router.push('/contabilidad')} className="block group text-left w-full">
             <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-amber-500/50 hover:shadow-[0_0_30px_rgba(245,158,11,0.2)] cursor-pointer">
               <CardHeader>
                 <div className="w-14 h-14 rounded-xl bg-amber-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
@@ -215,7 +215,7 @@ export default function HubPage() {
 
         {/* Clientes Frecuentes - Acceso: ADMIN, CAJERA */}
         {(role === 'ADMIN' || role === 'CAJERA') ? (
-          <button onClick={() => window.open('http://localhost:3002/clientes', '_blank')} className="block group text-left w-full">
+          <button onClick={() => router.push('/clientes')} className="block group text-left w-full">
             <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-pink-500/50 hover:shadow-[0_0_30px_rgba(236,72,153,0.2)] cursor-pointer">
               <CardHeader>
                 <div className="w-14 h-14 rounded-xl bg-pink-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
