@@ -63,15 +63,15 @@ const VOUCHER_TYPES: { id: VoucherType; label: string; icon: string }[] = [
 
 // ─────────────── Component ───────────────
 export default function CajaPage() {
-  const { role, isHydrated } = useRole();
+  const { role, username, isHydrated } = useRole();
   const { theme, toggleTheme } = useTheme();
   const router = useRouter();
 
   const [tickets, setTickets] = useState<PendingTicket[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
-  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("PENDING");
+  const [viewMode, setViewMode] = useState<"grid" | "list">("list");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
 
   // ── Payment modal ──
   const [selectedTicket, setSelectedTicket] = useState<PendingTicket | null>(null);
@@ -81,11 +81,20 @@ export default function CajaPage() {
     EFECTIVO: "", BCP: "", BBVA: "", IZIPAY: "",
   });
 
+  // ── Review / Confirm modal ──
+  const [isReviewing, setIsReviewing] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   // ── Voucher / Comprobante ──
   const [voucherType, setVoucherType] = useState<VoucherType>("TICKET");
   const [docNumber, setDocNumber] = useState("");
   const [docName, setDocName] = useState("");
   const [activeDocField, setActiveDocField] = useState<DocField>(null);
+
+  // ── Print preview state ──
+  const [lastSaleInfo, setLastSaleInfo] = useState<{
+    ticketNum: number | null; docNum: string; items: any[]; total: number; izipayFee?: number;
+  } | null>(null);
 
   // ── Customer Autocomplete ──
   const [customerQuery, setCustomerQuery] = useState("");
@@ -132,7 +141,11 @@ export default function CajaPage() {
   // ── Derived payment values ──
   const ticketTotal = selectedTicket?.total ?? 0;
   const izipayAmount = parseFloat(paymentAmounts["IZIPAY"]) || 0;
-  const izipayFee = izipayAmount - (izipayAmount / 1.04);
+  const rawIzipayFee = izipayAmount > 0 ? (izipayAmount - (izipayAmount / 1.04)) : 0;
+  let izipayFee = Math.round(rawIzipayFee * 10) / 10;
+  if (izipayAmount > 0 && izipayFee < 0.50) {
+    izipayFee = 0.50;
+  }
   const finalTotal = ticketTotal + izipayFee;
   const totalPaid = Object.values(paymentAmounts).reduce((acc, val) => acc + (parseFloat(val) || 0), 0);
   const vuelto = Math.round(totalPaid * 100) >= Math.round(finalTotal * 100)
@@ -157,9 +170,9 @@ export default function CajaPage() {
 
     const query = supabase
       .from("sales")
-      .select("id, document_number, internal_ticket_number, total, detail, status, created_at, voucher_type, voucher_doc_number")
+      .select("id, document_number, internal_ticket_number, total, detail, status, created_at, voucher_type, voucher_doc_number, transactions(payment_method, amount)")
       .eq("record_date", todayStr)
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: true });
 
     const { data, error } = await query;
 
@@ -172,8 +185,22 @@ export default function CajaPage() {
 
   useEffect(() => {
     fetchTickets();
-    const interval = setInterval(fetchTickets, 30000);
-    return () => clearInterval(interval);
+    const channel = supabase
+      .channel("caja-sales-changes")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "sales" },
+        () => {
+          fetchTickets();
+        }
+      )
+      .subscribe();
+
+    const interval = setInterval(fetchTickets, 5000);
+    return () => {
+      clearInterval(interval);
+      supabase.removeChannel(channel);
+    };
   }, [fetchTickets]);
 
   // ── Filtered tickets ──
@@ -211,9 +238,16 @@ export default function CajaPage() {
     }
   };
 
-  const handleConfirmPayment = async () => {
-    if (!selectedTicket || !canConfirm) return;
-    setIsProcessing(true);
+  // Phase 1: open the review pop-up (NO DB write yet)
+  const openReview = () => {
+    if (!canConfirm) return;
+    setIsReviewing(true);
+  };
+
+  // Phase 2: actually write to DB (guarded by isSubmitting)
+  const handleFinalSubmit = async () => {
+    if (!selectedTicket || isSubmitting) return;
+    setIsSubmitting(true);
 
     try {
       const starsoftDoc = `B002-${String(Math.floor(Math.random() * 10000000)).padStart(7, '0')}`;
@@ -222,6 +256,9 @@ export default function CajaPage() {
         throw new Error("No se pudo determinar el número interno del ticket.");
       }
 
+      // Encode cajero into source_sheet: keep vendedor prefix, append cajero
+      const cajeroTag = username ? `|CAJERO:${username}` : "";
+
       const updatePayload: Record<string, unknown> = {
         status: "COMPLETED",
         total: finalTotal,
@@ -229,6 +266,7 @@ export default function CajaPage() {
         voucher_type: voucherType,
         voucher_doc_number: needsDocInfo ? docNumber : String(internalTicketNum),
         voucher_doc_name: needsDocInfo ? docName.trim() : null,
+        source_sheet: `${(selectedTicket as any).source_sheet || ""}${cajeroTag}`,
       };
 
       const { error: updateErr } = await supabase
@@ -275,8 +313,7 @@ export default function CajaPage() {
     } catch (err) {
       console.error(err);
       alert(err instanceof Error ? err.message : "Error al procesar el cobro.");
-    } finally {
-      setIsProcessing(false);
+      setIsSubmitting(false); // re-enable only on error
     }
   };
 
@@ -303,8 +340,10 @@ export default function CajaPage() {
   };
 
   const closeModal = () => {
-    if (isProcessing) return;
+    if (isSubmitting) return;
     setSelectedTicket(null);
+    setIsReviewing(false);
+    setIsSubmitting(false);
     setActivePayMethod("EFECTIVO");
     setPaymentAmounts({ EFECTIVO: "", BCP: "", BBVA: "", IZIPAY: "" });
     setVoucherType("TICKET");
@@ -315,12 +354,19 @@ export default function CajaPage() {
 
   const openModal = (ticket: PendingTicket) => {
     setSelectedTicket(ticket);
+    setIsReviewing(false);
+    setIsSubmitting(false);
     setActivePayMethod("EFECTIVO");
     setPaymentAmounts({ EFECTIVO: "", BCP: "", BBVA: "", IZIPAY: "" });
     setVoucherType("TICKET");
     setDocNumber("");
     setDocName("");
     setActiveDocField(null);
+    // Auto-focus the Efectivo input after the modal renders
+    setTimeout(() => {
+      const el = document.getElementById("payment-input-EFECTIVO");
+      if (el) (el as HTMLInputElement).focus();
+    }, 80);
   };
 
   const setFullAmount = (method: PaymentMethod) => {
@@ -330,7 +376,10 @@ export default function CajaPage() {
       if (m === method) continue;
       const v = parseFloat(valStr) || 0;
       if (m === "IZIPAY") {
-        basePaidOthers += v / 1.04;
+        const rawFee = v > 0 ? (v - (v / 1.04)) : 0;
+        let fee = Math.round(rawFee * 10) / 10;
+        if (v > 0 && fee < 0.50) fee = 0.50;
+        basePaidOthers += (v - fee);
       } else {
         basePaidOthers += v;
       }
@@ -338,59 +387,79 @@ export default function CajaPage() {
     const baseRemaining = Math.max(0, ticketTotal - basePaidOthers);
 
     if (method === "IZIPAY") {
-      const izipayTotal = baseRemaining * 1.04;
+      const rawFee = baseRemaining * 0.04;
+      let fee = Math.round(rawFee * 10) / 10;
+      if (baseRemaining > 0 && fee < 0.50) fee = 0.50;
+      const izipayTotal = baseRemaining + fee;
       setPaymentAmounts(prev => ({ ...prev, [method]: izipayTotal.toFixed(2) }));
     } else {
       setPaymentAmounts(prev => ({ ...prev, [method]: baseRemaining.toFixed(2) }));
     }
   };
 
-  const docNumberMaxLen = voucherType === "BOLETA" ? 8 : 11;
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, currentId: PaymentMethod) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
 
-  const handleDocNumericKey = (key: string) => {
-    if (key === "DEL") {
-      setDocNumber((prev) => {
-        const next = prev.slice(0, -1);
-        setCustomerQuery(next);
-        return next;
-      });
-      return;
+    // Move to next input; if at last input and fully paid, focus the Confirmar button
+    const order = PAYMENT_METHODS.map(m => m.id);
+    const currentIdx = order.indexOf(currentId);
+    const nextId = order[currentIdx + 1];
+    if (nextId) {
+      const nextInput = document.getElementById(`payment-input-${nextId}`);
+      if (nextInput) (nextInput as HTMLInputElement).focus();
+    } else {
+      // Last field — focus the Confirmar Cobro button
+      const confirmBtn = document.getElementById("btn-confirmar-cobro");
+      if (confirmBtn) (confirmBtn as HTMLButtonElement).focus();
     }
-    if (key === "CLEAR") {
-      setDocNumber("");
-      setCustomerQuery("");
-      return;
-    }
-    setDocNumber((prev) => {
-      if (prev.length >= docNumberMaxLen) return prev;
-      const next = prev + key;
-      setCustomerQuery(next);
-      return next;
-    });
   };
 
-  const handleDocTextKey = (key: string) => {
-    if (key === "DEL") {
-      setDocName((prev) => {
-        const next = prev.slice(0, -1);
-        setCustomerQuery(next);
-        return next;
-      });
-      return;
-    }
-    if (key === "SPACE") {
-      setDocName((prev) => {
-        const next = `${prev} `;
-        setCustomerQuery(next);
-        return next;
-      });
-      return;
-    }
-    setDocName((prev) => {
-      const next = prev + key;
-      setCustomerQuery(next);
-      return next;
+  const handlePrintA4 = (ticket: PendingTicket) => {
+    const lines = ticket.detail.split("\n");
+    const reconstructedItems = lines.map((l: string, idx: number) => {
+      let code = "";
+      let name = l;
+      let quantity = 1;
+      let editedPrice = 0;
+      try {
+        const parts = l.split(" — ");
+        if (parts.length === 2) {
+          const firstSpaceIdx = parts[0].indexOf(" ");
+          code = firstSpaceIdx > -1 ? parts[0].substring(0, firstSpaceIdx) : "";
+          name = firstSpaceIdx > -1 ? parts[0].substring(firstSpaceIdx + 1) : parts[0];
+          const subParts = parts[1].split("m × S/ ");
+          if (subParts.length === 2) {
+            quantity = parseFloat(subParts[0]) || 0;
+            editedPrice = parseFloat(subParts[1]) || 0;
+          }
+        }
+      } catch (e) {
+        console.error(e);
+      }
+      return {
+        id: String(idx),
+        code,
+        name,
+        price: editedPrice,
+        editedPrice,
+        quantity,
+      };
     });
+
+    const txs = ticket.transactions || [];
+    const izipayTx = txs.find((t) => t.payment_method === "IZIPAY");
+    const izipayFeeAmt = izipayTx ? izipayTx.surcharge_amount || 0 : 0;
+
+    setLastSaleInfo({
+      ticketNum: ticket.internal_ticket_number,
+      docNum: ticket.document_number,
+      items: reconstructedItems,
+      total: ticket.total,
+      izipayFee: izipayFeeAmt,
+    });
+
+    setTimeout(() => window.print(), 120);
   };
 
   // ── Format helpers ──
@@ -510,7 +579,7 @@ export default function CajaPage() {
           <span className="text-foreground font-black text-lg font-mono">S/ {filteredTotal.toFixed(2)}</span>
         </div>
         <div className="ml-auto text-xs text-muted-foreground font-mono">
-          Auto-actualiza cada 30s
+          Auto-actualiza cada 5s
         </div>
       </div>
 
@@ -540,14 +609,12 @@ export default function CajaPage() {
               const sunatDoc = starsoftDocNum(ticket);
               return (
                 <div key={ticket.id} className="relative group">
-                  <button
-                    onClick={() => ticket.status === "PENDING" ? openModal(ticket) : undefined}
-                    disabled={ticket.status !== "PENDING"}
+                  <div
                     className={`w-full bg-card border-2 rounded-2xl p-5 text-left transition-all ${
                       ticket.status === "PENDING"
                         ? "border-orange-500/30 hover:border-orange-500 hover:shadow-xl hover:shadow-orange-500/10 active:scale-[0.97] cursor-pointer"
                         : ticket.status === "COMPLETED"
-                        ? "border-emerald-500/20 opacity-75 cursor-default"
+                        ? "border-emerald-500/20 opacity-90 cursor-default"
                         : "border-red-500/20 opacity-60 cursor-default"
                     }`}
                   >
@@ -570,17 +637,31 @@ export default function CajaPage() {
                     <div className="space-y-2 border-t border-border pt-4">
                       <div className="flex items-center justify-between">
                         <span className="text-muted-foreground text-xs font-mono">{time}</span>
-                        {ticket.status === "PENDING" && (
-                          <span className="text-muted-foreground text-xs font-mono truncate max-w-[120px]">{ticket.document_number}</span>
-                        )}
+                        <span className="text-muted-foreground text-xs font-mono truncate max-w-[120px]">{ticket.document_number}</span>
                       </div>
                       <div className="text-muted-foreground text-xs truncate">{ticket.detail.split('\n')[0]}...</div>
                       <div className="flex items-center justify-between mt-3">
                         <span className="text-muted-foreground text-sm font-bold">Total:</span>
                         <span className="text-2xl font-black font-mono">S/ {ticket.total.toFixed(2)}</span>
                       </div>
+                      
+                      {ticket.status === "PENDING" ? (
+                        <button
+                          onClick={() => openModal(ticket)}
+                          className="w-full mt-3 h-10 rounded-xl text-white bg-orange-600 hover:bg-orange-500 font-bold shadow-lg shadow-orange-500/20 transition-all flex items-center justify-center"
+                        >
+                          Cobrar
+                        </button>
+                      ) : ticket.status === "COMPLETED" ? (
+                        <button
+                          onClick={() => handlePrintA4(ticket)}
+                          className="w-full mt-3 h-10 rounded-xl text-white bg-blue-600 hover:bg-blue-500 font-bold shadow-lg shadow-blue-500/20 transition-all flex items-center justify-center"
+                        >
+                          Imprimir A4
+                        </button>
+                      ) : null}
                     </div>
-                  </button>
+                  </div>
                   {ticket.status === "PENDING" && (
                     <button
                       onClick={(e) => handleCancelTicket(ticket, e)}
@@ -600,10 +681,12 @@ export default function CajaPage() {
               <thead className="bg-background text-muted-foreground border-b border-border">
                 <tr>
                   <th className="px-6 py-4 font-bold">Ticket</th>
-                  <th className="px-6 py-4 font-bold">Hora</th>
                   <th className="px-6 py-4 font-bold">Documento</th>
-                  <th className="px-6 py-4 font-bold">Estado</th>
+                  <th className="px-6 py-4 font-bold">Efectivo</th>
+                  <th className="px-6 py-4 font-bold">BCP</th>
+                  <th className="px-6 py-4 font-bold">BBVA</th>
                   <th className="px-6 py-4 font-bold">Total</th>
+                  <th className="px-6 py-4 font-bold">Estado</th>
                   <th className="px-6 py-4 font-bold text-right">Acciones</th>
                 </tr>
               </thead>
@@ -612,6 +695,15 @@ export default function CajaPage() {
                   const badge = statusBadge(ticket.status);
                   const ticketNo = parseInternalTicketNum(ticket);
                   const sunatDoc = starsoftDocNum(ticket);
+                  
+                  const txs = ticket.transactions || [];
+                  const sumBy = (m: string) => txs.filter(t => t.payment_method === m).reduce((s, t) => s + t.amount, 0);
+                  const efectivoAmt = sumBy("EFECTIVO");
+                  const bcpAmt = sumBy("BCP") + sumBy("IZIPAY");
+                  const bbvaAmt = sumBy("BBVA");
+
+                  const fmt = (n: number) => n === 0 ? "—" : `S/ ${n.toFixed(2)}`;
+
                   return (
                     <tr key={ticket.id} className="hover:bg-secondary/30 transition-colors">
                       <td className="px-6 py-4">
@@ -620,17 +712,19 @@ export default function CajaPage() {
                           <span className="text-xs text-muted-foreground font-mono">Doc: {sunatDoc}</span>
                         )}
                       </td>
-                      <td className="px-6 py-4 text-muted-foreground font-mono">{formatTime(ticket.created_at)}</td>
                       <td className="px-6 py-4 text-muted-foreground font-mono">{ticket.document_number}</td>
+                      <td className="px-6 py-4 font-mono font-bold text-gray-700">{fmt(efectivoAmt)}</td>
+                      <td className="px-6 py-4 font-mono font-bold text-gray-700">{fmt(bcpAmt)}</td>
+                      <td className="px-6 py-4 font-mono font-bold text-gray-700">{fmt(bbvaAmt)}</td>
+                      <td className="px-6 py-4 font-black text-emerald-500 text-lg">S/ {ticket.total.toFixed(2)}</td>
                       <td className="px-6 py-4">
                         <span className={`text-xs font-bold px-2.5 py-1 rounded-full uppercase tracking-wider ${badge.classes}`}>
                           {badge.label}
                         </span>
                       </td>
-                      <td className="px-6 py-4 font-black text-emerald-500 text-lg">S/ {ticket.total.toFixed(2)}</td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex justify-end gap-2">
-                          {ticket.status === "PENDING" && (
+                          {ticket.status === "PENDING" ? (
                             <>
                               <button
                                 onClick={() => handleCancelTicket(ticket)}
@@ -645,7 +739,14 @@ export default function CajaPage() {
                                 Cobrar
                               </button>
                             </>
-                          )}
+                          ) : ticket.status === "COMPLETED" ? (
+                            <button
+                              onClick={() => handlePrintA4(ticket)}
+                              className="px-4 py-1.5 rounded-lg text-white bg-blue-600 hover:bg-blue-500 font-bold shadow-lg shadow-blue-500/20 transition-all"
+                            >
+                              Imprimir A4
+                            </button>
+                          ) : null}
                         </div>
                       </td>
                     </tr>
@@ -658,12 +759,12 @@ export default function CajaPage() {
       </main>
 
       {/* ════════════════════════════════════════
-          PAYMENT MODAL (SPLIT PAYMENTS - NUMPAD TÁCTIL)
+          PAYMENT MODAL (OPTIMIZADO PARA PC / TECLADO FÍSICO)
           ════════════════════════════════════════ */}
       <Dialog open={!!selectedTicket} onOpenChange={(open) => { if (!open) closeModal(); }}>
         <DialogContent
           onClose={closeModal}
-          className="w-[92vw] max-w-6xl h-[85vh] sm:max-w-6xl bg-card border-border text-foreground p-0 overflow-hidden flex flex-col"
+          className="w-[92vw] max-w-3xl bg-card border-border text-foreground p-0 overflow-hidden flex flex-col"
         >
           {/* Header — identificación del ticket */}
           <div className="px-8 py-5 border-b border-border bg-background/50 shrink-0">
@@ -672,346 +773,373 @@ export default function CajaPage() {
                 <span>Cobrar Ticket {selectedTicket ? formatTicketHash(parseInternalTicketNum(selectedTicket)) : ""}</span>
                 <span className="text-sm font-mono text-muted-foreground font-normal">{selectedTicket?.document_number}</span>
               </DialogTitle>
-              <DialogDescription className="hidden">Modal de cobro con teclado táctil</DialogDescription>
+              <DialogDescription className="hidden">Modal de cobro para PC</DialogDescription>
             </DialogHeader>
           </div>
 
-          {/* Cuerpo — split 65% scroll / 35% fijo */}
-          <div className="flex flex-1 min-h-0 overflow-hidden">
-            {/* Columna izquierda (65%) — scrollable */}
-            <div className="w-[65%] flex-1 overflow-y-auto p-8 pr-5 space-y-6">
+          {/* Cuerpo */}
+          <div className="p-8 space-y-6 overflow-y-auto max-h-[60vh]">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Columna Izquierda: Métodos de Pago */}
               <div className="space-y-4">
                 <span className="text-sm font-bold text-muted-foreground uppercase tracking-wider">Métodos de Pago</span>
-                {PAYMENT_METHODS.map(({ id, label, sub, Icon }) => {
+                {PAYMENT_METHODS.map(({ id, label, Icon }) => {
                   const amount = paymentAmounts[id];
-                  const isSelected = activePayMethod === id && activeDocField === null;
                   const hasValue = parseFloat(amount) > 0;
 
                   return (
                     <div
                       key={id}
-                      onClick={() => { setActiveDocField(null); setActivePayMethod(id); }}
-                      className={`flex items-center gap-4 p-4 rounded-2xl border-2 transition-all cursor-pointer ${
-                        isSelected
-                          ? "border-orange-500 bg-orange-500/10 shadow-lg"
-                          : "border-border bg-background/30 hover:border-muted-foreground/40"
-                      }`}
+                      className="flex items-center gap-4 p-3 rounded-xl border border-border bg-background/30"
                     >
-                      <div className={`w-14 h-14 rounded-xl flex items-center justify-center shrink-0 ${
-                        isSelected ? "bg-orange-500 text-white" : hasValue ? "bg-orange-500/20 text-orange-500" : "bg-secondary text-muted-foreground"
+                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${
+                        hasValue ? "bg-orange-500/20 text-orange-500" : "bg-secondary text-muted-foreground"
                       }`}>
-                        <Icon className="w-7 h-7" />
+                        <Icon className="w-5 h-5" />
                       </div>
 
                       <div className="flex-1 min-w-0">
-                        <div className="font-bold text-foreground text-xl leading-tight">{label}</div>
-                        <div className="text-sm text-muted-foreground mt-0.5">{sub}</div>
+                        <div className="font-bold text-foreground text-base leading-tight">{label}</div>
                       </div>
 
-                      <div className="flex items-center gap-3 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center gap-2 shrink-0">
                         <button
-                          onClick={() => { setActiveDocField(null); setActivePayMethod(id); setFullAmount(id); }}
-                          className="text-sm font-bold text-emerald-600 bg-emerald-500/10 hover:bg-emerald-500/20 px-3 py-2 rounded-lg transition-colors touch-manipulation"
+                          type="button"
+                          tabIndex={-1}
+                          onClick={(e) => { 
+                            e.preventDefault();
+                            setFullAmount(id); 
+                            setTimeout(() => {
+                              document.getElementById(`payment-input-${id}`)?.focus();
+                            }, 0);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                            }
+                          }}
+                          className="text-xs font-bold text-emerald-600 bg-emerald-500/10 hover:bg-emerald-500/20 px-2.5 py-1.5 rounded-lg transition-colors"
                         >
                           Exacto
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => { setActiveDocField(null); setActivePayMethod(id); }}
-                          className={`min-w-[8.5rem] bg-background border rounded-xl py-3 px-4 text-right font-mono font-bold text-xl transition-colors touch-manipulation ${
-                            isSelected ? "border-orange-500 text-foreground ring-2 ring-orange-500/20" : "border-border text-muted-foreground"
-                          }`}
-                        >
-                          S/ {amount || "0.00"}
-                        </button>
+                        <input
+                          type="number"
+                          id={`payment-input-${id}`}
+                          value={amount}
+                          min={0}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (parseFloat(val) < 0) {
+                              setPaymentAmounts(prev => ({ ...prev, [id]: "0" }));
+                            } else {
+                              setPaymentAmounts(prev => ({ ...prev, [id]: val }));
+                            }
+                          }}
+                          onKeyDown={(e) => handleInputKeyDown(e, id)}
+                          placeholder="0.00"
+                          step="1"
+                          className="w-28 bg-background border border-border rounded-lg py-1.5 px-3 text-right font-mono font-bold text-base focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/25 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                        />
                       </div>
                     </div>
                   );
                 })}
               </div>
 
-              {/* Tipo de comprobante + inputs cliente */}
-              <div className="pt-5 border-t border-border">
-                <div className="flex items-center gap-2 mb-4">
-                  <FileText className="w-5 h-5 text-muted-foreground" />
-                  <span className="text-sm font-bold text-muted-foreground uppercase tracking-wider">Tipo de Comprobante</span>
-                </div>
-                <div className="flex gap-3 mb-4">
-                  {VOUCHER_TYPES.map(({ id, label, icon }) => (
-                    <button
-                      key={id}
-                      onClick={() => { setVoucherType(id); setDocNumber(""); setDocName(""); setActiveDocField(null); }}
-                      className={`flex-1 flex flex-col items-center gap-1.5 py-4 px-3 rounded-xl border-2 text-base font-bold transition-all touch-manipulation ${
-                        voucherType === id
-                          ? "border-indigo-500 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
-                          : "border-border bg-background/30 text-muted-foreground hover:border-muted-foreground/40"
-                      }`}
-                    >
-                      <span className="text-2xl">{icon}</span>
-                      <span className="text-center leading-tight">{label}</span>
-                    </button>
-                  ))}
+              {/* Columna Derecha: Resumen & Cliente */}
+              <div className="space-y-6">
+                <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4">
+                  <span className="text-muted-foreground text-xs font-bold uppercase tracking-wider block mb-1">Total a Pagar</span>
+                  <span className="text-4xl font-black text-emerald-500 font-mono leading-none block">
+                    S/ {finalTotal.toFixed(2)}
+                  </span>
+                  {izipayFee > 0 && (
+                    <span className="text-orange-500 text-xs font-bold mt-2 block">
+                      Recargo Izipay: S/ {izipayFee.toFixed(2)}
+                    </span>
+                  )}
                 </div>
 
-                {needsDocInfo && (
-                  <div className="space-y-3 animate-in fade-in slide-in-from-top-2 duration-200 relative">
-                    <div className="relative">
-                      <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground pointer-events-none" />
-                      <input
-                        type="text"
-                        readOnly
-                        inputMode="none"
-                        placeholder={voucherType === "BOLETA" ? "DNI (8 dígitos)" : "RUC (11 dígitos)"}
-                        value={docNumber}
-                        onFocus={() => {
-                          setActiveDocField("docNumber");
-                          if (customerResults.length > 0) setShowDropdown(true);
-                        }}
-                        className={`w-full pl-12 pr-16 py-4 rounded-xl border-2 bg-background text-foreground font-mono text-xl font-bold outline-none transition-colors cursor-pointer touch-manipulation ${
-                          activeDocField === "docNumber" ? "border-indigo-500 ring-2 ring-indigo-500/20" : ""
-                        } ${
-                          docNumber && !docNumberValid
-                            ? "border-red-500"
-                            : docNumberValid && docNumber
-                            ? "border-emerald-500"
-                            : activeDocField !== "docNumber" ? "border-border" : ""
+                {/* Tipo de comprobante + inputs cliente */}
+                <div className="space-y-4">
+                  <span className="text-sm font-bold text-muted-foreground uppercase tracking-wider block">Comprobante</span>
+                  <div className="flex gap-2">
+                    {VOUCHER_TYPES.map(({ id, label }) => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => { setVoucherType(id); setDocNumber(""); setDocName(""); }}
+                        className={`flex-1 py-2 px-3 rounded-lg border text-xs font-bold transition-all ${
+                          voucherType === id
+                            ? "border-indigo-500 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
+                            : "border-border bg-background/30 text-muted-foreground hover:border-muted-foreground/40"
                         }`}
-                      />
-                      {docNumber && (
-                        <span className={`absolute right-4 top-1/2 -translate-y-1/2 text-sm font-bold ${docNumberValid ? "text-emerald-500" : "text-red-500"}`}>
-                          {docNumber.length}/{voucherType === "BOLETA" ? 8 : 11}
-                        </span>
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {needsDocInfo && (
+                    <div className="space-y-3 relative">
+                      <div className="relative">
+                        <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                        <input
+                          type="text"
+                          placeholder={voucherType === "BOLETA" ? "DNI (8 dígitos)" : "RUC (11 dígitos)"}
+                          value={docNumber}
+                          onChange={(e) => {
+                            const val = e.target.value.replace(/\D/g, "");
+                            setDocNumber(val);
+                            setCustomerQuery(val);
+                          }}
+                          className={`w-full pl-9 pr-12 py-2 rounded-lg border bg-background text-foreground font-mono text-sm outline-none transition-colors ${
+                            docNumber && !docNumberValid
+                              ? "border-red-500"
+                              : docNumberValid && docNumber
+                              ? "border-emerald-500"
+                              : "border-border"
+                          }`}
+                        />
+                      </div>
+                      <div className="relative">
+                        <FileText className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                        <input
+                          type="text"
+                          placeholder={voucherType === "BOLETA" ? "Nombre completo" : "Razón Social"}
+                          value={docName}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setDocName(val);
+                            setCustomerQuery(val);
+                          }}
+                          className={`w-full pl-9 pr-4 py-2 rounded-lg border bg-background text-foreground text-sm outline-none transition-colors ${
+                            docName && !docNameValid
+                              ? "border-red-500"
+                              : docNameValid && docName
+                              ? "border-emerald-500"
+                              : "border-border"
+                          }`}
+                        />
+                      </div>
+
+                      {showDropdown && (
+                        <div className="absolute top-[100%] mt-1 left-0 right-0 bg-card border border-border shadow-xl rounded-lg z-50 overflow-hidden flex flex-col">
+                          {customerResults.map((c) => (
+                            <button
+                              key={c.id}
+                              type="button"
+                              onClick={() => selectCustomer(c)}
+                              className="w-full text-left px-3 py-2.5 hover:bg-secondary transition-colors border-b border-border/50 last:border-0 flex flex-col"
+                            >
+                              <span className="font-bold text-foreground text-xs truncate">{c.business_name}</span>
+                              <span className="font-mono text-[10px] text-muted-foreground">{c.ruc || "Sin doc."}</span>
+                            </button>
+                          ))}
+                        </div>
                       )}
                     </div>
-                    <div className="relative">
-                      <FileText className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground pointer-events-none" />
-                      <input
-                        type="text"
-                        readOnly
-                        inputMode="none"
-                        placeholder={voucherType === "BOLETA" ? "Nombre completo del cliente" : "Razón Social"}
-                        value={docName}
-                        onFocus={() => {
-                          setActiveDocField("docName");
-                          if (customerResults.length > 0) setShowDropdown(true);
-                        }}
-                        className={`w-full pl-12 pr-4 py-4 rounded-xl border-2 bg-background text-foreground text-xl font-bold outline-none transition-colors cursor-pointer touch-manipulation ${
-                          activeDocField === "docName" ? "border-indigo-500 ring-2 ring-indigo-500/20" : ""
-                        } ${
-                          docName && !docNameValid
-                            ? "border-red-500"
-                            : docNameValid && docName
-                            ? "border-emerald-500"
-                            : activeDocField !== "docName" ? "border-border" : ""
-                        }`}
-                      />
-                    </div>
-
-                    {showDropdown && (
-                      <div className="absolute top-[100%] mt-1 left-0 right-0 bg-card border border-border shadow-xl rounded-xl z-50 overflow-hidden flex flex-col">
-                        <div className="px-3 py-2 bg-secondary/50 text-[10px] font-bold text-muted-foreground uppercase tracking-wider border-b border-border flex justify-between items-center">
-                          Coincidencias
-                          <button onClick={() => setShowDropdown(false)} className="hover:text-foreground">✕</button>
-                        </div>
-                        {customerResults.map((c) => (
-                          <button
-                            key={c.id}
-                            onClick={() => selectCustomer(c)}
-                            className="w-full text-left px-4 py-3 hover:bg-secondary transition-colors border-b border-border/50 last:border-0 flex flex-col gap-0.5"
-                          >
-                            <span className="font-bold text-foreground text-sm truncate">{c.business_name}</span>
-                            <span className="font-mono text-xs text-muted-foreground">{c.ruc || "Sin doc."}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-
-                    {(!docNumberValid && docNumber) && (
-                      <p className="text-red-500 text-base font-bold">
-                        {voucherType === "BOLETA" ? "El DNI debe tener 8 dígitos." : "El RUC debe tener 11 dígitos."}
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Resumen de pago (scroll con el contenido izquierdo) */}
-              <div className="pt-5 border-t border-border space-y-4">
-                <div className="flex items-center justify-between text-lg">
-                  <span className="text-muted-foreground font-bold">Total Ingresado:</span>
-                  <span className="text-xl font-bold font-mono">S/ {totalPaid.toFixed(2)}</span>
+                  )}
                 </div>
-                {vuelto > 0 && (
-                  <div className="flex items-center justify-between bg-emerald-500/20 border border-emerald-500/30 rounded-xl p-4 animate-in fade-in slide-in-from-bottom-2">
-                    <span className="text-emerald-600 dark:text-emerald-400 font-black text-lg">VUELTO A ENTREGAR:</span>
-                    <span className="text-3xl font-black text-emerald-500 font-mono">S/ {vuelto.toFixed(2)}</span>
-                  </div>
-                )}
               </div>
             </div>
 
-            {/* Columna derecha (35%) — fija: total + teclado */}
-            <div className="w-[35%] shrink-0 border-l border-border bg-secondary/20 p-5 flex flex-col gap-5 overflow-hidden self-stretch">
-              <div className="bg-emerald-500/10 border-2 border-emerald-500/30 rounded-2xl p-5 shrink-0">
-                <span className="text-muted-foreground text-xs font-bold uppercase tracking-wider block mb-2">Total a Pagar</span>
-                <span className="text-5xl font-black text-emerald-500 font-mono leading-none block">
-                  S/ {finalTotal.toFixed(2)}
-                </span>
-                {izipayFee > 0 && (
-                  <span className="text-orange-500 text-sm font-bold mt-3 block">
-                    Recargo Izipay: S/ {izipayFee.toFixed(2)}
-                  </span>
-                )}
+            {/* Vuelto */}
+            {vuelto > 0 && (
+              <div className="flex items-center justify-between bg-emerald-500/20 border border-emerald-500/30 rounded-xl p-3">
+                <span className="text-emerald-600 dark:text-emerald-400 font-bold text-sm">VUELTO A ENTREGAR:</span>
+                <span className="text-2xl font-black text-emerald-500 font-mono">S/ {vuelto.toFixed(2)}</span>
               </div>
-
-              <div className="flex flex-col gap-4 flex-1 min-h-0">
-                <span className="text-sm font-bold text-muted-foreground uppercase tracking-wider shrink-0">
-                  Teclado:{" "}
-                  <span className={`font-bold ${
-                    activeDocField === "docNumber" || activeDocField === "docName"
-                      ? "text-indigo-500"
-                      : "text-orange-500"
-                  }`}>
-                    {activeDocField === "docNumber"
-                      ? (voucherType === "BOLETA" ? "DNI" : "RUC")
-                      : activeDocField === "docName"
-                      ? "Nombre"
-                      : activePayMethod}
-                  </span>
-                </span>
-
-                {activeDocField === "docNumber" ? (
-                  <div className="grid grid-cols-3 gap-2 bg-background/60 p-4 rounded-2xl border border-border/80">
-                    {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((num) => (
-                      <button
-                        key={num}
-                        type="button"
-                        onClick={() => handleDocNumericKey(num)}
-                        className="h-16 text-lg font-bold rounded-xl bg-secondary hover:bg-muted active:bg-indigo-500 active:text-white transition-colors touch-manipulation"
-                      >
-                        {num}
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() => handleDocNumericKey("CLEAR")}
-                      className="h-16 text-base font-bold rounded-xl bg-secondary/60 hover:bg-muted active:bg-red-500/20 active:text-red-600 transition-colors touch-manipulation"
-                    >
-                      Limpiar
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDocNumericKey("0")}
-                      className="h-16 text-lg font-bold rounded-xl bg-secondary hover:bg-muted active:bg-indigo-500 active:text-white transition-colors touch-manipulation"
-                    >
-                      0
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDocNumericKey("DEL")}
-                      className="h-16 flex items-center justify-center rounded-xl bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white active:bg-red-600 transition-colors touch-manipulation"
-                    >
-                      <Delete className="w-6 h-6" />
-                    </button>
-                  </div>
-                ) : activeDocField === "docName" ? (
-                  <div className="bg-background/60 p-4 rounded-2xl border border-border/80 flex flex-col gap-2">
-                    {["QWERTYUIOP", "ASDFGHJKLÑ", "ZXCVBNM"].map((row) => (
-                      <div key={row} className="flex gap-2 justify-center">
-                        {row.split("").map((key) => (
-                          <button
-                            key={key}
-                            type="button"
-                            onClick={() => handleDocTextKey(key)}
-                            className="h-14 flex-1 max-w-[44px] text-lg font-bold rounded-xl bg-secondary hover:bg-muted active:bg-indigo-500 active:text-white transition-colors touch-manipulation"
-                          >
-                            {key}
-                          </button>
-                        ))}
-                      </div>
-                    ))}
-                    <div className="flex gap-2 justify-center mt-1">
-                      <button
-                        type="button"
-                        onClick={() => handleDocTextKey("SPACE")}
-                        className="h-14 flex-1 text-base font-bold rounded-xl bg-secondary hover:bg-muted active:bg-indigo-500 active:text-white transition-colors touch-manipulation uppercase"
-                      >
-                        Espacio
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDocTextKey("DEL")}
-                        className="h-14 px-6 flex items-center justify-center rounded-xl bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white active:bg-red-600 transition-colors touch-manipulation"
-                      >
-                        <Delete className="w-6 h-6" />
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-3 gap-2 bg-background/60 p-4 rounded-2xl border border-border/80">
-                    {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((num) => (
-                      <button
-                        key={num}
-                        type="button"
-                        onClick={() => handleNumpadKey(num)}
-                        className="h-16 text-lg font-bold rounded-xl bg-secondary hover:bg-muted active:bg-orange-500 active:text-white transition-colors touch-manipulation"
-                      >
-                        {num}
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() => handleNumpadKey(".")}
-                      className="h-16 text-lg font-bold rounded-xl bg-secondary hover:bg-muted active:bg-orange-500 active:text-white transition-colors touch-manipulation"
-                    >
-                      .
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleNumpadKey("0")}
-                      className="h-16 text-lg font-bold rounded-xl bg-secondary hover:bg-muted active:bg-orange-500 active:text-white transition-colors touch-manipulation"
-                    >
-                      0
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleNumpadKey("DEL")}
-                      className="h-16 flex items-center justify-center rounded-xl bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white active:bg-red-600 transition-colors touch-manipulation"
-                    >
-                      <Delete className="w-6 h-6" />
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
+            )}
           </div>
 
           {/* Footer fijo — acciones */}
           <div className="shrink-0 border-t border-border px-8 py-5 bg-card flex gap-4">
             <button
               onClick={closeModal}
-              className="h-14 flex-1 rounded-xl border-2 border-border text-muted-foreground hover:bg-secondary font-bold text-lg transition-colors flex items-center justify-center gap-2 touch-manipulation"
+              className="h-12 flex-1 rounded-xl border border-border text-muted-foreground hover:bg-secondary font-bold text-sm transition-colors flex items-center justify-center gap-2"
             >
-              <XCircle className="w-5 h-5" /> VOLVER
+              <XCircle className="w-4 h-4" /> VOLVER
             </button>
             <button
-              onClick={handleConfirmPayment}
-              disabled={!canConfirm || isProcessing}
-              className={`h-14 flex-[2] rounded-xl font-black text-lg uppercase tracking-wide transition-all flex items-center justify-center gap-2 touch-manipulation ${
-                !canConfirm || isProcessing
+              id="btn-confirmar-cobro"
+              onClick={openReview}
+              disabled={!canConfirm}
+              className={`h-12 flex-[2] rounded-xl font-black text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${
+                !canConfirm
                   ? "bg-secondary text-muted-foreground cursor-not-allowed"
                   : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg hover:shadow-emerald-500/30"
               }`}
             >
-              {isProcessing ? (
-                <><RefreshCw className="w-4 h-4 animate-spin" /> Procesando...</>
-              ) : (
-                <><CheckCircle2 className="w-4 h-4" /> Confirmar Cobro</>
-              )}
+              <CheckCircle2 className="w-4 h-4" /> Confirmar Cobro
             </button>
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ════════════════════════════════════════
+          REVIEW MODAL — confirm before DB write
+          ════════════════════════════════════════ */}
+      {isReviewing && selectedTicket && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="w-full max-w-md bg-card border-2 border-border rounded-2xl shadow-2xl p-0 overflow-hidden animate-in zoom-in-95 duration-150">
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-border bg-background/50">
+              <div className="text-lg font-black text-foreground">Revisar y Confirmar</div>
+              <div className="text-xs text-muted-foreground mt-0.5">Verifica los datos antes de guardar</div>
+            </div>
+
+            {/* Summary */}
+            <div className="px-6 py-5 space-y-4">
+              {/* Total */}
+              <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4">
+                <span className="text-sm font-bold text-muted-foreground uppercase">Total Cobrado</span>
+                <span className="text-3xl font-black text-emerald-500 font-mono">S/ {finalTotal.toFixed(2)}</span>
+              </div>
+
+              {/* Comprobante */}
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-muted-foreground uppercase">Comprobante</span>
+                <span className="font-bold text-foreground">
+                  {voucherType === "TICKET" ? "🎫 Ticket / Simple" : voucherType === "BOLETA" ? `📄 Boleta — ${docNumber} ${docName}` : `🏢 Factura — ${docNumber} ${docName}`}
+                </span>
+              </div>
+
+              {/* Payment breakdown */}
+              <div className="space-y-2">
+                <div className="text-xs font-bold text-muted-foreground uppercase">Desglose de Pago</div>
+                {PAYMENT_METHODS.filter(m => parseFloat(paymentAmounts[m.id]) > 0).map(m => (
+                  <div key={m.id} className="flex justify-between items-center text-sm">
+                    <span className="font-bold text-foreground">{m.label}</span>
+                    <span className="font-mono font-bold text-foreground">S/ {parseFloat(paymentAmounts[m.id]).toFixed(2)}</span>
+                  </div>
+                ))}
+                {vuelto > 0 && (
+                  <div className="flex justify-between items-center text-sm text-emerald-600 border-t border-border pt-2 mt-1">
+                    <span className="font-bold">Vuelto a entregar</span>
+                    <span className="font-mono font-black">S/ {vuelto.toFixed(2)}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="px-6 pb-6 flex gap-3">
+              <button
+                onClick={() => setIsReviewing(false)}
+                disabled={isSubmitting}
+                className="flex-1 h-11 rounded-xl border border-border text-muted-foreground hover:bg-secondary font-bold text-sm transition-colors"
+              >
+                ← Volver
+              </button>
+              <button
+                id="btn-review-confirm"
+                autoFocus
+                onClick={handleFinalSubmit}
+                disabled={isSubmitting}
+                className={`flex-[2] h-11 rounded-xl font-black text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${
+                  isSubmitting
+                    ? "bg-emerald-800 text-emerald-300 cursor-not-allowed"
+                    : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg"
+                }`}
+              >
+                {isSubmitting ? (
+                  <><RefreshCw className="w-4 h-4 animate-spin" /> Guardando...</>
+                ) : (
+                  <><CheckCircle2 className="w-4 h-4" /> CONFIRMAR</>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* A4 Print Layout */}
+      <div id="print-ticket">
+        {lastSaleInfo && (
+          <>
+            <div className="ticket-header" style={{ textAlign: "center", fontWeight: "900", fontSize: "24px", textTransform: "uppercase" }}>
+              G-SYSTEM ERP
+            </div>
+            <div style={{ textAlign: "center", fontWeight: "900", fontSize: "32px", textTransform: "uppercase", letterSpacing: "2px", marginTop: "10px" }}>
+              PROFORMA
+            </div>
+            <br />
+            <div style={{ textAlign: "left", fontSize: "16px", fontWeight: "bold", marginBottom: "5px" }}>
+              Empleado: Propietario
+            </div>
+            <div className="ticket-divider"></div>
+
+            <div className="ticket-items">
+              {lastSaleInfo.items.map((item) => {
+                const codigo = item.codigo || item.code || '';
+                const nombre = item.nombre || item.name || item.product_name || 'Producto';
+                const precioFijo = Number(item.precio_fijo || item.catalog_price || item.precio_base || item.price || 0).toFixed(2);
+                const cantidad = item.cantidad || item.quantity || item.qty || 0;
+                const precioVariable = Number(item.precio_variable || item.variable_price || item.editedPrice || item.price || 0).toFixed(2);
+                const subtotal = Number(item.subtotal || (cantidad * precioVariable) || 0).toFixed(2);
+                return (
+                  <div key={item.id} className="ticket-item mb-4 pb-2 border-b border-gray-200">
+                    <div className="flex justify-between text-lg font-bold">
+                      <span>{codigo ? `${codigo} ` : ''}({nombre} - S/ {precioFijo})</span>
+                    </div>
+                    <div className="flex justify-between items-center text-base mt-1">
+                      <span>{cantidad} m x S/ {precioVariable}</span>
+                      <span>S/ {subtotal}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="ticket-divider"></div>
+            {lastSaleInfo.izipayFee && lastSaleInfo.izipayFee > 0 ? (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "20px", fontWeight: "bold", marginBottom: "10px" }}>
+                <span>VISA</span>
+                <span>S/ {Number(lastSaleInfo.izipayFee).toFixed(2)}</span>
+              </div>
+            ) : null}
+            <div className="ticket-total-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontWeight: "900", fontSize: "36px" }}>
+              <span>TOTAL FINAL</span>
+              <span>S/ {Math.round(lastSaleInfo.total).toFixed(2)}</span>
+            </div>
+            <div className="ticket-divider"></div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: "16px", fontSize: "14px", color: "#555", fontWeight: "bold" }}>
+              <span>
+                {new Date().toLocaleDateString("es-PE", { day: "2-digit", month: "2-digit", year: "numeric" })} {new Date().toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit", hour12: false })}
+              </span>
+              <span>
+                {lastSaleInfo.ticketNum !== null
+                  ? `${String(lastSaleInfo.ticketNum).padStart(3, "0")}-Caja 1`
+                  : "-Caja 1"}
+              </span>
+            </div>
+          </>
+        )}
+      </div>
+
+      <style>{`
+        #print-ticket { display: none; }
+        @media print {
+          @page { size: A4; margin: 0; }
+          body * { visibility: hidden; }
+          #print-ticket, #print-ticket * { visibility: visible; }
+          #print-ticket {
+            display: block !important;
+            position: absolute; left: 50%; top: 0; transform: translateX(-50%);
+            width: 100%; max-width: 700px;
+            margin-top: 20mm;
+            font-family: sans-serif;
+            font-size: 16px;
+            color: black !important;
+            background: white !important;
+          }
+          .ticket-divider {
+            border-bottom: 2px solid black;
+            margin: 15px 0;
+          }
+        }
+      `}</style>
     </div>
   );
 }

@@ -35,7 +35,7 @@ export default function HubPage() {
       <header className="flex justify-between items-end border-b border-white/10 pb-6">
         <div>
           <h1 className="text-4xl font-bold tracking-tight mb-2">Hola, {role === 'CAJERA' ? 'Yuriko' : role === 'VENDEDOR' ? 'Vendedor' : 'Admin'} 👋</h1>
-          <p className="text-muted-foreground text-lg">¿Qué deseas hacer hoy en GOLTEX?</p>
+          <p className="text-muted-foreground text-lg">¿Qué deseas hacer hoy?</p>
         </div>
         <div className="flex flex-col items-end gap-3">
           <div className="flex items-center gap-3">
@@ -76,7 +76,7 @@ export default function HubPage() {
                 <div className="w-14 h-14 rounded-xl bg-blue-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
                   <ShoppingCart className="w-7 h-7 text-blue-400" />
                 </div>
-                <CardTitle className="text-2xl">Punto de Venta</CardTitle>
+              <CardTitle className="text-2xl">Punto 1</CardTitle>
                 <CardDescription className="text-base mt-2">
                   Catálogo de telas, proformas, carrito de compras y facturación rápida.
                 </CardDescription>
@@ -89,7 +89,7 @@ export default function HubPage() {
               <div className="w-14 h-14 rounded-xl bg-gray-500/20 flex items-center justify-center mb-4">
                 <ShoppingCart className="w-7 h-7 text-gray-500" />
               </div>
-              <CardTitle className="text-2xl text-gray-400">Punto de Venta</CardTitle>
+              <CardTitle className="text-2xl text-gray-400">Punto 1</CardTitle>
               <CardDescription className="text-base mt-2 text-gray-500">
                 Acceso denegado (Requiere ADMIN o VENDEDOR).
               </CardDescription>
@@ -105,7 +105,7 @@ export default function HubPage() {
                 <div className="w-14 h-14 rounded-xl bg-purple-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
                   <PackageSearch className="w-7 h-7 text-purple-400" />
                 </div>
-                <CardTitle className="text-2xl">Catálogo e Inventario</CardTitle>
+                <CardTitle className="text-2xl">Catálogo</CardTitle>
                 <CardDescription className="text-base mt-2">
                   Gestión de stock, control de productos, y alertas de desabastecimiento.
                 </CardDescription>
@@ -118,7 +118,7 @@ export default function HubPage() {
               <div className="w-14 h-14 rounded-xl bg-gray-500/20 flex items-center justify-center mb-4">
                 <PackageSearch className="w-7 h-7 text-gray-500" />
               </div>
-              <CardTitle className="text-2xl text-gray-400">Inventario</CardTitle>
+              <CardTitle className="text-2xl text-gray-400">Catálogo</CardTitle>
               <CardDescription className="text-base mt-2 text-gray-500">
                 Acceso denegado (Requiere ADMIN).
               </CardDescription>
@@ -163,7 +163,7 @@ export default function HubPage() {
                 <div className="w-14 h-14 rounded-xl bg-cyan-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
                   <Banknote className="w-7 h-7 text-cyan-400" />
                 </div>
-                <CardTitle className="text-2xl">Caja y Cobros</CardTitle>
+                <CardTitle className="text-2xl">Caja</CardTitle>
                 <CardDescription className="text-base mt-2">
                   Liquidación de tickets pendientes del día, control de pasarela de pagos y cierre rápido.
                 </CardDescription>
@@ -176,7 +176,7 @@ export default function HubPage() {
               <div className="w-14 h-14 rounded-xl bg-gray-500/20 flex items-center justify-center mb-4">
                 <Banknote className="w-7 h-7 text-gray-500" />
               </div>
-              <CardTitle className="text-2xl text-gray-400">Caja y Cobros</CardTitle>
+              <CardTitle className="text-2xl text-gray-400">Caja</CardTitle>
               <CardDescription className="text-base mt-2 text-gray-500">
                 Acceso denegado.
               </CardDescription>
@@ -192,7 +192,7 @@ export default function HubPage() {
                 <div className="w-14 h-14 rounded-xl bg-amber-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
                   <FileSpreadsheet className="w-7 h-7 text-amber-400" />
                 </div>
-                <CardTitle className="text-2xl">Contabilidad (Excel)</CardTitle>
+                <CardTitle className="text-2xl">Contabilidad</CardTitle>
                 <CardDescription className="text-base mt-2">
                   Migración de historial, importación y exportación de archivos contables.
                 </CardDescription>
@@ -205,7 +205,7 @@ export default function HubPage() {
               <div className="w-14 h-14 rounded-xl bg-gray-500/20 flex items-center justify-center mb-4">
                 <FileSpreadsheet className="w-7 h-7 text-gray-500" />
               </div>
-              <CardTitle className="text-2xl text-gray-400">Contabilidad (Excel)</CardTitle>
+              <CardTitle className="text-2xl text-gray-400">Contabilidad</CardTitle>
               <CardDescription className="text-base mt-2 text-gray-500">
                 Acceso denegado.
               </CardDescription>

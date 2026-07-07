@@ -39,7 +39,7 @@ type HistoryTicket = {
 };
 
 export default function POSPage() {
-  const { role, isHydrated } = useRole();
+  const { role, username, isHydrated } = useRole();
   const { theme, toggleTheme } = useTheme();
   const router = useRouter();
 
@@ -55,7 +55,7 @@ export default function POSPage() {
   const [ticketNumber, setTicketNumber] = useState<number>(1);
   const [isEmitting, setIsEmitting] = useState(false);
   const [lastSaleInfo, setLastSaleInfo] = useState<{
-    ticketNum: number | null; docNum: string; items: CartItem[]; total: number;
+    ticketNum: number | null; docNum: string; items: CartItem[]; total: number; izipayFee?: number;
   } | null>(null);
 
   // ── Vendedor History ──
@@ -122,7 +122,7 @@ export default function POSPage() {
     const todayStr = getLimaTodayStr();
     const { data } = await supabase
       .from("sales")
-      .select("*")
+      .select("*, transactions(payment_method, amount, surcharge_amount)")
       .eq("record_date", todayStr)
       .eq("source_type", "POS")
       .order("created_at", { ascending: false });
@@ -257,7 +257,7 @@ export default function POSPage() {
         record_date: todayStr,
         detail: cart.map(i => `${i.code} ${i.name} — ${i.quantity}m × S/ ${i.editedPrice.toFixed(2)}`).join('\n'),
         total: total,
-        source_sheet: "POS Gamarra",
+        source_sheet: `VENDEDOR:${username || "Propietario"}`,
         source_type: "POS",
         is_fractional: false,
         status: "PENDING",
@@ -329,11 +329,17 @@ export default function POSPage() {
         familyId: ""
       };
     });
+
+    const txs = (ticket as any).transactions || [];
+    const izipayTx = txs.find((t: any) => t.payment_method === "IZIPAY");
+    const izipayFeeAmt = izipayTx ? izipayTx.surcharge_amount || 0 : 0;
+
     setLastSaleInfo({
       ticketNum: parseInternalTicketNum(ticket),
       docNum: ticket.document_number,
       items: reconstructedItems,
-      total: ticket.total
+      total: ticket.total,
+      izipayFee: izipayFeeAmt
     });
     setTimeout(() => window.print(), 120);
   };
@@ -668,6 +674,27 @@ export default function POSPage() {
                         <span className="text-muted-foreground font-mono">{new Date(ticket.created_at).toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" })}</span>
                         <span className="font-black text-emerald-500">S/ {ticket.total.toFixed(2)}</span>
                       </div>
+                      {role === "ADMIN" && (() => {
+                          if (ticket.status === 'PENDING') {
+                            return (
+                              <div className="text-xs font-bold bg-orange-500/15 text-orange-600 px-2 py-0.5 rounded uppercase mt-1 inline-block">
+                                PENDIENTE DE COBRAR
+                              </div>
+                            );
+                          }
+                          if (ticket.status === 'COMPLETED' && ticket.source_sheet) {
+                            const cajeroMatch = (ticket.source_sheet as string).match(/CAJERO:([^|]+)/);
+                            const cajeroName = cajeroMatch ? cajeroMatch[1].trim() : null;
+                            if (cajeroName) {
+                              return (
+                                <div className="text-xs font-bold text-emerald-600 uppercase mt-1">
+                                  CAJERO: {cajeroName}
+                                </div>
+                              );
+                            }
+                          }
+                          return null;
+                        })()}
                       <button
                         onClick={() => handleReprint(ticket)}
                         className="mt-2 w-full py-2 bg-secondary/50 hover:bg-secondary rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-colors"
@@ -787,6 +814,12 @@ export default function POSPage() {
             </div>
 
             <div className="ticket-divider"></div>
+            {lastSaleInfo.izipayFee && lastSaleInfo.izipayFee > 0 ? (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "20px", fontWeight: "bold", marginBottom: "10px" }}>
+                <span>VISA</span>
+                <span>S/ {Number(lastSaleInfo.izipayFee).toFixed(2)}</span>
+              </div>
+            ) : null}
             <div className="ticket-total-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontWeight: "900", fontSize: "36px" }}>
               <span>TOTAL FINAL</span>
               <span>S/ {Math.round(lastSaleInfo.total).toFixed(2)}</span>

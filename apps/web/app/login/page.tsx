@@ -3,12 +3,27 @@
 import { useRouter } from "next/navigation";
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input } from "@goltex/ui";
 import { Box } from "lucide-react";
+import { useRole } from "../context/RoleContext";
 
 export default function LoginPage() {
   const router = useRouter();
+  const { setUsername, setRole } = useRole();
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const usernameInput = (form.elements.namedItem("username") as HTMLInputElement).value;
+    setUsername(usernameInput || "Propietario");
+    
+    const lowerUser = (usernameInput || "").toLowerCase();
+    if (lowerUser.includes("yuriko")) {
+      setRole("CAJERA");
+    } else if (lowerUser.includes("vendedor") || lowerUser.includes("mostrador")) {
+      setRole("VENDEDOR");
+    } else {
+      setRole("ADMIN");
+    }
+    
     router.push("/hub");
   };
 
@@ -21,7 +36,7 @@ export default function LoginPage() {
           <div className="mx-auto bg-primary/10 w-16 h-16 rounded-full flex items-center justify-center mb-2">
             <Box className="w-8 h-8 text-primary" />
           </div>
-          <CardTitle className="text-3xl font-bold tracking-tight">GOLTEX S.A.C.</CardTitle>
+          <CardTitle className="text-3xl font-bold tracking-tight">G-SYSTEM ERP</CardTitle>
           <CardDescription>Sistema Interno Integrado</CardDescription>
         </CardHeader>
         <CardContent>

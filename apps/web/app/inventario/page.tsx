@@ -24,7 +24,6 @@ import {
 import { ArrowLeft, Search, Download, Filter, Plus, Edit2, Trash2, Save, FolderPlus } from "lucide-react";
 import { supabase } from "../lib/supabase";
 
-// Real schema: { id, category_id, name, sku, price, stock, unit }
 type Product = {
   id: string;
   category_id: string;
@@ -43,7 +42,7 @@ type Category = {
 };
 
 export default function InventarioPage() {
-  const [activeTab, setActiveTab] = useState<"productos" | "categorias">("productos");
+  const [activeTab, setActiveTab] = useState<"catalogo" | "inventario" | "categorias">("catalogo");
   
   // Products states
   const [products, setProducts] = useState<Product[]>([]);
@@ -51,6 +50,7 @@ export default function InventarioPage() {
   const [search, setSearch] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [editMode, setEditMode] = useState<"catalogo" | "inventario">("catalogo");
   const [isSaving, setIsSaving] = useState(false);
   const [formData, setFormData] = useState({
     sku: "",
@@ -109,7 +109,8 @@ export default function InventarioPage() {
   );
 
   // Product CRUD functions
-  const openModal = (product?: Product) => {
+  const openModal = (product?: Product, mode: "catalogo" | "inventario" = "catalogo") => {
+    setEditMode(mode);
     if (product) {
       setEditingProduct(product);
       setFormData({
@@ -126,26 +127,35 @@ export default function InventarioPage() {
         name: "",
         category_id: categories[0]?.id || "",
         price: "",
-        stock: "",
+        stock: "0",
       });
     }
     setIsModalOpen(true);
   };
 
   const handleSave = async () => {
-    if (!formData.sku || !formData.name || !formData.price || !formData.stock) {
-      alert("Por favor completa los campos obligatorios (SKU, Nombre, Precio, Stock).");
-      return;
+    if (editMode === "catalogo") {
+      if (!formData.sku || !formData.name || !formData.price) {
+        alert("Por favor completa los campos obligatorios (SKU, Nombre, Precio).");
+        return;
+      }
+    } else {
+      if (!formData.stock) {
+        alert("Por favor indica la cantidad de Stock.");
+        return;
+      }
     }
 
     setIsSaving(true);
-    const payload = {
-      sku: formData.sku.trim(),
-      name: formData.name.trim().toUpperCase(),
-      category_id: formData.category_id || null,
-      price: parseFloat(formData.price) || 0,
-      stock: parseFloat(formData.stock) || 0,
-    };
+    const payload = editMode === "inventario"
+      ? { stock: parseFloat(formData.stock) || 0 }
+      : {
+          sku: formData.sku.trim(),
+          name: formData.name.trim().toUpperCase(),
+          category_id: formData.category_id || null,
+          price: parseFloat(formData.price) || 0,
+          ...(!editingProduct ? { stock: parseFloat(formData.stock) || 0 } : {})
+        };
 
     try {
       if (editingProduct) {
@@ -232,7 +242,6 @@ export default function InventarioPage() {
   };
 
   const handleDeleteCategory = async (category: Category) => {
-    // Check if category_id is used by any products
     const { count, error: countError } = await supabase
       .from("products")
       .select("*", { count: "exact", head: true })
@@ -262,7 +271,6 @@ export default function InventarioPage() {
     }
   };
 
-  // Helper: get category name by id
   const getCategoryName = (category_id: string) => {
     return categories.find(c => c.id === category_id)?.name || "—";
   };
@@ -282,22 +290,15 @@ export default function InventarioPage() {
           </div>
         </div>
         
-        {activeTab === "productos" ? (
+        {activeTab === "catalogo" && (
           <div className="flex items-center gap-3">
-            <Button variant="outline" className="gap-2">
-              <Filter className="w-4 h-4" />
-              Filtros
-            </Button>
-            <Button className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white">
-              <Download className="w-4 h-4" />
-              Exportar Excel
-            </Button>
-            <Button onClick={() => openModal()} className="gap-2 bg-primary">
+            <Button onClick={() => openModal(undefined, "catalogo")} className="gap-2 bg-primary">
               <Plus className="w-4 h-4" />
               Nuevo Producto
             </Button>
           </div>
-        ) : (
+        )}
+        {activeTab === "categorias" && (
           <div className="flex items-center gap-3">
             <Button onClick={() => openCategoryModal()} className="gap-2 bg-primary">
               <FolderPlus className="w-4 h-4" />
@@ -310,14 +311,24 @@ export default function InventarioPage() {
       {/* Tabs Switcher */}
       <div className="flex border-b border-border gap-6">
         <button
-          onClick={() => setActiveTab("productos")}
+          onClick={() => setActiveTab("catalogo")}
           className={`pb-3 text-sm font-bold border-b-2 transition-colors ${
-            activeTab === "productos" 
+            activeTab === "catalogo" 
               ? "border-primary text-primary" 
               : "border-transparent text-muted-foreground hover:text-foreground"
           }`}
         >
-          Stock de Telas
+          Catálogo
+        </button>
+        <button
+          onClick={() => setActiveTab("inventario")}
+          className={`pb-3 text-sm font-bold border-b-2 transition-colors ${
+            activeTab === "inventario" 
+              ? "border-primary text-primary" 
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Inventario
         </button>
         <button
           onClick={() => setActiveTab("categorias")}
@@ -331,12 +342,12 @@ export default function InventarioPage() {
         </button>
       </div>
 
-      {/* Product Tab Content */}
-      {activeTab === "productos" && (
+      {/* Catalog Tab Content */}
+      {activeTab === "catalogo" && (
         <Card className="bg-glass border-white/10 shadow-xl overflow-hidden">
           <CardHeader className="border-b border-border bg-surface/50 pb-4">
             <div className="flex justify-between items-center">
-              <CardTitle className="text-lg">Todos los Productos</CardTitle>
+              <CardTitle className="text-lg">Telas del Catálogo</CardTitle>
               <div className="relative w-72">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <Input
@@ -356,21 +367,19 @@ export default function InventarioPage() {
                   <TableHead>Producto</TableHead>
                   <TableHead>Categoría</TableHead>
                   <TableHead className="text-right">Precio/m</TableHead>
-                  <TableHead className="text-right">Stock (m)</TableHead>
-                  <TableHead className="text-center">Estado</TableHead>
                   <TableHead className="text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loadingProducts ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-12 text-muted-foreground">
-                      Cargando inventario...
+                    <TableCell colSpan={5} className="text-center py-12 text-muted-foreground">
+                      Cargando catálogo...
                     </TableCell>
                   </TableRow>
                 ) : filteredProducts.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-12 text-muted-foreground">
+                    <TableCell colSpan={5} className="text-center py-12 text-muted-foreground">
                       No se encontraron productos.
                     </TableCell>
                   </TableRow>
@@ -388,6 +397,79 @@ export default function InventarioPage() {
                       </TableCell>
                       <TableCell className="text-right font-medium">S/ {product.price?.toFixed(2) || "0.00"}</TableCell>
                       <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <button onClick={() => openModal(product, "catalogo")} className="p-2 text-muted-foreground hover:text-primary transition-colors">
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => handleDelete(product.id)} className="p-2 text-muted-foreground hover:text-red-500 transition-colors">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Inventory Tab Content */}
+      {activeTab === "inventario" && (
+        <Card className="bg-glass border-white/10 shadow-xl overflow-hidden">
+          <CardHeader className="border-b border-border bg-surface/50 pb-4">
+            <div className="flex justify-between items-center">
+              <CardTitle className="text-lg">Inventario de Stock</CardTitle>
+              <div className="relative w-72">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar por SKU o nombre..."
+                  className="pl-9 h-9"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader className="bg-secondary/30">
+                <TableRow>
+                  <TableHead className="w-[100px]">SKU</TableHead>
+                  <TableHead>Producto</TableHead>
+                  <TableHead>Categoría</TableHead>
+                  <TableHead className="text-right">Stock (m)</TableHead>
+                  <TableHead className="text-center">Estado</TableHead>
+                  <TableHead className="text-right">Acciones</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {loadingProducts ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
+                      Cargando inventario...
+                    </TableCell>
+                  </TableRow>
+                ) : filteredProducts.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
+                      No se encontraron productos.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredProducts.map((product) => (
+                    <TableRow key={product.id} className="hover:bg-white/5 transition-colors">
+                      <TableCell className="font-mono text-sm font-bold text-primary">
+                        {product.sku}
+                      </TableCell>
+                      <TableCell>
+                        <div className="font-medium">{product.name}</div>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-sm">
+                        {getCategoryName(product.category_id)}
+                      </TableCell>
+                      <TableCell className="text-right">
                         <div className={`inline-flex items-center gap-1.5 ${product.stock <= 10 ? 'text-amber-500 font-bold' : ''}`}>
                           {product.stock <= 10 && <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />}
                           {product.stock?.toFixed(2) || "0.00"}
@@ -400,11 +482,8 @@ export default function InventarioPage() {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-2">
-                          <button onClick={() => openModal(product)} className="p-2 text-muted-foreground hover:text-primary transition-colors">
+                          <button onClick={() => openModal(product, "inventario")} className="p-2 text-muted-foreground hover:text-primary transition-colors">
                             <Edit2 className="w-4 h-4" />
-                          </button>
-                          <button onClick={() => handleDelete(product.id)} className="p-2 text-muted-foreground hover:text-red-500 transition-colors">
-                            <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
                       </TableCell>
@@ -477,73 +556,102 @@ export default function InventarioPage() {
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{editingProduct ? 'Editar Producto' : 'Nuevo Producto'}</DialogTitle>
+            <DialogTitle>
+              {editingProduct 
+                ? (editMode === "inventario" ? 'Ajustar Stock' : 'Editar Producto') 
+                : 'Nuevo Producto'}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            {/* SKU — reads from product.sku */}
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-muted-foreground uppercase">SKU *</label>
-              <Input
-                value={formData.sku}
-                onChange={(e) => setFormData({...formData, sku: e.target.value})}
-                placeholder="Ej: 2.2"
-              />
-            </div>
-            {/* Nombre */}
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-muted-foreground uppercase">Producto (Nombre) *</label>
-              <Input
-                value={formData.name}
-                onChange={(e) => setFormData({...formData, name: e.target.value})}
-                placeholder="Ej: JERSEY LISO"
-                className="uppercase"
-              />
-            </div>
-            {/* Categoría — dropdown linked to category_id */}
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-muted-foreground uppercase">Categoría</label>
-              <select
-                value={formData.category_id}
-                onChange={(e) => setFormData({...formData, category_id: e.target.value})}
-                className="w-full h-10 px-3 rounded-md border border-input bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              >
-                <option value="">— Sin categoría —</option>
-                {categories.map((cat) => (
-                  <option key={cat.id} value={cat.id}>
-                    {cat.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {/* Precio y Stock */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-muted-foreground uppercase">Precio por metro (S/) *</label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={formData.price}
-                  onChange={(e) => setFormData({...formData, price: e.target.value})}
-                  placeholder="0.00"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-muted-foreground uppercase">Stock actual (mts) *</label>
-                <Input
-                  type="number"
-                  step="0.1"
-                  value={formData.stock}
-                  onChange={(e) => setFormData({...formData, stock: e.target.value})}
-                  placeholder="0"
-                />
-              </div>
-            </div>
+            {editMode === "catalogo" ? (
+              <>
+                {/* SKU */}
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-muted-foreground uppercase">SKU *</label>
+                  <Input
+                    value={formData.sku}
+                    onChange={(e) => setFormData({...formData, sku: e.target.value})}
+                    placeholder="Ej: 2.2"
+                  />
+                </div>
+                {/* Nombre */}
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-muted-foreground uppercase">Producto (Nombre) *</label>
+                  <Input
+                    value={formData.name}
+                    onChange={(e) => setFormData({...formData, name: e.target.value})}
+                    placeholder="Ej: JERSEY LISO"
+                    className="uppercase"
+                  />
+                </div>
+                {/* Categoría */}
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-muted-foreground uppercase">Categoría</label>
+                  <select
+                    value={formData.category_id}
+                    onChange={(e) => setFormData({...formData, category_id: e.target.value})}
+                    className="w-full h-10 px-3 rounded-md border border-input bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    <option value="">— Sin categoría —</option>
+                    {categories.map((cat) => (
+                      <option key={cat.id} value={cat.id}>
+                        {cat.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {/* Precio y Stock Inicial */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-muted-foreground uppercase">Precio por metro (S/) *</label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={formData.price}
+                      onChange={(e) => setFormData({...formData, price: e.target.value})}
+                      placeholder="0.00"
+                    />
+                  </div>
+                  {!editingProduct && (
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-muted-foreground uppercase">Stock Inicial (mts) *</label>
+                      <Input
+                        type="number"
+                        step="0.1"
+                        value={formData.stock}
+                        onChange={(e) => setFormData({...formData, stock: e.target.value})}
+                        placeholder="0"
+                      />
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="space-y-1.5 p-3.5 bg-secondary/20 rounded-xl border">
+                  <div className="text-xs text-muted-foreground font-bold uppercase">Producto Seleccionado</div>
+                  <div className="text-base font-bold text-foreground">{editingProduct?.name}</div>
+                  <div className="text-xs text-muted-foreground font-mono">SKU: {editingProduct?.sku} | Cat: {getCategoryName(editingProduct?.category_id || "")}</div>
+                </div>
+                {/* Stock Input Only */}
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-muted-foreground uppercase">Stock Actual (mts) *</label>
+                  <Input
+                    type="number"
+                    step="0.1"
+                    value={formData.stock}
+                    onChange={(e) => setFormData({...formData, stock: e.target.value})}
+                    placeholder="0"
+                  />
+                </div>
+              </>
+            )}
           </div>
           <div className="flex justify-end gap-3 pt-4 border-t border-border">
             <Button variant="outline" onClick={() => setIsModalOpen(false)}>Cancelar</Button>
             <Button onClick={handleSave} disabled={isSaving} className="gap-2">
               <Save className="w-4 h-4" />
-              {isSaving ? "Guardando..." : "Guardar Producto"}
+              {isSaving ? "Guardando..." : "Guardar Cambios"}
             </Button>
           </div>
         </DialogContent>
