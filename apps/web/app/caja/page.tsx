@@ -10,7 +10,7 @@ import {
 import {
   CreditCard, Banknote, Smartphone, RefreshCw,
   CheckCircle2, AlertCircle, ArrowLeft, Clock, Receipt, XCircle,
-  LayoutGrid, List, Trash2, Delete, Sun, Moon, FileText, User,
+  LayoutGrid, List, Trash2, Delete, Sun, Moon, FileText, User, Printer
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import {
@@ -20,7 +20,7 @@ import {
 } from "../lib/ticket-sequence";
 import { useRole } from "../context/RoleContext";
 import { useTheme } from "../context/ThemeContext";
-import { requestBluetoothDevice, printSaleReceipt } from '../configuracion/utils/printerEngine';
+import { requestBluetoothDevice, printSaleReceipt, silentPrintSaleReceipt } from '../configuracion/utils/printerEngine';
 
 // ─────────────── Types ───────────────
 type SaleStatus = "PENDING" | "COMPLETED" | "CANCELLED";
@@ -77,7 +77,7 @@ function TicketTableRow({
   statusBadge,
   handleCancel,
   openModal,
-  handlePrintA4
+  handleReprint
 }: any) {
   const txs = ticket.transactions || [];
   const sumBy = (m: string) => txs.filter((t: any) => t.payment_method === m).reduce((s: number, t: any) => s + (t.amount || 0), 0);
@@ -233,6 +233,7 @@ function TicketTableRow({
         <div className="flex justify-end gap-2">
           {ticket.status === "PENDING" ? (
             <>
+
               <button
                 onClick={() => handleCancel(ticket)}
                 className="px-3 py-1.5 rounded-lg text-red-500 bg-red-500/10 hover:bg-red-500/20 font-bold transition-colors"
@@ -247,12 +248,7 @@ function TicketTableRow({
               </button>
             </>
           ) : ticket.status === "COMPLETED" ? (
-            <button
-              onClick={() => handlePrintA4(ticket)}
-              className="bg-purple-600 hover:bg-purple-700 font-bold px-4 py-1.5 rounded-lg text-white shadow-lg shadow-purple-500/20 transition-all"
-            >
-              Imprimir
-            </button>
+            <span className="text-sm font-semibold text-purple-600">Completado</span>
           ) : null}
         </div>
       </td>
@@ -278,7 +274,7 @@ export default function CajaPage() {
 
   useEffect(() => {
     async function loadPrinter() {
-      const { data } = await supabase.from('printers').select('*').order('created_at', { ascending: false }).limit(1).single();
+      const { data } = await supabase.from('printers').select('*').order('auto_print', { ascending: false }).limit(1).single();
       if (data) {
         setActivePrinter(data);
         if (data.type === 'bluetooth') {
@@ -605,24 +601,7 @@ export default function CajaPage() {
       setSuccessSaleData(saleDataForPrint);
       setShowSuccessModal(true);
 
-      if (activePrinter && activePrinter.auto_print && activePrinter.type === 'bluetooth' && btDeviceObj) {
-        try {
-          console.log('Iniciando auto-impresión (Doble Copia)...');
-          // Primera Copia
-          await printSaleReceipt(btDeviceObj, saleDataForPrint, activePrinter.paper_width || 80);
-          
-          // Delay de 1.5s
-          await new Promise(resolve => setTimeout(resolve, 1500));
-          
-          // Segunda Copia
-          await printSaleReceipt(btDeviceObj, saleDataForPrint, activePrinter.paper_width || 80);
-          
-          console.log('Auto-impresión doble completada.');
-        } catch (e: any) {
-          console.error('Error en auto-impresión:', e);
-          alert(`Error auto-impresión: ${e.message}`);
-        }
-      }
+
 
       setTickets((prev) => prev.filter((t) => t.id !== selectedTicket.id));
       closeModal();
@@ -634,29 +613,7 @@ export default function CajaPage() {
     }
   };
 
-  const handleManualPrint = async () => {
-    if (!successSaleData) return;
-    if (activePrinter?.type !== 'bluetooth') {
-      alert('Solo las impresoras Bluetooth soportan impresión directa en este módulo actualmente.');
-      return;
-    }
 
-    try {
-      let deviceToPrint = btDeviceObj;
-      if (!deviceToPrint) {
-        // Pide permisos manualmente si no estaba reconectado
-        const { device } = await requestBluetoothDevice();
-        setBtDeviceObj(device);
-        deviceToPrint = device;
-      }
-
-      await printSaleReceipt(deviceToPrint, successSaleData, activePrinter?.paper_width || 80);
-      alert('Ticket impreso con éxito');
-    } catch (e: any) {
-      console.error(e);
-      alert(`Error de impresión: ${e.message}`);
-    }
-  };
 
   const handleCancelTicket = async (ticket: PendingTicket, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
@@ -756,66 +713,7 @@ export default function CajaPage() {
     }
   };
 
-  const handlePrintA4 = async (ticket: PendingTicket) => {
-    const lines = ticket.detail.split("\n");
-    const reconstructedItems = lines.map((l: string, idx: number) => {
-      let code = "";
-      let name = l;
-      let quantity = 1;
-      let editedPrice = 0;
-      try {
-        const parts = l.split(" — ");
-        if (parts.length === 2 && parts[0] !== undefined && parts[1] !== undefined) {
-          const firstSpaceIdx = parts[0].indexOf(" ");
-          code = firstSpaceIdx > -1 ? parts[0].substring(0, firstSpaceIdx) : "";
-          name = firstSpaceIdx > -1 ? parts[0].substring(firstSpaceIdx + 1) : parts[0];
-          const subParts = parts[1].split("m × S/ ");
-          if (subParts.length === 2 && subParts[0] !== undefined && subParts[1] !== undefined) {
-            quantity = parseFloat(subParts[0]) || 0;
-            editedPrice = parseFloat(subParts[1]) || 0;
-          }
-        }
-      } catch (e) {
-        console.error(e);
-      }
-      return {
-        id: String(idx),
-        code,
-        name,
-        price: editedPrice,
-        editedPrice,
-        quantity,
-      };
-    });
 
-    const txs = ticket.transactions || [];
-    const izipayTx = txs.find((t: any) => t.payment_method === "IZIPAY");
-    const izipayFeeAmt = izipayTx ? izipayTx.surcharge_amount || 0 : 0;
-
-    setLastSaleInfo({
-      ticketNum: ticket.internal_ticket_number,
-      docNum: ticket.document_number,
-      items: reconstructedItems,
-      total: ticket.total,
-      izipayFee: izipayFeeAmt,
-    });
-
-    if (activePrinter?.type === 'bluetooth' && btDeviceObj) {
-      try {
-        const saleDataForPrint = {
-          ...ticket,
-          items: reconstructedItems,
-          customer_name: (ticket as any).customer_name || docName,
-        };
-        await printSaleReceipt(btDeviceObj, saleDataForPrint, activePrinter.paper_width || 80);
-      } catch (e) {
-        console.error(e);
-        alert('Error al imprimir por Bluetooth: ' + (e as Error).message);
-      }
-    } else {
-      setTimeout(() => window.print(), 120); // Fallback to standard print if no Bluetooth
-    }
-  };
 
   // ── Format helpers ──
   const formatTime = (iso: string) =>
@@ -1001,19 +899,19 @@ export default function CajaPage() {
                       </div>
                       
                       {ticket.status === "PENDING" ? (
+                        <div className="flex gap-2">
+
                         <button
                           onClick={() => openModal(ticket)}
-                          className="w-full mt-3 h-10 rounded-xl text-white bg-orange-600 hover:bg-orange-500 font-bold shadow-lg shadow-orange-500/20 transition-all flex items-center justify-center"
+                          className="flex-[2] mt-3 h-10 rounded-xl text-white bg-orange-600 hover:bg-orange-500 font-bold shadow-lg shadow-orange-500/20 transition-all flex items-center justify-center"
                         >
                           Cobrar
                         </button>
+                        </div>
                       ) : ticket.status === "COMPLETED" ? (
-                        <button
-                          onClick={() => handlePrintA4(ticket)}
-                          className="w-full mt-3 h-10 rounded-xl text-white bg-blue-600 hover:bg-blue-500 font-bold shadow-lg shadow-blue-500/20 transition-all flex items-center justify-center"
-                        >
-                          Imprimir A4
-                        </button>
+                        <span className="w-full mt-3 h-10 rounded-xl text-white bg-blue-600 font-bold shadow-lg shadow-blue-500/20 flex items-center justify-center gap-1.5 cursor-default">
+                          Completado
+                        </span>
                       ) : null}
                     </div>
                   </div>
@@ -1060,7 +958,7 @@ export default function CajaPage() {
                     statusBadge={statusBadge}
                     handleCancel={(t: any) => handleCancelTicket(t)}
                     openModal={openModal}
-                    handlePrintA4={handlePrintA4}
+                    handleReprint={() => {}}
                   />
                 ))}
               </tbody>
@@ -1375,15 +1273,7 @@ export default function CajaPage() {
             <h2 className="text-2xl font-black text-gray-900 dark:text-white mb-2">¡Venta Exitosa!</h2>
             <p className="text-gray-500 text-center mb-6">El cobro ha sido procesado correctamente.</p>
             
-            {activePrinter && activePrinter.type === 'bluetooth' ? (
-              <button
-                onClick={handleManualPrint}
-                className="w-full flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold py-3.5 rounded-xl transition-colors mb-3"
-              >
-                <Receipt className="w-5 h-5 mr-2 text-gray-600" />
-                IMPRIMIR TICKET
-              </button>
-            ) : null}
+
 
             <button
               onClick={() => setShowSuccessModal(false)}
@@ -1395,92 +1285,7 @@ export default function CajaPage() {
         </div>
       )}
 
-      {/* A4 Print Layout */}
-      <div id="print-ticket">
-        {lastSaleInfo && (
-          <>
-            <div className="ticket-header" style={{ textAlign: "center", fontWeight: "900", fontSize: "24px", textTransform: "uppercase" }}>
-              G-SYSTEM ERP
-            </div>
-            <div style={{ textAlign: "center", fontWeight: "900", fontSize: "32px", textTransform: "uppercase", letterSpacing: "2px", marginTop: "10px" }}>
-              PROFORMA
-            </div>
-            <br />
-            <div style={{ textAlign: "left", fontSize: "16px", fontWeight: "bold", marginBottom: "5px" }}>
-              Empleado: Propietario
-            </div>
-            <div className="ticket-divider"></div>
 
-            <div className="ticket-items">
-              {lastSaleInfo.items.map((item) => {
-                const codigo = item.codigo || item.code || '';
-                const nombre = item.nombre || item.name || item.product_name || 'Producto';
-                const precioFijo = Number(item.precio_fijo || item.catalog_price || item.precio_base || item.price || 0).toFixed(2);
-                const cantidad = item.cantidad || item.quantity || item.qty || 0;
-                const precioVariable = Number(item.precio_variable || item.variable_price || item.editedPrice || item.price || 0).toFixed(2);
-                const subtotal = Number(item.subtotal || (Number(cantidad) * Number(precioVariable)) || 0).toFixed(2);
-                return (
-                  <div key={item.id} className="ticket-item mb-4 pb-2 border-b border-gray-200">
-                    <div className="flex justify-between text-lg font-bold">
-                      <span>{codigo ? `${codigo} ` : ''}({nombre} - S/ {precioFijo})</span>
-                    </div>
-                    <div className="flex justify-between items-center text-base mt-1">
-                      <span>{cantidad} m x S/ {precioVariable}</span>
-                      <span>S/ {subtotal}</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="ticket-divider"></div>
-            {lastSaleInfo.izipayFee && lastSaleInfo.izipayFee > 0 ? (
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "20px", fontWeight: "bold", marginBottom: "10px" }}>
-                <span>VISA</span>
-                <span>S/ {Number(lastSaleInfo.izipayFee).toFixed(2)}</span>
-              </div>
-            ) : null}
-            <div className="ticket-total-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontWeight: "900", fontSize: "36px" }}>
-              <span>TOTAL FINAL</span>
-              <span>S/ {Math.round(lastSaleInfo.total).toFixed(2)}</span>
-            </div>
-            <div className="ticket-divider"></div>
-            <div style={{ display: "flex", justifyContent: "space-between", marginTop: "16px", fontSize: "14px", color: "#555", fontWeight: "bold" }}>
-              <span>
-                {new Date().toLocaleDateString("es-PE", { day: "2-digit", month: "2-digit", year: "numeric" })} {new Date().toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit", hour12: false })}
-              </span>
-              <span>
-                {lastSaleInfo.ticketNum !== null
-                  ? `${String(lastSaleInfo.ticketNum).padStart(3, "0")}-Caja 1`
-                  : "-Caja 1"}
-              </span>
-            </div>
-          </>
-        )}
-      </div>
-
-      <style>{`
-        #print-ticket { display: none; }
-        @media print {
-          @page { size: A4; margin: 0; }
-          body * { visibility: hidden; }
-          #print-ticket, #print-ticket * { visibility: visible; }
-          #print-ticket {
-            display: block !important;
-            position: absolute; left: 50%; top: 0; transform: translateX(-50%);
-            width: 100%; max-width: 700px;
-            margin-top: 20mm;
-            font-family: sans-serif;
-            font-size: 16px;
-            color: black !important;
-            background: white !important;
-          }
-          .ticket-divider {
-            border-bottom: 2px solid black;
-            margin: 15px 0;
-          }
-        }
-      `}</style>
     </div>
   );
 }

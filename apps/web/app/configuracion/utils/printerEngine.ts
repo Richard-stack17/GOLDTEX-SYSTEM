@@ -42,7 +42,7 @@ export async function printTestReceipt(device: any, paperWidth: number) {
   if (!device.gatt) throw new Error('El dispositivo seleccionado no soporta GATT.');
 
   const server = await device.gatt.connect();
-  
+
   // Buscar dinámicamente un servicio que tenga una característica escribible
   const services = await server.getPrimaryServices();
   let writeCharacteristic = null;
@@ -65,7 +65,7 @@ export async function printTestReceipt(device: any, paperWidth: number) {
 
   // Construir Array ESC/POS puro
   const escpos: number[] = [];
-  
+
   // 1. Inicialización
   escpos.push(0x1B, 0x40);
 
@@ -91,7 +91,7 @@ export async function printTestReceipt(device: any, paperWidth: number) {
 
   // Enviar a la impresora en chunks (límite BLE típico de ~512 o 20 bytes)
   const uint8 = new Uint8Array(escpos);
-  const CHUNK_SIZE = 256; 
+  const CHUNK_SIZE = 256;
 
   try {
     for (let i = 0; i < uint8.length; i += CHUNK_SIZE) {
@@ -111,17 +111,17 @@ export async function printTestReceipt(device: any, paperWidth: number) {
   device.gatt.disconnect();
 }
 
-export async function printSaleReceipt(device: any, saleData: any, paperWidth: number) {
+export async function printSaleReceipt(device: any, saleData: any, paperWidth: number, maxChars: number = 42) {
   if (!device) throw new Error('No hay un dispositivo Bluetooth emparejado.');
   if (!device.gatt) throw new Error('El dispositivo no soporta GATT.');
 
   let server;
   try {
     server = device.gatt.connected ? device.gatt : await device.gatt.connect();
-  } catch(e) {
+  } catch (e) {
     throw new Error('No se pudo conectar con la impresora. Enciéndela o acércate a ella.');
   }
-  
+
   const services = await server.getPrimaryServices();
   let writeCharacteristic = null;
 
@@ -151,61 +151,27 @@ export async function printSaleReceipt(device: any, saleData: any, paperWidth: n
   // Inicialización
   escpos.push(0x1B, 0x40);
 
-  // Centro
-  escpos.push(0x1B, 0x61, 0x01);
-  escpos.push(0x1B, 0x45, 0x01); // Bold on
-  append('GOLTEX\n');
-  escpos.push(0x1B, 0x45, 0x00); // Bold off
-  append('Ticket de Venta\n');
-  append(`Doc: ${saleData.document_number || 'N/A'}\n`);
-  append(`Fecha: ${new Date().toLocaleString()}\n`);
-  
-  if (saleData.customer_name) {
-    append(`Cliente: ${saleData.customer_name}\n`);
-  }
+  // Forzar Fuente A (Estándar 80mm)
+  escpos.push(0x1B, 0x4D, 0x00);
 
-  // Izquierda
-  escpos.push(0x1B, 0x61, 0x00);
-  
-  // Dependiendo del ancho, definimos la línea de separación. 
-  // 32 chars genérico para 58mm y 80mm
-  const MAX_CHARS = paperWidth === 80 ? 48 : 32;
-  const separator = '-'.repeat(MAX_CHARS) + '\n';
-  
-  append(separator);
-  
-  // Titulos de tabla
-  const titleProd = 'PRODUCTO'.padEnd(MAX_CHARS - 17, ' ');
-  const titleCant = 'CANT'.padStart(6, ' ');
-  const titleTot = 'TOTAL'.padStart(10, ' ');
-  append(`${titleProd} ${titleCant} ${titleTot}\n`);
-  
-  append(separator);
+  const lines = generateTicketLines(saleData, maxChars);
 
-  // Items (el usuario no proporcionó el schema exacto de los items, asumo description, quantity, total)
-  const items = saleData.items || [];
-  for (const item of items) {
-    const nameStr = (item.description || 'Producto').substring(0, MAX_CHARS - 17).padEnd(MAX_CHARS - 17, ' ');
-    const qtyStr = String(item.quantity || 1).padStart(6, ' ');
-    const totalStr = Number(item.total || 0).toFixed(2).padStart(10, ' ');
-    append(`${nameStr} ${qtyStr} ${totalStr}\n`);
-  }
+  for (const line of lines) {
+    if (line.align === 'center') {
+      escpos.push(0x1B, 0x61, 0x01); // Center
+    } else if (line.align === 'right') {
+      escpos.push(0x1B, 0x61, 0x02); // Right
+    } else {
+      escpos.push(0x1B, 0x61, 0x00); // Left
+    }
 
-  append(separator);
-  
-  // Derecha
-  escpos.push(0x1B, 0x61, 0x02);
-  append(`SUBTOTAL: S/ ${Number(saleData.total || 0).toFixed(2)}\n`);
-  append(`TOTAL: S/ ${Number(saleData.total || 0).toFixed(2)}\n`);
-  
-  // Centro pie de pagina
-  escpos.push(0x1B, 0x61, 0x01);
-  append('\n');
-  if (saleData.comment) {
-    append(`Nota: ${saleData.comment}\n`);
+    // Bold only for PROFORMA
+    if (line.text === 'PROFORMA') escpos.push(0x1B, 0x45, 0x01); // Bold on
+
+    append(line.text + '\n');
+
+    if (line.text === 'PROFORMA') escpos.push(0x1B, 0x45, 0x00); // Bold off
   }
-  append('Gracias por su preferencia!\n');
-  append('Software por GOLTEX\n');
 
   // Feed de papel (3 lineas)
   escpos.push(0x1B, 0x64, 0x03);
@@ -214,7 +180,7 @@ export async function printSaleReceipt(device: any, saleData: any, paperWidth: n
   escpos.push(0x1D, 0x56, 0x41, 0x00);
 
   const uint8 = new Uint8Array(escpos);
-  const CHUNK_SIZE = 256; 
+  const CHUNK_SIZE = 256;
 
   try {
     for (let i = 0; i < uint8.length; i += CHUNK_SIZE) {
@@ -228,5 +194,173 @@ export async function printSaleReceipt(device: any, saleData: any, paperWidth: n
   } catch (error) {
     device.gatt.disconnect();
     throw new Error('Error al enviar bytes a la impresora: ' + (error as Error).message);
+  }
+}
+
+export interface TicketLine {
+  align?: 'center' | 'left' | 'right';
+  text: string;
+}
+
+export function generateTicketLines(saleData: any, maxChars: number): TicketLine[] {
+  const lines: TicketLine[] = [];
+
+  const center = (text: string) => lines.push({ align: 'center', text });
+  const left = (text: string) => lines.push({ align: 'left', text });
+
+  const formatLR = (l: string, r: string) => {
+    const spaces = maxChars - l.length - r.length;
+    if (spaces > 0) return l + ' '.repeat(spaces) + r;
+    const truncatedL = l.substring(0, maxChars - r.length - 1);
+    return truncatedL + ' ' + r;
+  };
+
+  const separator = '='.repeat(maxChars);
+  const separatorThin = '-'.repeat(maxChars);
+
+  // Layout Estricto
+  center('PROFORMA');
+  left(`Empleado: Propietario`);
+  left(separator);
+
+  const items = saleData.items || [];
+  let sumaExacta = 0;
+
+  for (const item of items) {
+    console.log('ITEM FOR PRINT:', item); // DEBUGGING: Verifica los nombres de las propiedades reales
+    let itemName = item.name || item.description || item.nombre_producto || 'Producto';
+    
+    // Simplificación Automática de Servicios
+    const upperName = itemName.toUpperCase();
+    if (upperName.includes('COSTO POR CONFECCIÓN') || upperName.includes('CONFECCION')) {
+      itemName = 'CONFECCIÓN';
+    } else if (upperName.includes('COSTO POR TAXI') || upperName.includes('TAXI')) {
+      itemName = 'TAXI';
+    }
+
+    const code = item.code || item.codigo ? `${item.code || item.codigo} ` : '';
+    const qty = item.quantity || item.cantidad || 1;
+    
+    // Robust Price Fallbacks para cazar el bug de '0.50' o 'S/ 0.00'
+    const rawEditedPrice = item.editedPrice ?? item.precio_variable ?? item.precio_unitario ?? item.price ?? item.precio ?? 0;
+    const rawPrice = item.price ?? item.precio_fijo ?? item.precio ?? item.editedPrice ?? item.precio_variable ?? 0;
+
+    const precioVar = Number(rawEditedPrice !== 0 ? rawEditedPrice : rawPrice).toFixed(2);
+    const precioFijo = Number(rawPrice !== 0 ? rawPrice : rawEditedPrice).toFixed(2);
+    
+    const itemTotal = item.total !== undefined ? item.total : qty * Number(precioVar);
+    sumaExacta += Number(itemTotal);
+
+    const isService = itemName === 'CONFECCIÓN' || itemName === 'TAXI';
+
+    if (isService) {
+      // Si es SERVICIO: Imprime una sola línea. Nombre a la izq, precio total a la derecha. NO imprime cantidad/multiplicación.
+      left(formatLR(itemName, `S/ ${Number(itemTotal).toFixed(2)}`));
+    } else {
+      // PRODUCTO NORMAL: Formato 2 líneas
+      // Línea 1: [IZQ] {codigo} {nombre_producto} x S/. {precio_fijo}
+      const suffixL1 = ` x S/. ${precioFijo}`;
+      const maxNameLen = maxChars - suffixL1.length - code.length;
+      let safeName = itemName;
+      if (safeName.length > maxNameLen) {
+        safeName = safeName.substring(0, maxNameLen);
+      }
+      left(`${code}${safeName}${suffixL1}`);
+
+      // Línea 2: [IZQ] {cantidad} {unidad} x S/{precio_variable}   [DER] S/ {total_item}
+      left(formatLR(`${qty} M x S/${precioVar}`, `S/ ${Number(itemTotal).toFixed(2)}`));
+    }
+  }
+
+  left(separatorThin);
+  // Paso 1 (Limpieza): Primero, redondea la suma a 2 decimales para eliminar errores de coma flotante
+  const sumaRedondeada2Dec = Math.round(sumaExacta * 100) / 100;
+  // Paso 2 (Redondeo a Décimos): Ahora redondea ese resultado al décimo (0.10) más cercano
+  const totalRedondeado = Math.round(sumaRedondeada2Dec * 10) / 10;
+  const totalFinalStr = totalRedondeado.toFixed(2);
+  left(formatLR('TOTAL FINAL', `S/ ${totalFinalStr}`));
+
+
+  const dateObj = new Date();
+  const dateStr = `${String(dateObj.getDate()).padStart(2, '0')}/${String(dateObj.getMonth() + 1).padStart(2, '0')}/${dateObj.getFullYear()} ${String(dateObj.getHours()).padStart(2, '0')}:${String(dateObj.getMinutes()).padStart(2, '0')}`;
+
+  center(dateStr);
+  const cleanDocNum = (saleData.document_number || 'N/A').replace(/^TKT-/, '');
+  center(`TKT-${cleanDocNum} - Caja 1`);
+
+  return lines;
+}
+
+import { supabase } from '../../lib/supabase';
+
+export async function silentPrintSaleReceipt(saleData: any, doubleCopy: boolean = false) {
+  try {
+    // 1. Fetch default printer configuration from Supabase (prioritize the one with auto_print: true)
+    const { data: printers, error } = await supabase
+      .from('printers')
+      .select('*')
+      .order('auto_print', { ascending: false });
+    const activePrinter = printers?.[0];
+
+    if (error || !activePrinter || activePrinter.type !== 'bluetooth') {
+      console.warn("No hay impresora Bluetooth por defecto configurada en Supabase.");
+      return;
+    }
+
+    let deviceToPrint = null;
+    const nav = navigator as any;
+
+    if (!nav.bluetooth) {
+      console.warn("Web Bluetooth API no está soportada en este navegador.");
+      return;
+    }
+
+    // 2. Reconexión Silenciosa (getDevices)
+    try {
+      if (typeof nav.bluetooth.getDevices === 'function') {
+        const devices = await nav.bluetooth.getDevices();
+        if (devices && devices.length > 0) {
+          deviceToPrint = devices.find((d: any) => d.name === activePrinter.name) || devices[0];
+        }
+      }
+    } catch (err) {
+      console.warn("Error en reconexión silenciosa (getDevices):", err);
+    }
+
+    // 3. Fallback (Plan B) - Request Device
+    if (!deviceToPrint) {
+      try {
+        deviceToPrint = await nav.bluetooth.requestDevice({
+          acceptAllDevices: true,
+          optionalServices: [
+            '00001101-0000-1000-8000-00805f9b34fb',
+            '000018f0-0000-1000-8000-00805f9b34fb',
+            'e7810a71-73ae-499d-8c15-faa9aef0c3f2',
+            '49535343-fe7d-4ae5-8fa9-9fafd205e455'
+          ]
+        });
+      } catch (err) {
+        console.warn("El usuario canceló o falló requestDevice:", err);
+        return; // Salir silenciosamente sin alertar
+      }
+    }
+
+    if (!deviceToPrint) return;
+
+    // 4. Conexión GATT Dinámica & Imprimir
+    const maxCharsConfig = activePrinter.max_chars || 42;
+    await printSaleReceipt(deviceToPrint, saleData, activePrinter.paper_width || 80, maxCharsConfig);
+
+    if (doubleCopy) {
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      await printSaleReceipt(deviceToPrint, saleData, activePrinter.paper_width || 80, maxCharsConfig);
+    }
+
+    // Desconectar al terminar la impresión
+    if (deviceToPrint.gatt && deviceToPrint.gatt.connected) {
+      deviceToPrint.gatt.disconnect();
+    }
+  } catch (err) {
+    console.error("Error en silentPrintSaleReceipt:", err);
   }
 }

@@ -10,9 +10,11 @@ import { products, families, type Product, type Family } from "@goltex/ui/mock-d
 import {
   Search, ArrowLeft, Trash2, Printer,
   Delete, ShoppingCart, XCircle, RefreshCw,
-  Clock, CheckCircle2, Sun, Moon, Scissors, Car
+  Clock, CheckCircle2, Sun, Moon, Scissors, Car, Eye
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
+import { requestBluetoothDevice, printSaleReceipt, silentPrintSaleReceipt } from "../configuracion/utils/printerEngine";
+import ReceiptPreview from "../components/ReceiptPreview";
 import {
   computeNextDailyTicketNumber,
   formatTicketHash,
@@ -53,19 +55,50 @@ export default function POSPage() {
   const { role, username, isHydrated } = useRole();
   const { theme, toggleTheme } = useTheme();
   const router = useRouter();
+  const [showConfigAlert, setShowConfigAlert] = useState(false);
+  const [previewTicketData, setPreviewTicketData] = useState<any>(null);
   const [hasPosAccess, setHasPosAccess] = useState(false);
 
   useEffect(() => {
     const checkAccess = async () => {
       if (!isHydrated) return;
-      const allowed = await hasModuleAccess(role, 'pos');
-      setHasPosAccess(allowed);
-      if (!allowed) {
-        router.push('/hub');
+      const ok = await hasModuleAccess(role, "pos");
+      if (!ok) {
+        router.replace("/hub");
+      } else {
+        setHasPosAccess(true);
       }
     };
     checkAccess();
-  }, [isHydrated, role, router]);
+  }, [role, isHydrated, router]);
+
+  // ── Printer state ──
+  const [activePrinter, setActivePrinter] = useState<any>(null);
+  const [btDeviceObj, setBtDeviceObj] = useState<any>(null);
+
+  useEffect(() => {
+    async function loadPrinter() {
+      const { data } = await supabase.from('printers').select('*').order('auto_print', { ascending: false }).limit(1).single();
+      if (data) {
+        setActivePrinter(data);
+        if (data.type === 'bluetooth') {
+          const nav = navigator as any;
+          if (nav.bluetooth && nav.bluetooth.getDevices) {
+            try {
+              const devices = await nav.bluetooth.getDevices();
+              if (devices.length > 0) {
+                setBtDeviceObj(devices[0]);
+              }
+            } catch (e) {
+              console.log('No silent BT access in POS', e);
+            }
+          }
+        }
+      }
+    }
+    loadPrinter();
+  }, []);
+
 
   // ── Cart ──
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -461,8 +494,19 @@ export default function POSPage() {
       setCart([]);
       await fetchTodayTicketNumber();
 
-      // Imprimir inmediatamente
-      setTimeout(() => window.print(), 120);
+      // Imprimir silenciosamente
+      try {
+        const saleDataForPrint = {
+          document_number: docNum,
+          customer_name: username || "Propietario",
+          items: cart,
+          total: total
+        };
+        console.log('Iniciando auto-impresión POS (Doble Copia)...');
+        await silentPrintSaleReceipt(saleDataForPrint, true);
+      } catch (e: any) {
+        console.error('Error impresión POS:', e);
+      }
     } catch (err) {
       console.error(err);
       alert(err instanceof Error ? err.message : "Error al emitir el ticket.");
@@ -471,7 +515,7 @@ export default function POSPage() {
     }
   };
 
-  const handleReprint = (ticket: HistoryTicket) => {
+  const handleReprint = async (ticket: HistoryTicket) => {
     // Tela format:    "CODE NAME — Xm × S/ Y.YY"
     // Service format: "CODE: NAME — S/ Y.YY"
     const lines = ticket.detail.split('\n');
@@ -506,7 +550,7 @@ export default function POSPage() {
             const mxIdx = secondPart.indexOf('m × S/ ');
             if (mxIdx !== -1) {
               quantity = parseFloat(secondPart.substring(0, mxIdx)) || 0;
-              editedPrice = parseFloat(secondPart.substring(mxIdx + 8)) || 0;
+              editedPrice = parseFloat(secondPart.substring(mxIdx + 7)) || 0;
             }
           }
         }
@@ -529,7 +573,19 @@ export default function POSPage() {
       total: ticket.total,
       izipayFee: izipayFeeAmt
     });
-    setTimeout(() => window.print(), 120);
+
+    try {
+      const saleDataForPrint = {
+        document_number: ticket.document_number,
+        customer_name: "Cliente General",
+        items: reconstructedItems,
+        total: ticket.total
+      };
+      console.log('Iniciando reimpresión POS (Simple)...');
+      await silentPrintSaleReceipt(saleDataForPrint, false);
+    } catch (e: any) {
+      console.error('Error reimpresión POS:', e);
+    }
   };
 
 
@@ -1029,12 +1085,67 @@ export default function POSPage() {
                           }
                           return null;
                         })()}
-                      <button
-                        onClick={() => handleReprint(ticket)}
-                        className="mt-2 w-full py-2 bg-secondary/50 hover:bg-secondary rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-colors"
-                      >
-                        <Printer className="w-4 h-4" /> REIMPRIMIR
-                      </button>
+                      <div className="flex gap-2 mt-2">
+                        <button
+                          onClick={() => handleReprint(ticket)}
+                          className="flex-1 py-2 bg-secondary/50 hover:bg-secondary rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-colors"
+                        >
+                          <Printer className="w-4 h-4" /> REIMPRIMIR
+                        </button>
+                        <button
+                          onClick={() => {
+                            const lines = typeof ticket.detail === 'string' ? ticket.detail.split('\n').filter(l => l.trim()) : [];
+                            const reconstructedItems = lines.map((l: string, idx: number) => {
+                              let code = "";
+                              let name = l;
+                              let quantity = 1;
+                              let editedPrice = 0;
+                              let basePrice = 0;
+
+                              try {
+                                const sepIdx = l.indexOf(' — ');
+                                if (sepIdx !== -1) {
+                                  const firstPart = l.substring(0, sepIdx);
+                                  const secondPart = l.substring(sepIdx + 3);
+
+                                  if (firstPart.includes(': ')) {
+                                    const colonIdx = firstPart.indexOf(': ');
+                                    code = firstPart.substring(0, colonIdx);
+                                    name = firstPart.substring(colonIdx + 2);
+                                    const priceMatch = secondPart.match(/S\/\s*([\d.]+)/);
+                                    editedPrice = priceMatch ? (parseFloat(priceMatch[1] ?? '0') || 0) : 0;
+                                  } else {
+                                    const spaceIdx = firstPart.indexOf(' ');
+                                    code = spaceIdx > -1 ? firstPart.substring(0, spaceIdx) : '';
+                                    name = spaceIdx > -1 ? firstPart.substring(spaceIdx + 1) : firstPart;
+                                    const matchedProd = products.find(p => p.code === code);
+                                    if (matchedProd) basePrice = matchedProd.price;
+                                    const mxIdx = secondPart.indexOf('m × S/ ');
+                                    if (mxIdx !== -1) {
+                                      quantity = parseFloat(secondPart.substring(0, mxIdx)) || 0;
+                                      editedPrice = parseFloat(secondPart.substring(mxIdx + 7)) || 0;
+                                    }
+                                  }
+                                }
+                              } catch (e) {}
+                              if (basePrice === 0) basePrice = editedPrice;
+                              return { code, name, price: basePrice, editedPrice, quantity };
+                            });
+
+                            const saleDataForPrint = {
+                              document_number: ticket.document_number,
+                              cajero: ticket.source_sheet ? (ticket.source_sheet as string).match(/CAJERO:([^|]+)/)?.[1]?.trim() : 'Caja',
+                              customer_name: "Cliente General",
+                              items: reconstructedItems,
+                              total: ticket.total
+                            };
+                            setPreviewTicketData(saleDataForPrint);
+                          }}
+                          className="flex-1 py-2 bg-secondary/20 hover:bg-secondary/40 text-foreground rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-colors border border-border"
+                        >
+                          <Eye className="w-4 h-4" /> VISTA PREVIA
+                        </button>
+                      </div>
                     </CardContent>
                   </Card>
                 )
@@ -1189,106 +1300,7 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* ════════════════════════════════════════
-          TICKET A4 FORMAT (solo @media print - Adaptado a A4 centrado con reglas gerenciales)
-          ════════════════════════════════════════ */}
-      <div id="print-ticket">
-        {lastSaleInfo && (
-          <>
-            <div className="ticket-header" style={{ textAlign: "center", fontWeight: "900", fontSize: "32px", textTransform: "uppercase", letterSpacing: "2px" }}>
-              PROFORMA
-            </div>
-            <br />
-            <div style={{ textAlign: "left", fontSize: "16px", fontWeight: "bold", marginBottom: "5px" }}>
-              Empleado: Propietario
-            </div>
-            <div className="ticket-divider"></div>
 
-            <div className="ticket-items">
-              {lastSaleInfo.items.map((item) => {
-                const codigo = item.codigo || item.code || '';
-                const nombre = item.nombre || item.name || item.product_name || 'Producto';
-                const isService = ['TAXI', 'CONFECCION'].includes(codigo);
-                const precioFijo = Number(item.precio_fijo || item.catalog_price || item.precio_base || item.price || 0).toFixed(2);
-                const cantidad = item.cantidad || item.quantity || item.qty || 0;
-                const precioVariable = Number(item.precio_variable || item.variable_price || item.editedPrice || item.price || 0).toFixed(2);
-                const subtotal = Number(item.subtotal || (Number(cantidad) * Number(precioVariable)) || 0).toFixed(2);
-
-                if (isService) {
-                  return (
-                    <div key={item.id} className="ticket-item mb-4 pb-2 border-b border-gray-200">
-                      <div className="flex justify-between text-lg font-bold">
-                        <span>({codigo})</span>
-                        <span>S/ {subtotal}</span>
-                      </div>
-                    </div>
-                  );
-                }
-
-                return (
-                  <div key={item.id} className="ticket-item mb-4 pb-2 border-b border-gray-200">
-                    {/* Línea 1: código, nombre y precio fijo */}
-                    <div className="flex justify-between text-lg font-bold">
-                      <span>{codigo ? `${codigo} ` : ''}({nombre} - S/ {precioFijo})</span>
-                    </div>
-                    {/* Línea 2: cantidad x precio variable y subtotal */}
-                    <div className="flex justify-between items-center text-base mt-1">
-                      <span>{cantidad} m x S/ {precioVariable}</span>
-                      <span>S/ {subtotal}</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="ticket-divider"></div>
-            {lastSaleInfo.izipayFee && lastSaleInfo.izipayFee > 0 ? (
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "20px", fontWeight: "bold", marginBottom: "10px" }}>
-                <span>VISA</span>
-                <span>S/ {Number(lastSaleInfo.izipayFee).toFixed(2)}</span>
-              </div>
-            ) : null}
-            <div className="ticket-total-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontWeight: "900", fontSize: "36px" }}>
-              <span>TOTAL FINAL</span>
-              <span>S/ {Number(lastSaleInfo.total).toFixed(2)}</span>
-            </div>
-            <div className="ticket-divider"></div>
-            <div style={{ display: "flex", justifyContent: "space-between", marginTop: "16px", fontSize: "14px", color: "#555", fontWeight: "bold" }}>
-              <span>
-                {new Date().toLocaleDateString("es-PE", { day: "2-digit", month: "2-digit", year: "numeric" })} {new Date().toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit", hour12: false })}
-              </span>
-              <span>
-                {lastSaleInfo.ticketNum !== null
-                  ? `${String(lastSaleInfo.ticketNum).padStart(3, "0")}-Caja 1`
-                  : "-Caja 1"}
-              </span>
-            </div>
-          </>
-        )}
-      </div>
-
-      <style>{`
-        #print-ticket { display: none; }
-        @media print {
-          @page { size: A4; margin: 0; }
-          body * { visibility: hidden; }
-          #print-ticket, #print-ticket * { visibility: visible; }
-          #print-ticket {
-            display: block !important;
-            position: absolute; left: 50%; top: 0; transform: translateX(-50%);
-            width: 100%; max-width: 700px;
-            margin-top: 20mm;
-            font-family: sans-serif;
-            font-size: 16px;
-            color: black !important;
-            background: white !important;
-          }
-          .ticket-divider {
-            border-bottom: 2px solid black;
-            margin: 15px 0;
-          }
-        }
-      `}</style>
 
       {/* Exit guard — carrito con ítems sin registrar */}
       <Dialog open={exitGuardOpen} onOpenChange={setExitGuardOpen}>
@@ -1365,6 +1377,33 @@ export default function POSPage() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ════════════════════════════════════════
+          MODAL DE VISTA PREVIA DE TICKET
+          ════════════════════════════════════════ */}
+      <Dialog open={!!previewTicketData} onOpenChange={(open) => !open && setPreviewTicketData(null)}>
+        <DialogContent className="max-w-md bg-surface border-border">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold flex items-center gap-2">
+              <Eye className="w-5 h-5 text-emerald-500" />
+              Vista Previa de Impresión
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-2">
+            {previewTicketData && (
+              <ReceiptPreview 
+                maxChars={activePrinter?.max_chars || 42} 
+                saleData={previewTicketData} 
+              />
+            )}
+          </div>
+          <div className="pt-2">
+            <Button variant="outline" className="w-full font-bold" onClick={() => setPreviewTicketData(null)}>
+              Cerrar
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

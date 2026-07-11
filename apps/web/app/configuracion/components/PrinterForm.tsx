@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { ArrowLeft, Printer, Trash2, Search, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { requestBluetoothDevice, printTestReceipt } from '../utils/printerEngine';
+import ReceiptPreview from '../../components/ReceiptPreview';
 
 // Helper de Toast (mismo estilo que Contabilidad)
 function Toast({ message, type }: { message: string; type: 'success' | 'error' }) {
@@ -37,6 +38,7 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
   const [port, setPort] = useState(9100);
   const [printReceipts, setPrintReceipts] = useState(true);
   const [autoPrint, setAutoPrint] = useState(false);
+  const [maxChars, setMaxChars] = useState(42);
 
   // Hardware state
   const [btDeviceObj, setBtDeviceObj] = useState<any>(null);
@@ -60,6 +62,7 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
       setIpAddress(data.ip_address || '192.168.1.100');
       setPort(data.port || 9100);
       setAutoPrint(data.auto_print);
+      if (data.max_chars) setMaxChars(data.max_chars);
     }
   };
 
@@ -83,7 +86,8 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
       mac_address: type === 'bluetooth' ? macAddress : null,
       ip_address: type === 'wifi' ? ipAddress : null,
       port: type === 'wifi' ? port : null,
-      auto_print: autoPrint
+      auto_print: autoPrint,
+      max_chars: maxChars
     };
 
     let error;
@@ -270,6 +274,18 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
               <option value={58}>58 mm</option>
             </select>
           </div>
+          <div className="px-4 py-3">
+            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Caracteres por línea</label>
+            <select 
+              value={maxChars} 
+              onChange={e => setMaxChars(Number(e.target.value))}
+              className="w-full text-[17px] font-medium text-gray-900 bg-transparent outline-none py-1 appearance-none cursor-pointer"
+            >
+              <option value={32}>32 (58mm)</option>
+              <option value={42}>42 (80mm genérico)</option>
+              <option value={48}>48 (80mm estándar)</option>
+            </select>
+          </div>
         </div>
 
         {/* Toggles */}
@@ -290,6 +306,24 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
               </label>
             </div>
           )}
+        </div>
+
+        {/* Vista Previa / Calibrador */}
+        <div className="mt-6 px-4">
+          <ReceiptPreview 
+            maxChars={maxChars} 
+            saleData={{
+              document_number: 'T001-00001234',
+              customer_name: 'Cliente Prueba',
+              items: [
+                { name: 'TELA ALGODON PREMIUM 100%', quantity: 2, price: 15.5 },
+                { name: 'HILO POLYESTER X', quantity: 1, price: 5 },
+                { name: 'AGUJAS INDUSTRIALES', quantity: 10, price: 0.5 }
+              ],
+              total: 41,
+              comment: 'Prueba de calibración de ticket'
+            }} 
+          />
         </div>
 
         {/* Botones de Acción */}
