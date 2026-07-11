@@ -2,13 +2,16 @@
 
 import React, { createContext, useContext, useState, useEffect } from "react";
 
-export type Role = "ADMIN" | "CAJERA" | "VENDEDOR";
+export type Role = "ADMIN" | "CAJERA" | "VENDEDOR" | "MOSTRADOR";
 
 interface RoleContextProps {
   role: Role;
   setRole: (role: Role) => void;
   username: string;
   setUsername: (username: string) => void;
+  employeeId: string | null;
+  setEmployeeId: (id: string | null) => void;
+  clearSession: () => void;
   isHydrated: boolean;
 }
 
@@ -17,16 +20,21 @@ const RoleContext = createContext<RoleContextProps | undefined>(undefined);
 export function RoleProvider({ children }: { children: React.ReactNode }) {
   const [role, setRoleState] = useState<Role>("ADMIN");
   const [username, setUsernameState] = useState<string>("Propietario");
+  const [employeeId, setEmployeeIdState] = useState<string | null>(null);
   const [isHydrated, setIsHydrated] = useState(false);
 
   useEffect(() => {
     const stored = localStorage.getItem("goltex_role");
-    if (stored === "ADMIN" || stored === "CAJERA" || stored === "VENDEDOR") {
+    if (stored === "ADMIN" || stored === "CAJERA" || stored === "VENDEDOR" || stored === "MOSTRADOR") {
       setRoleState(stored as Role);
     }
     const storedUsername = localStorage.getItem("goltex_username");
     if (storedUsername) {
       setUsernameState(storedUsername);
+    }
+    const storedEmpId = localStorage.getItem("goltex_employee_id");
+    if (storedEmpId) {
+      setEmployeeIdState(storedEmpId);
     }
     setIsHydrated(true);
   }, []);
@@ -41,8 +49,26 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem("goltex_username", newUsername);
   };
 
+  const setEmployeeId = (newId: string | null) => {
+    setEmployeeIdState(newId);
+    if (newId) {
+      localStorage.setItem("goltex_employee_id", newId);
+    } else {
+      localStorage.removeItem("goltex_employee_id");
+    }
+  };
+
+  const clearSession = () => {
+    setRoleState("ADMIN");
+    setUsernameState("");
+    setEmployeeIdState(null);
+    localStorage.removeItem("goltex_role");
+    localStorage.removeItem("goltex_username");
+    localStorage.removeItem("goltex_employee_id");
+  };
+
   return (
-    <RoleContext.Provider value={{ role, setRole, username, setUsername, isHydrated }}>
+    <RoleContext.Provider value={{ role, setRole, username, setUsername, employeeId, setEmployeeId, clearSession, isHydrated }}>
       {children}
     </RoleContext.Provider>
   );

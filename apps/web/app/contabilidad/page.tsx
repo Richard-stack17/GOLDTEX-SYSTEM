@@ -9,18 +9,8 @@ import {
 import { supabase } from '../lib/supabase';
 import Link from 'next/link';
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-type ExcelRow = {
-  id: string;
-  FECHA: string;          // YYYY-MM-DD stored, displayed as DD-MM-YYYY
-  DOCUMENTO: string;
-  'NOMBRE Y (O) RAZON': string;
-  DETALLE: string;        // bank label: BBVA | BCP | — (never "Efectivo")
-  BBVA: number;
-  BCP: number;
-  EFECTIVO: number;
-  TOTAL: number;
-};
+import { ExcelRow } from './types';
+import ContabilidadTable from './components/ContabilidadTable';
 
 // ─── Peru / Lima helpers ──────────────────────────────────────────────────────
 const limaToday = (): string => {
@@ -47,11 +37,15 @@ const excelDate = (iso: string) => {
 const fmt = (n: number) => (n === 0 ? '—' : `S/ ${n.toFixed(2)}`);
 
 /** Derive bank label for DETALLE column (never "Efectivo") */
-const deriveBankLabel = (bbva: number, bcp: number): string => {
-  if (bbva > 0 && bcp === 0) return 'BBVA';
-  if (bcp > 0 && bbva === 0) return 'BCP';
-  if (bbva > 0 && bcp > 0) return 'BBVA / BCP';
-  return '—'; // cash only
+const deriveBankLabel = (bbva: number, combinedBcp: number, izipay: number = 0): string => {
+  const realBcp = combinedBcp - izipay;
+  const parts = [];
+  if (realBcp > 0) parts.push('BCP');
+  if (bbva > 0) parts.push('BBVA');
+  if (izipay > 0) parts.push('IZIPAY');
+
+  if (parts.length > 0) return parts.join(' / ');
+  return 'EFECTIVO'; // cash only
 };
 
 /** Map a Supabase sale row to ExcelRow */
@@ -59,7 +53,8 @@ const mapSale = (sale: any): ExcelRow => {
   const txs: { payment_method: string; amount: number }[] = sale.transactions ?? [];
   const sumBy = (m: string) => txs.filter(t => t.payment_method === m).reduce((s, t) => s + t.amount, 0);
   const bbva = sumBy('BBVA');
-  const bcp = sumBy('BCP') + sumBy('IZIPAY');
+  const izipay = sumBy('IZIPAY');
+  const bcp = sumBy('BCP') + izipay;
   const efectivo = sumBy('EFECTIVO');
 
   const clientName: string =
@@ -79,15 +74,34 @@ const mapSale = (sale: any): ExcelRow => {
     FECHA: sale.issue_date ?? '',
     DOCUMENTO: documento,
     'NOMBRE Y (O) RAZON': clientName,
-    DETALLE: deriveBankLabel(bbva, bcp),
+    DETALLE: deriveBankLabel(bbva, bcp, izipay),
     BBVA: bbva,
     BCP: bcp,
     EFECTIVO: efectivo,
-    TOTAL: bbva + bcp + efectivo,
+    TOTAL: sale.total ?? (bbva + bcp + efectivo),
+    COMENTARIO: sale.comment || '',
+    _izipay: izipay,
   };
 };
 
-// ─── Component ────────────────────────────────────────────────────────────────
+// ─── Toast helper ─────────────────────────────────────────────────────────────
+function Toast({ message, type }: { message: string; type: 'success' | 'error' }) {
+  return (
+    <div className={`fixed bottom-5 right-5 z-50 flex items-center gap-3 px-5 py-3.5 rounded-2xl border shadow-2xl font-bold text-sm animate-in fade-in slide-in-from-bottom-4 ${
+      type === 'success'
+        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
+        : 'bg-red-500/10 border-red-500/30 text-red-500'
+    }`}>
+      {type === 'success' ? (
+        <CheckCircle2 className="w-4 h-4 shrink-0" />
+      ) : (
+        <AlertCircle className="w-4 h-4 shrink-0" />
+      )}
+      <span>{message}</span>
+    </div>
+  );
+}
+
 export default function ContabilidadPage() {
   const [startDate, setStartDate] = useState<string>(limaToday);
   const [endDate, setEndDate] = useState<string>(limaToday);
@@ -96,42 +110,23 @@ export default function ContabilidadPage() {
   const [previewRows, setPreviewRows] = useState<ExcelRow[] | null>(null);
   const [isDataCurrent, setIsDataCurrent] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showFullEfectivo, setShowFullEfectivo] = useState(false);
   const tableWrapperRef = useRef<HTMLDivElement>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const isEditingRef = useRef(false);
 
-
-
-  // ── Cell-level draft edits ─────────────────────────────────────────────────
-  type CellDraft = {
-    DOCUMENTO?: string;
-    'NOMBRE Y (O) RAZON'?: string;
-    BBVA?: string;
-    BCP?: string;
-    EFECTIVO?: string;
+  const showToast = (message: string, type: 'success' | 'error') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3500);
   };
-  const [cellEdits, setCellEdits] = useState<Record<string, CellDraft>>({});
 
-  const getCellDraft = (rowId: string, field: keyof CellDraft, fallback: string) =>
-    cellEdits[rowId]?.[field] ?? fallback;
-
-  const setCellDraft = (rowId: string, field: keyof CellDraft, val: string) =>
-    setCellEdits(prev => ({ ...prev, [rowId]: { ...prev[rowId], [field]: val } }));
-
-  const clearCellDraft = (rowId: string, field: keyof CellDraft) =>
-    setCellEdits(prev => {
-      const next = { ...prev };
-      if (next[rowId]) {
-        delete next[rowId][field];
-        if (!Object.keys(next[rowId]).length) delete next[rowId];
-      }
-      return next;
-    });
 
   // ── Supabase query ─────────────────────────────────────────────────────────
   const querySales = (start: string, end: string) =>
     supabase
       .from('sales')
       .select(`
-        id, document_number, issue_date, detail, total,
+        id, document_number, issue_date, detail, total, comment, source_type,
         voucher_type, voucher_doc_number, voucher_doc_name,
         customers ( business_name ),
         transactions ( payment_method, amount )
@@ -142,6 +137,7 @@ export default function ContabilidadPage() {
       .order('issue_date', { ascending: true });
 
   const loadRows = useCallback(async (start: string, end: string) => {
+    if (isEditingRef.current) return;
     setIsLoading(true); setError(null); setPreviewRows(null); setIsDataCurrent(false);
     try {
       const { data, error: e } = await querySales(start, end);
@@ -162,6 +158,20 @@ export default function ContabilidadPage() {
     loadRows(today, today);
   }, [loadRows]);
 
+  React.useEffect(() => {
+    const channel = supabase
+      .channel("contabilidad-sales")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "sales" },
+        () => {
+           loadRows(startDate, endDate); // silent refresh on realtime event
+        }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [loadRows, startDate, endDate]);
+
   const handlePreview = () => {
     if (!startDate || !endDate || startDate > endDate) { setError('Rango de fechas inválido.'); return; }
     loadRows(startDate, endDate);
@@ -173,61 +183,88 @@ export default function ContabilidadPage() {
     loadRows(t, t);
   };
 
-  // ── Cell save ──────────────────────────────────────────────────────────────
-  const handleSaveCell = async (rowId: string, field: keyof CellDraft) => {
-    const draft = cellEdits[rowId]?.[field];
-    if (draft === undefined) return;
-    const row = previewRows?.find(r => r.id === rowId);
-    if (!row) return;
-
-    const numericFields = ['BBVA', 'BCP', 'EFECTIVO'];
-    const isNumeric = numericFields.includes(field as string);
-
+  // ── Row save ──────────────────────────────────────────────────────────────
+  const handleSaveRow = async (rowId: string, rowBuffer: any, isIzipay?: boolean): Promise<boolean> => {
     try {
-      if (field === 'DOCUMENTO') {
-        let voucherDocNumber = draft;
-        if (draft.startsWith('FT-') || draft.startsWith('BV-')) voucherDocNumber = draft.substring(3);
-        const { error: e } = await supabase.from('sales')
-          .update({ document_number: draft, voucher_doc_number: voucherDocNumber })
-          .eq('id', rowId);
-        if (e) throw e;
-        setPreviewRows(prev => prev ? prev.map(r => r.id === rowId ? { ...r, DOCUMENTO: draft } : r) : null);
+      const bcp = parseFloat(rowBuffer.bcp) || 0;
+      const bbva = parseFloat(rowBuffer.bbva) || 0;
+      const efectivo = parseFloat(rowBuffer.efectivo) || 0;
 
-      } else if (field === 'NOMBRE Y (O) RAZON') {
-        const val = draft.trim() || 'CLIENTES VARIOS';
-        const { error: e } = await supabase.from('sales').update({ voucher_doc_name: val }).eq('id', rowId);
-        if (e) throw e;
-        setPreviewRows(prev => prev ? prev.map(r => r.id === rowId ? { ...r, 'NOMBRE Y (O) RAZON': val } : r) : null);
+      const voucherDocName = rowBuffer.nombre.trim() || 'CLIENTES VARIOS';
+      let voucherDocNumber = rowBuffer.documento;
+      if (voucherDocNumber.startsWith('FT-') || voucherDocNumber.startsWith('BV-')) {
+        voucherDocNumber = voucherDocNumber.substring(3);
+      }
+      const comment = rowBuffer.comentario.trim();
 
-      } else if (isNumeric) {
-        const numVal = parseFloat(draft) || 0;
-        const method = field as 'BBVA' | 'BCP' | 'EFECTIVO';
+      const { error: e } = await supabase.from('sales')
+        .update({ 
+          document_number: rowBuffer.documento, 
+          voucher_doc_number: voucherDocNumber,
+          voucher_doc_name: voucherDocName,
+          comment: comment
+        })
+        .eq('id', rowId);
+      if (e) throw e;
+
+      const methods = [
+        { name: "EFECTIVO", amount: efectivo },
+        { name: isIzipay ? "IZIPAY" : "BCP", amount: bcp },
+        { name: "BBVA", amount: bbva },
+      ];
+      
+      // Aseguramos de eliminar la otra contraparte que no debe existir
+      if (isIzipay) {
+        methods.push({ name: "BCP", amount: 0 });
+      } else {
+        methods.push({ name: "IZIPAY", amount: 0 });
+      }
+
+      for (const m of methods) {
         const { data: existingTx } = await supabase
           .from('transactions').select('id')
-          .eq('sale_id', rowId).eq('payment_method', method).maybeSingle();
+          .eq('sale_id', rowId).eq('payment_method', m.name).maybeSingle();
+        
         if (existingTx) {
-          await supabase.from('transactions').update({ amount: numVal }).eq('id', existingTx.id);
-        } else if (numVal > 0) {
+          if (m.amount > 0) {
+            await supabase.from('transactions').update({ amount: m.amount }).eq('id', existingTx.id);
+          } else {
+            await supabase.from('transactions').delete().eq('id', existingTx.id);
+          }
+        } else if (m.amount > 0) {
           await supabase.from('transactions').insert({
-            sale_id: rowId, payment_method: method, amount: numVal,
-            surcharge_pct: 0, surcharge_amount: 0, sequence: 99, original_detail: 'Ajuste manual',
+            sale_id: rowId, payment_method: m.name, amount: m.amount,
+            surcharge_pct: 0, surcharge_amount: 0, sequence: 99, original_detail: 'Ajuste manual'
           });
         }
-        const newBBVA = method === 'BBVA' ? numVal : row.BBVA;
-        const newBCP  = method === 'BCP'  ? numVal : row.BCP;
-        const newEFE  = method === 'EFECTIVO' ? numVal : row.EFECTIVO;
-        const newTotal = newBBVA + newBCP + newEFE;
-        await supabase.from('sales').update({ total: newTotal }).eq('id', rowId);
-        setPreviewRows(prev => prev ? prev.map(r => {
-          if (r.id !== rowId) return r;
-          const u = { ...r, [method]: numVal, TOTAL: newTotal };
-          u.DETALLE = deriveBankLabel(u.BBVA, u.BCP);
-          return u;
-        }) : null);
       }
-      clearCellDraft(rowId, field);
+      
+      // Actualización inmediata del estado local (Opción A)
+      setPreviewRows(prev => {
+        if (!prev) return prev;
+        return prev.map(r => {
+          if (r.id === rowId) {
+            return {
+              ...r,
+              DOCUMENTO: rowBuffer.documento,
+              'NOMBRE Y (O) RAZON': voucherDocName,
+              BBVA: bbva,
+              BCP: bcp, // Siempre asignamos bcp porque en ExcelRow representa la columna combinada (BCP + IZIPAY)
+              EFECTIVO: efectivo,
+              COMENTARIO: comment,
+              DETALLE: deriveBankLabel(bbva, bcp, isIzipay ? bcp : 0),
+              _izipay: isIzipay ? bcp : 0
+            };
+          }
+          return r;
+        });
+      });
+      
+      showToast('Fila actualizada correctamente', 'success');
+      return true;
     } catch (err: any) {
-      alert('Error al guardar: ' + err.message);
+      showToast('Error al guardar: ' + err.message, 'error');
+      return false;
     }
   };
 
@@ -244,33 +281,41 @@ export default function ContabilidadPage() {
     const aoa: any[][] = [];
 
     // Header row — DOCUMENTO spans two "lines" via newline char
-    aoa.push(['FECHA', 'DOCUMENTO\nNUMERO', 'NOMBRE Y (O) RAZON', 'DETALLE', 'BBVA', 'BCP', 'TOTAL']);
+    aoa.push(['FECHA', 'DOCUMENTO\nNUMERO', 'NOMBRE Y (O) RAZON', 'DETALLE', 'BBVA', 'BCP', '']);
 
     for (const r of filteredExportRows) {
       aoa.push([
         excelDate(r.FECHA),
         r.DOCUMENTO,
         r['NOMBRE Y (O) RAZON'],
-        r.DETALLE === '—' ? '' : r.DETALLE, // never write efectivo label
+        r.DETALLE === '—' || r.DETALLE === 'EFECTIVO' ? '' : r.DETALLE, // never write efectivo label
         r.BBVA || 0,
         r.BCP || 0,
-        (r.BBVA || 0) + (r.BCP || 0), // Excel Total = BBVA + BCP
+        r.COMENTARIO || '',
       ]);
     }
 
     const excelBBVATotal = filteredExportRows.reduce((s, r) => s + (r.BBVA || 0), 0);
     const excelBCPTotal = filteredExportRows.reduce((s, r) => s + (r.BCP || 0), 0);
 
-    // Totals row
+    // Totals row (Subtotals)
     aoa.push([
-      'TOTALES', '', '', '',
+      '', '', '', '', // Empty first 4 cells
       excelBBVATotal,
       excelBCPTotal,
-      excelBBVATotal + excelBCPTotal, // Excel Total
+      '', // Empty COMENTARIO
+    ]);
+
+    // General Total row (under BBVA)
+    aoa.push([
+      '', '', '', '', // Empty first 4 cells
+      excelBBVATotal + excelBCPTotal, // Green cell under BBVA
+      '', // Empty BCP
+      '', // Empty COMENTARIO
     ]);
 
     const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = [{ wch: 10 }, { wch: 20 }, { wch: 36 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
+    ws['!cols'] = [{ wch: 10 }, { wch: 20 }, { wch: 36 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 30 }];
 
     // Apply styles to cells
     const range = XLSX.utils.decode_range(ws['!ref'] || "A1:G1");
@@ -283,18 +328,21 @@ export default function ContabilidadPage() {
         let color = "000000"; // default black
         if (C === 4) color = "0000FF"; // BBVA: Blue
         else if (C === 5) color = "FF0000"; // BCP: Red
-        else if (C === 6) color = "008000"; // TOTAL: Green
 
-        // Add boldness for header and totals row, and alignment
+        // Add boldness for header and totals rows, and alignment
         const isHeader = R === 0;
-        const isTotals = R === range.e.r;
+        const isSubTotals = R === range.e.r - 1;
+        const isGeneralTotal = R === range.e.r;
         
+        // Make the General Total cell (under BBVA) green
+        if (isGeneralTotal && C === 4) color = "008000"; // Green
+
         cell.s = {
-          font: { color: { rgb: color }, bold: isHeader || isTotals },
+          font: { color: { rgb: color }, bold: isHeader || isSubTotals || isGeneralTotal },
           alignment: { 
             wrapText: isHeader && C === 1, 
             vertical: "center",
-            horizontal: (C >= 4 || isHeader) ? "center" : "left" 
+            horizontal: (C >= 4 && C <= 5 || isHeader) ? "center" : "left" 
           }
         };
       }
@@ -329,6 +377,12 @@ export default function ContabilidadPage() {
     { BBVA: 0, BCP: 0, EFECTIVO: 0, TOTAL: 0 }
   );
   const totalBancos = (totals?.BCP ?? 0) + (totals?.BBVA ?? 0);
+
+  const filteredRows = previewRows?.filter(r => showFullEfectivo || (r.BBVA || 0) > 0 || (r.BCP || 0) > 0) || [];
+  const visibleTotals = filteredRows.reduce(
+    (acc, r) => ({ BBVA: acc.BBVA + r.BBVA, BCP: acc.BCP + r.BCP, EFECTIVO: acc.EFECTIVO + r.EFECTIVO, TOTAL: acc.TOTAL + r.TOTAL }),
+    { BBVA: 0, BCP: 0, EFECTIVO: 0, TOTAL: 0 }
+  );
 
   const spinnerOff = '[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none';
   const inlineCellCls = 'h-7 px-1.5 border-2 border-transparent hover:border-indigo-200 focus:border-indigo-500 rounded bg-transparent focus:bg-white text-xs font-bold w-full focus:outline-none transition-colors';
@@ -453,129 +507,23 @@ export default function ContabilidadPage() {
 
           {/* Preview Table */}
           {previewRows && !error && (
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-              <div className="px-5 py-3 border-b border-gray-200 bg-gray-50/80 flex items-center justify-between">
-                <div>
-                  <h2 className="text-sm font-bold text-gray-900">Vista previa de ventas</h2>
-                  <p className="text-xs text-gray-400 mt-0.5">Clic en cualquier celda para editar · Enter o Tab para guardar</p>
-                </div>
-                <button
-                  onClick={toggleFullscreen}
-                  title={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
-                  className="flex items-center gap-2 px-3 py-1.5 text-xs font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-                >
-                  {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
-                  {isFullscreen ? 'Salir' : 'Pantalla Completa'}
-                </button>
-              </div>
-
-              <div ref={tableWrapperRef} className={`overflow-x-auto ${isFullscreen ? 'bg-white p-4 overflow-y-auto' : ''}`}>
-                <table className="min-w-max w-full text-xs">
-                  <thead className="bg-[#FACC15] border-b border-gray-300 text-gray-800">
-                    <tr>
-                      {['FECHA', 'DOCUMENTO', 'NOMBRE Y (O) RAZON', 'DETALLE', 'BBVA', 'BCP', 'EFECTIVO', 'TOTAL'].map(col => {
-                        const isNum = ['BBVA', 'BCP', 'EFECTIVO', 'TOTAL'].includes(col);
-                        return (
-                          <th key={col} className={`px-4 py-2.5 font-extrabold whitespace-nowrap uppercase tracking-wider ${isNum ? 'text-right' : 'text-left'}`}>{col}</th>
-                        )
-                      })}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {previewRows.map((row, index) => (
-                      <tr key={index} className="hover:bg-indigo-50/30 transition-colors font-bold text-gray-800">
-
-                        {/* FECHA — display as DD-MM-YYYY */}
-                        <td className="px-4 py-1.5 whitespace-nowrap font-mono text-gray-600">{displayDate(row.FECHA)}</td>
-
-                        {/* DOCUMENTO — unified inline edit (no buttons) */}
-                        <td className="px-2 py-1 whitespace-nowrap min-w-[140px]">
-                          <input
-                            type="text"
-                            value={getCellDraft(row.id, 'DOCUMENTO', row.DOCUMENTO)}
-                            onChange={e => setCellDraft(row.id, 'DOCUMENTO', e.target.value)}
-                            onBlur={() => handleSaveCell(row.id, 'DOCUMENTO')}
-                            onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') clearCellDraft(row.id, 'DOCUMENTO'); }}
-                            className={`${inlineCellCls} font-mono`}
-                          />
-                        </td>
-
-                        {/* NOMBRE Y (O) RAZON — with datalist */}
-                        <td className="px-2 py-1 whitespace-nowrap min-w-[180px]">
-                          <input
-                            type="text"
-                            list="clientes-list"
-                            value={getCellDraft(row.id, 'NOMBRE Y (O) RAZON', row['NOMBRE Y (O) RAZON'])}
-                            onChange={e => setCellDraft(row.id, 'NOMBRE Y (O) RAZON', e.target.value)}
-                            onBlur={() => handleSaveCell(row.id, 'NOMBRE Y (O) RAZON')}
-                            onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                            className={inlineCellCls}
-                          />
-                        </td>
-
-                        {/* DETALLE — bank label badge */}
-                        <td className="px-4 py-1.5 whitespace-nowrap">
-                          <span className={`text-xs font-extrabold px-2 py-0.5 rounded-md ${
-                            row.DETALLE === 'BBVA' ? 'bg-blue-100 text-blue-700'
-                            : row.DETALLE === 'BCP' ? 'bg-orange-100 text-orange-700'
-                            : row.DETALLE === 'BBVA / BCP' ? 'bg-purple-100 text-purple-700'
-                            : 'text-gray-400'
-                          }`}>{row.DETALLE}</span>
-                        </td>
-
-                        {/* BBVA */}
-                        <td className="px-2 py-1 whitespace-nowrap min-w-[100px]">
-                          <input type="number" step="0.01" placeholder="0.00"
-                            value={getCellDraft(row.id, 'BBVA', row.BBVA === 0 ? '' : String(row.BBVA))}
-                            onChange={e => setCellDraft(row.id, 'BBVA', e.target.value)}
-                            onBlur={() => handleSaveCell(row.id, 'BBVA')}
-                            onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                            className={`${inlineCellCls} text-right text-blue-700 ${spinnerOff}`}
-                          />
-                        </td>
-
-                        {/* BCP */}
-                        <td className="px-2 py-1 whitespace-nowrap min-w-[100px]">
-                          <input type="number" step="0.01" placeholder="0.00"
-                            value={getCellDraft(row.id, 'BCP', row.BCP === 0 ? '' : String(row.BCP))}
-                            onChange={e => setCellDraft(row.id, 'BCP', e.target.value)}
-                            onBlur={() => handleSaveCell(row.id, 'BCP')}
-                            onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                            className={`${inlineCellCls} text-right text-red-600 ${spinnerOff}`}
-                          />
-                        </td>
-
-                        {/* EFECTIVO */}
-                        <td className="px-2 py-1 whitespace-nowrap min-w-[100px]">
-                          <input type="number" step="0.01" placeholder="0.00"
-                            value={getCellDraft(row.id, 'EFECTIVO', row.EFECTIVO === 0 ? '' : String(row.EFECTIVO))}
-                            onChange={e => setCellDraft(row.id, 'EFECTIVO', e.target.value)}
-                            onBlur={() => handleSaveCell(row.id, 'EFECTIVO')}
-                            onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                            className={`${inlineCellCls} text-right text-fuchsia-600 ${spinnerOff}`}
-                          />
-                        </td>
-
-                        {/* TOTAL — read-only, green */}
-                        <td className="px-4 py-1.5 font-extrabold text-emerald-700 whitespace-nowrap text-right">{fmt(row.TOTAL)}</td>
-                      </tr>
-                    ))}
-
-                    {/* Totals row */}
-                    <tr className="bg-[#40E0D0] font-extrabold text-gray-950 border-t-2 border-gray-300 text-xs">
-                      <td colSpan={4} className="px-4 py-3 whitespace-nowrap text-right">TOTAL GENERAL</td>
-                      <td className="px-4 py-3 text-blue-800 whitespace-nowrap text-right">{fmt(totals?.BBVA || 0)}</td>
-                      <td className="px-4 py-3 text-red-700 whitespace-nowrap text-right">{fmt(totals?.BCP || 0)}</td>
-                      <td className="px-4 py-3 text-fuchsia-700 whitespace-nowrap text-right">{fmt(totals?.EFECTIVO || 0)}</td>
-                      <td className="px-4 py-3 text-xl text-emerald-800 whitespace-nowrap text-right">{fmt(totals?.TOTAL || 0)}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            <ContabilidadTable
+              filteredRows={filteredRows}
+              handleSaveRow={handleSaveRow}
+              isEditingRef={isEditingRef}
+              displayDate={displayDate}
+              inlineCellCls={inlineCellCls}
+              showToast={showToast}
+              showFullEfectivo={showFullEfectivo}
+              setShowFullEfectivo={setShowFullEfectivo}
+              toggleFullscreen={toggleFullscreen}
+              isFullscreen={isFullscreen}
+              tableWrapperRef={tableWrapperRef}
+            />
           )}
         </div>
       </main>
+      {toast && <Toast message={toast.message} type={toast.type} />}
     </div>
   );
 }

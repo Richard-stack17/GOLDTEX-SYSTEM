@@ -21,7 +21,7 @@ import {
   DialogHeader,
   DialogTitle
 } from "@goltex/ui";
-import { ArrowLeft, Search, Download, Filter, Plus, Edit2, Trash2, Save, FolderPlus } from "lucide-react";
+import { ArrowLeft, Search, Download, Filter, Plus, Edit2, Trash2, Save, FolderPlus, PackageSearch } from "lucide-react";
 import { supabase } from "../lib/supabase";
 
 type Product = {
@@ -285,7 +285,10 @@ export default function InventarioPage() {
             </Link>
           </Button>
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">Catálogo e Inventario</h1>
+            <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
+              <PackageSearch className="w-8 h-8 text-indigo-600" />
+              Catálogo e Inventario
+            </h1>
             <p className="text-muted-foreground">Mantenimiento de telas y categorías de la tienda</p>
           </div>
         </div>

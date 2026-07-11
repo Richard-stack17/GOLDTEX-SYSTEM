@@ -3,17 +3,19 @@
 import React, { useState, useEffect } from 'react';
 import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@goltex/ui";
-import { ShoppingCart, PackageSearch, BarChart3, Clock, FileSpreadsheet, Banknote, UserCircle, Sun, Moon, Contact } from "lucide-react";
-import { useRole, type Role } from "../context/RoleContext";
+import { ShoppingCart, PackageSearch, BarChart3, Clock, FileSpreadsheet, Banknote, UserCircle, Sun, Moon, Contact, Users, ScrollText, Settings } from "lucide-react";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { useRole } from "../context/RoleContext";
 import { useTheme } from "../context/ThemeContext";
 import { useRouter } from "next/navigation";
 
 
 export default function HubPage() {
   const [isMounted, setIsMounted] = useState(false);
-  const { role, setRole, isHydrated } = useRole();
+  const { role, username, isHydrated, clearSession } = useRole();
   const { theme, toggleTheme } = useTheme();
   const router = useRouter();
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   useEffect(() => {
     setIsMounted(true);
@@ -34,7 +36,7 @@ export default function HubPage() {
     <div className="min-h-screen p-8 max-w-[1400px] mx-auto space-y-12">
       <header className="flex justify-between items-end border-b border-white/10 pb-6">
         <div>
-          <h1 className="text-4xl font-bold tracking-tight mb-2">Hola, {role === 'CAJERA' ? 'Yuriko' : role === 'VENDEDOR' ? 'Vendedor' : 'Admin'} 👋</h1>
+          <h1 className="text-4xl font-bold tracking-tight mb-2">Hola, {username || (role === 'CAJERA' ? 'Cajera' : role === 'MOSTRADOR' ? 'Mostrador' : 'Admin')} 👋</h1>
           <p className="text-muted-foreground text-lg">¿Qué deseas hacer hoy?</p>
         </div>
         <div className="flex flex-col items-end gap-3">
@@ -52,24 +54,19 @@ export default function HubPage() {
               {theme === 'dark' ? <Sun className="w-5 h-5 text-yellow-400" /> : <Moon className="w-5 h-5 text-indigo-400" />}
             </button>
           </div>
-          <div className="flex items-center gap-2 bg-secondary/30 px-3 py-1.5 rounded-xl border border-border">
+          <button
+            onClick={() => setShowLogoutConfirm(true)}
+            className="flex items-center gap-2 bg-secondary/30 px-3 py-1.5 rounded-xl border border-border text-sm font-semibold text-foreground hover:bg-secondary transition-colors"
+          >
             <UserCircle className="w-5 h-5 text-muted-foreground" />
-            <select
-              value={role}
-              onChange={(e) => setRole(e.target.value as Role)}
-              className="bg-transparent text-foreground font-bold outline-none cursor-pointer"
-            >
-              <option value="ADMIN">ADMIN (Dueño)</option>
-              <option value="CAJERA">CAJERA (Yuriko)</option>
-              <option value="VENDEDOR">VENDEDOR (Mostrador)</option>
-            </select>
-          </div>
+            Cerrar Sesión
+          </button>
         </div>
       </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
-        {/* POS - Acceso: ADMIN, VENDEDOR */}
-        {(role === 'ADMIN' || role === 'VENDEDOR') ? (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-6 gap-6">
+        {/* POS - Acceso: ADMIN, MOSTRADOR */}
+        {(role === 'ADMIN' || role === 'MOSTRADOR') ? (
           <Link href="/pos" className="block group">
             <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-blue-500/50 hover:shadow-[0_0_30px_rgba(59,130,246,0.2)]">
               <CardHeader>
@@ -91,7 +88,7 @@ export default function HubPage() {
               </div>
               <CardTitle className="text-2xl text-gray-400">Punto 1</CardTitle>
               <CardDescription className="text-base mt-2 text-gray-500">
-                Acceso denegado (Requiere ADMIN o VENDEDOR).
+                Acceso denegado (Requiere ADMIN o MOSTRADOR).
               </CardDescription>
             </CardHeader>
           </Card>
@@ -186,7 +183,7 @@ export default function HubPage() {
 
         {/* Contabilidad - Acceso: ADMIN, CAJERA */}
         {(role === 'ADMIN' || role === 'CAJERA') ? (
-          <button onClick={() => router.push('/contabilidad')} className="block group text-left w-full">
+          <Link href="/contabilidad" className="block group w-full">
             <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-amber-500/50 hover:shadow-[0_0_30px_rgba(245,158,11,0.2)] cursor-pointer">
               <CardHeader>
                 <div className="w-14 h-14 rounded-xl bg-amber-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
@@ -198,7 +195,7 @@ export default function HubPage() {
                 </CardDescription>
               </CardHeader>
             </Card>
-          </button>
+          </Link>
         ) : (
           <Card className="h-full bg-glass/50 border-white/5 opacity-50 cursor-not-allowed">
             <CardHeader>
@@ -215,7 +212,7 @@ export default function HubPage() {
 
         {/* Clientes Frecuentes - Acceso: ADMIN, CAJERA */}
         {(role === 'ADMIN' || role === 'CAJERA') ? (
-          <button onClick={() => router.push('/clientes')} className="block group text-left w-full">
+          <Link href="/clientes" className="block group w-full">
             <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-pink-500/50 hover:shadow-[0_0_30px_rgba(236,72,153,0.2)] cursor-pointer">
               <CardHeader>
                 <div className="w-14 h-14 rounded-xl bg-pink-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
@@ -227,7 +224,7 @@ export default function HubPage() {
                 </CardDescription>
               </CardHeader>
             </Card>
-          </button>
+          </Link>
         ) : (
           <Card className="h-full bg-glass/50 border-white/5 opacity-50 cursor-not-allowed">
             <CardHeader>
@@ -241,7 +238,95 @@ export default function HubPage() {
             </CardHeader>
           </Card>
         )}
+
+        {/* Personal - Acceso: ADMIN only */}
+        {role === 'ADMIN' ? (
+          <Link href="/admin/personal" className="block group">
+            <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-indigo-500/50 hover:shadow-[0_0_30px_rgba(99,102,241,0.2)]">
+              <CardHeader>
+                <div className="w-14 h-14 rounded-xl bg-indigo-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                  <Users className="w-7 h-7 text-indigo-400" />
+                </div>
+                <CardTitle className="text-2xl">Personal</CardTitle>
+                <CardDescription className="text-base mt-2">
+                  Gestión de empleados, control de accesos y roles del sistema.
+                </CardDescription>
+              </CardHeader>
+            </Card>
+          </Link>
+        ) : (
+          <Card className="h-full bg-glass/50 border-white/5 opacity-50 cursor-not-allowed">
+            <CardHeader>
+              <div className="w-14 h-14 rounded-xl bg-gray-500/20 flex items-center justify-center mb-4">
+                <Users className="w-7 h-7 text-gray-500" />
+              </div>
+              <CardTitle className="text-2xl text-gray-400">Personal</CardTitle>
+              <CardDescription className="text-base mt-2 text-gray-500">
+                Acceso denegado (Requiere ADMIN).
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        )}
+
+        {/* Historial de Proformas - Acceso: ADMIN only */}
+        {role === 'ADMIN' ? (
+          <Link href="/historial-proformas" className="block group">
+            <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-teal-500/50 hover:shadow-[0_0_30px_rgba(20,184,166,0.2)]">
+              <CardHeader>
+                <div className="w-14 h-14 rounded-xl bg-teal-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                  <ScrollText className="w-7 h-7 text-teal-400" />
+                </div>
+                <CardTitle className="text-2xl">Historial</CardTitle>
+                <CardDescription className="text-base mt-2">
+                  Historial completo de proformas, detalles de ítems y anulación.
+                </CardDescription>
+              </CardHeader>
+            </Card>
+          </Link>
+        ) : (
+          <Card className="h-full bg-glass/50 border-white/5 opacity-50 cursor-not-allowed">
+            <CardHeader>
+              <div className="w-14 h-14 rounded-xl bg-gray-500/20 flex items-center justify-center mb-4">
+                <ScrollText className="w-7 h-7 text-gray-500" />
+              </div>
+              <CardTitle className="text-2xl text-gray-400">Historial</CardTitle>
+              <CardDescription className="text-base mt-2 text-gray-500">
+                Acceso denegado (Requiere ADMIN).
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        )}
+
+        {/* Configuración - Acceso: ADMIN only */}
+        {role === 'ADMIN' && (
+          <Link href="/configuracion" className="block group">
+            <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-emerald-500/50 hover:shadow-[0_0_30px_rgba(16,185,129,0.2)]">
+              <CardHeader>
+                <div className="w-14 h-14 rounded-xl bg-emerald-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                  <Settings className="w-7 h-7 text-emerald-400" />
+                </div>
+                <CardTitle className="text-2xl">Configuración</CardTitle>
+                <CardDescription className="text-base mt-2">
+                  Gestión de impresoras, hardware y ajustes generales del sistema.
+                </CardDescription>
+              </CardHeader>
+            </Card>
+          </Link>
+        )}
       </div>
+
+      <ConfirmDialog
+        isOpen={showLogoutConfirm}
+        onCancel={() => setShowLogoutConfirm(false)}
+        onConfirm={() => {
+          clearSession();
+          router.push('/login');
+        }}
+        title="Cerrar Sesión"
+        description="¿Estás seguro de que deseas salir de tu cuenta?"
+        confirmText="Sí, salir"
+        isDestructive={true}
+      />
     </div>
   );
 }

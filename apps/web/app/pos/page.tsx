@@ -10,7 +10,7 @@ import { products, families, type Product, type Family } from "@goltex/ui/mock-d
 import {
   Search, ArrowLeft, Trash2, Printer,
   Delete, ShoppingCart, XCircle, RefreshCw,
-  Clock, CheckCircle2, Sun, Moon
+  Clock, CheckCircle2, Sun, Moon, Scissors, Car
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import {
@@ -21,8 +21,17 @@ import {
 } from "../lib/ticket-sequence";
 import { useRole } from "../context/RoleContext";
 import { useTheme } from "../context/ThemeContext";
+import { hasModuleAccess } from "../lib/permissions";
 
 type CartItem = Product & { quantity: number; editedPrice: number };
+// Tipo para items de servicio (no son telas, no extienden Product completo)
+type ServiceCartItem = {
+  id: string; code: string; name: string; price: number;
+  editedPrice: number; quantity: number; familyId: string;
+  stock?: number; description?: string; category?: string; color?: string;
+};
+// IDs de servicios reservados (no son telas, no tienen MTS)
+const SERVICE_IDS = ["confeccion-item", "taxi-item"] as const;
 type SaleStatus = "PENDING" | "COMPLETED" | "CANCELLED";
 type VoucherType = "TICKET" | "BOLETA" | "FACTURA";
 
@@ -36,18 +45,26 @@ type HistoryTicket = {
   created_at: string;
   voucher_type?: VoucherType | null;
   voucher_doc_number?: string | null;
+  source_sheet?: string | null;
+  transactions?: { payment_method: string; amount: number; surcharge_amount?: number }[];
 };
 
 export default function POSPage() {
   const { role, username, isHydrated } = useRole();
   const { theme, toggleTheme } = useTheme();
   const router = useRouter();
+  const [hasPosAccess, setHasPosAccess] = useState(false);
 
-  // ── Redirect if wrong role ──
   useEffect(() => {
-    if (isHydrated && role === 'CAJERA') {
-      router.push('/hub');
-    }
+    const checkAccess = async () => {
+      if (!isHydrated) return;
+      const allowed = await hasModuleAccess(role, 'pos');
+      setHasPosAccess(allowed);
+      if (!allowed) {
+        router.push('/hub');
+      }
+    };
+    checkAccess();
   }, [isHydrated, role, router]);
 
   // ── Cart ──
@@ -55,18 +72,72 @@ export default function POSPage() {
   const [ticketNumber, setTicketNumber] = useState<number>(1);
   const [isEmitting, setIsEmitting] = useState(false);
   const [lastSaleInfo, setLastSaleInfo] = useState<{
-    ticketNum: number | null; docNum: string; items: CartItem[]; total: number; izipayFee?: number;
+    ticketNum: number | null; docNum: string; items: any[]; total: number; izipayFee?: number;
   } | null>(null);
+
+  // ── Caja Actions ──
+  const [closingCajaLoading, setClosingCajaLoading] = useState(false);
+  const [cajaSummaryOpen, setCajaSummaryOpen] = useState(false);
+  const [cajaSummary, setCajaSummary] = useState<{ efectivo: number; bcp: number; bbva: number; izipay: number; total: number } | null>(null);
+
+  const handleCloseCajaAttempt = async () => {
+    setClosingCajaLoading(true);
+    setCajaSummaryOpen(true);
+    
+    try {
+      const now = new Date();
+      const formatter = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima", year: "numeric", month: "2-digit", day: "2-digit" });
+      const todayStr = formatter.format(now);
+      
+      const { data, error } = await supabase
+        .from('sales')
+        .select('transactions(payment_method, amount)')
+        .eq('record_date', todayStr)
+        .eq('status', 'COMPLETED');
+        
+      if (error) throw error;
+      
+      let efe = 0, bcp = 0, bbva = 0, izi = 0;
+      data?.forEach(sale => {
+        sale.transactions?.forEach((tx: any) => {
+          if (tx.payment_method === 'EFECTIVO') efe += tx.amount;
+          else if (tx.payment_method === 'BCP') bcp += tx.amount;
+          else if (tx.payment_method === 'BBVA') bbva += tx.amount;
+          else if (tx.payment_method === 'IZIPAY') izi += tx.amount;
+        });
+      });
+      
+      setCajaSummary({ efectivo: efe, bcp: bcp, bbva: bbva, izipay: izi, total: efe + bcp + bbva + izi });
+    } catch (e: any) {
+      alert("Error al obtener resumen: " + e.message);
+      setCajaSummaryOpen(false);
+    } finally {
+      setClosingCajaLoading(false);
+    }
+  };
+
+  const confirmCloseCaja = () => {
+    setIsCajaOpen(false);
+    localStorage.setItem("isCajaOpen", "false");
+    setCajaSummaryOpen(false);
+  };
 
   // ── Vendedor History ──
   const [rightPanelMode, setRightPanelMode] = useState<"cart" | "history">("cart");
   const [historyTickets, setHistoryTickets] = useState<HistoryTicket[]>([]);
 
-  // ── Numpad ──
+  // ── Numpad (productos de tela) ──
   const [numpadProduct, setNumpadProduct] = useState<Product | null>(null);
   const [numpadField, setNumpadField] = useState<"qty" | "price">("qty");
   const [numpadQty, setNumpadQty] = useState<string>("");
   const [numpadPrice, setNumpadPrice] = useState<string>("");
+
+  // ── Modales de Servicios (Confección y Taxi) ──
+  // Ambos usan un numpad simple solo para el precio (sin MTS)
+  const [confeccionModalOpen, setConfeccionModalOpen] = useState(false);
+  const [confeccionPrice, setConfeccionPrice] = useState("");
+  const [taxiModalOpen, setTaxiModalOpen] = useState(false);
+  const [taxiPrice, setTaxiPrice] = useState("");
 
   // ── Catalog ──
   const [search, setSearch] = useState("");
@@ -97,6 +168,108 @@ export default function POSPage() {
     } else {
       setExitGuardOpen(true);
     }
+  };
+
+  const [isCajaOpen, setIsCajaOpen] = useState(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("isCajaOpen");
+      return saved !== "false";
+    }
+    return true;
+  });
+
+  // ── Handlers de Servicios ──────────────────────────────────────────
+
+  /** Abre el modal de precio para Confección */
+  const handleOpenConfeccion = () => {
+    const exists = cart.find((i) => i.id === "confeccion-item");
+    if (exists) {
+      // Si ya existe, permite editar el precio abriendo el modal con el precio actual
+      setConfeccionPrice(String(exists.editedPrice));
+    } else {
+      setConfeccionPrice("");
+    }
+    setConfeccionModalOpen(true);
+  };
+
+  /** Confirma y agrega/actualiza el ítem Confección en el carrito */
+  const handleConfirmConfeccion = () => {
+    const precio = parseFloat(confeccionPrice);
+    if (isNaN(precio) || precio <= 0) return;
+    const item: ServiceCartItem = {
+      id: "confeccion-item",
+      code: "CONFECCION",
+      name: "COSTO POR CONFECCIÓN",
+      price: 0,
+      editedPrice: precio,
+      quantity: 1,
+      familyId: "",
+    };
+    setCart((prev) => {
+      // Regla: máximo 1 fila de Confección por ticket
+      const filtered = prev.filter((i) => i.id !== "confeccion-item");
+      return [...filtered, item as unknown as CartItem];
+    });
+    setConfeccionModalOpen(false);
+    setConfeccionPrice("");
+  };
+
+  /** Abre el modal de precio para Taxi */
+  const handleOpenTaxi = () => {
+    const exists = cart.find((i) => i.id === "taxi-item");
+    if (exists) {
+      setTaxiPrice(String(exists.editedPrice));
+    } else {
+      setTaxiPrice("");
+    }
+    setTaxiModalOpen(true);
+  };
+
+  /** Confirma y agrega/actualiza el ítem Taxi en el carrito */
+  const handleConfirmTaxi = () => {
+    const precio = parseFloat(taxiPrice);
+    if (isNaN(precio) || precio <= 0) return;
+    const item: ServiceCartItem = {
+      id: "taxi-item",
+      code: "TAXI",
+      name: "COSTO POR TAXI",
+      price: 0,
+      editedPrice: precio,
+      quantity: 1,
+      familyId: "",
+    };
+    setCart((prev) => {
+      // Regla: máximo 1 fila de Taxi por ticket
+      const filtered = prev.filter((i) => i.id !== "taxi-item");
+      return [...filtered, item as unknown as CartItem];
+    });
+    setTaxiModalOpen(false);
+    setTaxiPrice("");
+  };
+
+  /**
+   * Numpad handler para modales de servicios (Confección / Taxi).
+   * Solo precio, sin decimales múltiples.
+   */
+  const handleServiceNumpadKey = (
+    key: string,
+    value: string,
+    setter: React.Dispatch<React.SetStateAction<string>>,
+  ) => {
+    setter((prev) => {
+      if (key === "DEL") return prev.slice(0, -1);
+      if (key === ".") {
+        if (prev.includes(".")) return prev; // Solo un punto decimal
+        return prev === "" ? "0." : prev + ".";
+      }
+      if (prev === "0" && key !== ".") return key;
+      if (prev.includes(".")) {
+        const [, decs] = prev.split(".");
+        if (decs && decs.length >= 2) return prev; // Máximo 2 decimales
+      }
+      if (prev.replace(".", "").length >= 7) return prev; // Máximo 7 dígitos
+      return prev + key;
+    });
   };
 
   const handleExitWithoutSaving = () => {
@@ -221,6 +394,10 @@ export default function POSPage() {
 
   // ── Emit Ticket (PENDING — mostrador, no cobro) ──
   const handleEmitTicket = async () => {
+    if (!isCajaOpen) {
+      alert("Caja Cerrada. Debe realizar la apertura de caja para emitir tickets.");
+      return;
+    }
     if (cart.length === 0) return;
     setIsEmitting(true);
     try {
@@ -248,6 +425,18 @@ export default function POSPage() {
       const nextInternalNum = computeNextDailyTicketNumber(todayTickets ?? []);
       const docNum = `TKT-${todayStr.replace(/-/g, "")}-${String(nextInternalNum).padStart(4, "0")}`;
 
+      /**
+       * Formatea el detalle de cada ítem según su tipo:
+       * - Telas: "CODE NOMBRE — Xm × S/ Y.YY"
+       * - Confección/Taxi (servicios sin MTS): "CODE: NOMBRE — S/ Y.YY"
+       */
+      const formatItemDetail = (i: CartItem): string => {
+        if (SERVICE_IDS.includes(i.id as any)) {
+          return `${i.code}: ${i.name} — S/ ${i.editedPrice.toFixed(2)}`;
+        }
+        return `${i.code} ${i.name} — ${i.quantity}m × S/ ${i.editedPrice.toFixed(2)}`;
+      };
+
       const { error: saleError } = await supabase.from("sales").insert({
         customer_id: customerId,
         document_number: docNum,
@@ -255,7 +444,8 @@ export default function POSPage() {
         document_type: "TICKET",
         issue_date: todayStr,
         record_date: todayStr,
-        detail: cart.map(i => `${i.code} ${i.name} — ${i.quantity}m × S/ ${i.editedPrice.toFixed(2)}`).join('\n'),
+        detail: cart.map(formatItemDetail).join('\n'),
+        items: cart,
         total: total,
         source_sheet: `VENDEDOR:${username || "Propietario"}`,
         source_type: "POS",
@@ -282,9 +472,10 @@ export default function POSPage() {
   };
 
   const handleReprint = (ticket: HistoryTicket) => {
-    // Reconstruct items from detail text
+    // Tela format:    "CODE NAME — Xm × S/ Y.YY"
+    // Service format: "CODE: NAME — S/ Y.YY"
     const lines = ticket.detail.split('\n');
-    const reconstructedItems: CartItem[] = lines.map((l: string, idx: number) => {
+    const reconstructedItems: any[] = lines.map((l: string, idx: number) => {
       let code = "";
       let name = l;
       let quantity = 1;
@@ -292,47 +483,44 @@ export default function POSPage() {
       let basePrice = 0;
 
       try {
-        const parts = l.split(' — ');
-        if (parts.length === 2) {
-          const firstSpaceIdx = parts[0].indexOf(' ');
-          code = firstSpaceIdx > -1 ? parts[0].substring(0, firstSpaceIdx) : '';
-          name = firstSpaceIdx > -1 ? parts[0].substring(firstSpaceIdx + 1) : parts[0];
+        const sepIdx = l.indexOf(' — ');
+        if (sepIdx !== -1) {
+          const firstPart = l.substring(0, sepIdx);
+          const secondPart = l.substring(sepIdx + 3);
 
-          // Try to find the base price from the products list
-          const matchedProd = products.find(p => p.code === code);
-          if (matchedProd) {
-            basePrice = matchedProd.price;
-          }
-
-          const subParts = parts[1].split('m × S/ ');
-          if (subParts.length === 2) {
-            quantity = parseFloat(subParts[0]) || 0;
-            editedPrice = parseFloat(subParts[1]) || 0;
+          if (firstPart.includes(': ')) {
+            // Service item: "CODE: NAME — S/ Y.YY"
+            const colonIdx = firstPart.indexOf(': ');
+            code = firstPart.substring(0, colonIdx);
+            name = firstPart.substring(colonIdx + 2);
+            const priceMatch = secondPart.match(/S\/\s*([\d.]+)/);
+            editedPrice = priceMatch ? (parseFloat(priceMatch[1] ?? '0') || 0) : 0;
+            quantity = 1;
+          } else {
+            // Tela item: "CODE NAME — Xm × S/ Y.YY"
+            const spaceIdx = firstPart.indexOf(' ');
+            code = spaceIdx > -1 ? firstPart.substring(0, spaceIdx) : '';
+            name = spaceIdx > -1 ? firstPart.substring(spaceIdx + 1) : firstPart;
+            const matchedProd = products.find(p => p.code === code);
+            if (matchedProd) basePrice = matchedProd.price;
+            const mxIdx = secondPart.indexOf('m × S/ ');
+            if (mxIdx !== -1) {
+              quantity = parseFloat(secondPart.substring(0, mxIdx)) || 0;
+              editedPrice = parseFloat(secondPart.substring(mxIdx + 8)) || 0;
+            }
           }
         }
       } catch (e) {
         console.error("Error parsing detail line", e);
       }
 
-      // Fallback basePrice to editedPrice if not found
-      if (basePrice === 0) {
-        basePrice = editedPrice;
-      }
-
-      return {
-        id: String(idx),
-        code,
-        name,
-        price: basePrice,
-        editedPrice: editedPrice,
-        quantity,
-        familyId: ""
-      };
+      if (basePrice === 0) basePrice = editedPrice;
+      return { id: String(idx), code, name, price: basePrice, editedPrice, quantity, familyId: "" };
     });
 
-    const txs = (ticket as any).transactions || [];
-    const izipayTx = txs.find((t: any) => t.payment_method === "IZIPAY");
-    const izipayFeeAmt = izipayTx ? izipayTx.surcharge_amount || 0 : 0;
+    const txs = ticket.transactions ?? [];
+    const izipayTx = txs.find((t) => t.payment_method === "IZIPAY");
+    const izipayFeeAmt = izipayTx ? (izipayTx.surcharge_amount ?? 0) : 0;
 
     setLastSaleInfo({
       ticketNum: parseInternalTicketNum(ticket),
@@ -344,10 +532,11 @@ export default function POSPage() {
     setTimeout(() => window.print(), 120);
   };
 
-  if (!isHydrated || role === 'CAJERA') return null;
+
+  if (!isHydrated || !hasPosAccess) return null;
 
   return (
-    <div className="flex h-screen bg-background">
+    <div className="flex flex-col lg:flex-row h-[100dvh] bg-background text-foreground overflow-hidden">
 
       {/* ════════════════════════════════════════
           LEFT PANEL — Catálogo de Telas
@@ -375,6 +564,33 @@ export default function POSPage() {
 
             {/* Theme toggle + ticket badge */}
             <div className="flex items-center gap-3">
+              {role === 'ADMIN' && (
+                <>
+                  <button
+                    onClick={() => {
+                      setIsCajaOpen(true);
+                      localStorage.setItem("isCajaOpen", "true");
+                    }}
+                    className={`px-4 h-12 rounded-2xl text-xs font-black uppercase transition-all ${
+                      isCajaOpen 
+                        ? "bg-emerald-600/10 text-emerald-600 border border-emerald-500/30" 
+                        : "bg-secondary text-muted-foreground hover:bg-emerald-500/10 hover:text-emerald-500 border border-border"
+                    }`}
+                  >
+                    Apertura de Caja
+                  </button>
+                  <button
+                    onClick={handleCloseCajaAttempt}
+                    className={`px-4 h-12 rounded-2xl text-xs font-black uppercase transition-all ${
+                      !isCajaOpen 
+                        ? "bg-red-600/10 text-red-600 border border-red-500/30" 
+                        : "bg-secondary text-muted-foreground hover:bg-red-500/10 hover:text-red-500 border border-border"
+                    }`}
+                  >
+                    Cerrar Caja
+                  </button>
+                </>
+              )}
               <button
                 onClick={toggleTheme}
                 title={theme === 'dark' ? 'Modo Claro' : 'Modo Oscuro'}
@@ -424,7 +640,8 @@ export default function POSPage() {
         </div>
 
         {/* Catalog Grid */}
-        <div className="flex-1 overflow-auto bg-secondary/10 flex flex-col">
+        <div className={`flex-1 overflow-auto bg-secondary/10 flex ${numpadProduct ? "flex-col lg:grid lg:grid-cols-2" : "flex-col"}`}>
+          <div className={`flex flex-col h-full overflow-auto ${numpadProduct ? "hidden lg:flex border-r border-border" : ""}`}>
           {!activeFamily && !search ? (
             <div className="p-6">
               <h2 className="text-sm font-bold text-muted-foreground uppercase tracking-wider mb-4">Familias de Tela</h2>
@@ -513,11 +730,79 @@ export default function POSPage() {
           )}
         </div>
       </div>
+      {numpadProduct && (
+        <div className="flex flex-col justify-center items-center p-4 bg-background h-full overflow-auto">
+          <div className="w-full max-w-[540px] bg-card rounded-3xl border-2 border-border/50 flex flex-col animate-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="p-4 border-b border-border bg-surface text-center shrink-0">
+              <div className="flex items-center justify-center gap-3">
+                <span className="font-mono text-base font-black text-muted-foreground bg-secondary px-3 py-1 rounded-lg">{numpadProduct.code}</span>
+                <h3 className="text-lg font-black uppercase text-primary">{numpadProduct.name}</h3>
+              </div>
+            </div>
+
+            {/* Campos Precio Fijo / Variable y Cantidad */}
+            <div className="px-4 pt-3 pb-2 bg-secondary/10 border-b border-border flex flex-col gap-2">
+              <div className="flex gap-3">
+                <div className="flex-1 bg-background rounded-xl border-2 border-border p-2.5 text-center opacity-60">
+                  <div className="text-[10px] font-bold text-muted-foreground uppercase mb-0.5">Precio Fijo</div>
+                  <div className="text-xl font-bold">S/ {numpadProduct.price.toFixed(2)}</div>
+                </div>
+                <div className={`flex-1 rounded-xl border-2 p-2.5 text-center cursor-pointer transition-all ${numpadField === "price" ? "border-primary bg-primary/10" : "border-border bg-background"}`}
+                  onClick={() => setNumpadField("price")}>
+                  <div className={`text-[10px] font-bold uppercase mb-0.5 ${numpadField === "price" ? "text-primary" : "text-muted-foreground"}`}>Precio Variable</div>
+                  <div className={`text-xl font-bold ${numpadField === "price" ? "text-primary" : "text-foreground"}`}>S/ {numpadPrice || "0.00"}</div>
+                </div>
+              </div>
+              <div className={`w-full rounded-xl border-2 p-2.5 text-center cursor-pointer transition-all flex items-center justify-center gap-3 ${numpadField === "qty" ? "border-emerald-500 bg-emerald-500/10" : "border-border bg-background"}`}
+                onClick={() => setNumpadField("qty")}>
+                <div className={`text-xs font-bold uppercase ${numpadField === "qty" ? "text-emerald-600" : "text-muted-foreground"}`}>Cantidad:</div>
+                <div className={`text-4xl font-black font-mono tracking-tighter ${numpadField === "qty" ? "text-emerald-500" : "text-foreground"}`}>{numpadQty || "0"}</div>
+                <div className={`text-base font-bold uppercase ${numpadField === "qty" ? "text-emerald-600" : "text-muted-foreground"}`}>mts</div>
+              </div>
+            </div>
+
+            {/* Teclado numérico — botones más pequeños para tablet */}
+            <div className="px-4 pt-3 pb-2 grid grid-cols-3 gap-1.5 bg-card">
+              {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((num) => (
+                <button key={num} onClick={() => handleNumpadKey(num)}
+                  className="h-10 text-2xl font-black rounded-xl bg-secondary/50 border-2 border-transparent hover:border-primary active:bg-primary active:text-white transition-colors touch-manipulation">
+                  {num}
+                </button>
+              ))}
+              <button onClick={() => numpadField === "price" && handleNumpadKey(".")}
+                className={`h-10 text-2xl font-black rounded-xl border-2 border-transparent transition-colors touch-manipulation ${numpadField === "price" ? "bg-secondary/50 hover:border-primary active:bg-primary active:text-white" : "bg-secondary/20 text-muted-foreground/30 cursor-not-allowed"}`}>
+                .
+              </button>
+              <button onClick={() => handleNumpadKey("0")} className="h-10 text-2xl font-black rounded-xl bg-secondary/50 border-2 border-transparent hover:border-primary active:bg-primary active:text-white transition-colors touch-manipulation">0</button>
+              <button onClick={() => handleNumpadKey("DEL")} className="h-10 flex items-center justify-center rounded-xl bg-red-500/10 text-red-500 border-2 border-transparent active:bg-red-500 active:text-white transition-colors touch-manipulation">
+                <Delete className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* Preview subtotal y botones de acción */}
+            <div className="px-4 pb-4 pt-2 flex flex-col gap-2.5">
+              <div className="bg-background border-2 border-border rounded-xl p-3 flex items-center justify-between gap-4">
+                <div className="text-sm font-mono font-bold text-muted-foreground">{previewQty} MTS × S/ {previewPrice.toFixed(2)}</div>
+                <div className="text-2xl font-black text-emerald-500 font-mono">S/ {previewSubtotal.toFixed(2)}</div>
+              </div>
+              <div className="flex gap-3">
+                <Button variant="outline" className="h-14 flex-1 text-base font-bold uppercase rounded-2xl border-2" onClick={() => setNumpadProduct(null)}>Cancelar</Button>
+                <Button className="h-14 flex-[2] text-xl font-black uppercase rounded-2xl shadow-xl" onClick={handleNumpadOk}
+                  disabled={!numpadQty || parseInt(numpadQty) <= 0 || !numpadPrice}>
+                  {cart.find((c) => c.id === numpadProduct.id) ? "Actualizar" : "Agregar"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+        </div>
 
       {/* ════════════════════════════════════════
           RIGHT PANEL — Proforma + Emitir + Historial
           ════════════════════════════════════════ */}
-      <div className="w-[460px] flex flex-col h-full bg-surface shadow-xl z-20 shrink-0 border-l border-border">
+      <div className="w-full lg:w-[460px] flex flex-col h-[50dvh] lg:h-full bg-surface shadow-xl z-20 shrink-0 border-t lg:border-t-0 lg:border-l border-border">
 
         <div className="px-5 pt-5 pb-3 border-b border-border bg-card shrink-0 flex flex-col gap-3">
           <div className="flex gap-2 bg-secondary/30 p-1 rounded-xl">
@@ -561,23 +846,45 @@ export default function POSPage() {
                   <div className="text-center font-mono text-muted-foreground/40 text-xs tracking-widest select-none">
                     ───────────────────────────────
                   </div>
-                  {cart.map((item, idx) => (
+                  {cart.map((item, idx) => {
+                    // Los servicios (Confección/Taxi) tienen un comportamiento distinto:
+                    // Al hacer click, abren su modal de precio simple en vez del numpad de telas
+                    const isService = SERVICE_IDS.includes(item.id as any);
+                    const handleCardClick = () => {
+                      if (item.id === "confeccion-item") handleOpenConfeccion();
+                      else if (item.id === "taxi-item") handleOpenTaxi();
+                      else openNumpad(item, item);
+                    };
+                    return (
                     <div key={item.id}>
                       <Card className="bg-background border-border shadow-sm rounded-2xl overflow-hidden cursor-pointer hover:border-primary/50 transition-colors active:scale-[0.98]"
-                        onClick={() => openNumpad(item, item)}>
+                        onClick={handleCardClick}>
                         <CardContent className="p-4">
                           <div className="flex items-start justify-between mb-1.5">
-                            <div className="text-sm font-bold text-foreground leading-snug">
-                              <span className="font-mono text-primary mr-1.5">{item.code}</span>{item.name} <span className="ml-1 text-muted-foreground font-mono">S/. {item.price.toFixed(2)}</span>
+                            <div className="text-sm font-bold text-foreground leading-snug flex items-center gap-1.5">
+                              {isService && (
+                                item.id === "confeccion-item"
+                                  ? <Scissors className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                                  : <Car className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                              )}
+                              <span className="font-mono text-primary mr-1.5">{item.code}</span>
+                              {item.name}
                             </div>
                             <button className="ml-3 p-2 text-red-500 bg-red-500/10 hover:bg-red-500/20 rounded-lg transition-colors shrink-0"
                               onClick={(e) => removeFromCart(item.id, e)}>
                               <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
-                          <div className="text-muted-foreground font-mono text-sm font-bold">
-                            {item.quantity} MTS × S/ {item.editedPrice.toFixed(2)}
-                          </div>
+                          {isService ? (
+                            // Servicios: solo mostrar precio, sin MTS
+                            <div className="text-muted-foreground font-mono text-sm font-bold">
+                              Precio: S/ {item.editedPrice.toFixed(2)}
+                            </div>
+                          ) : (
+                            <div className="text-muted-foreground font-mono text-sm font-bold">
+                              {item.quantity} MTS × S/ {item.editedPrice.toFixed(2)}
+                            </div>
+                          )}
                           <div className="text-xl font-black text-foreground mt-1.5 text-right">
                             S/ {(item.editedPrice * item.quantity).toFixed(2)}
                           </div>
@@ -589,7 +896,7 @@ export default function POSPage() {
                         </div>
                       )}
                     </div>
-                  ))}
+                  )})}
                   <div className="text-center font-mono text-muted-foreground/40 text-xs tracking-widest select-none">
                     ───────────────────────────────
                   </div>
@@ -599,6 +906,33 @@ export default function POSPage() {
 
             {/* Footer Cart */}
             <div className="p-5 border-t border-border bg-card shadow-[0_-8px_30px_rgba(0,0,0,0.06)] shrink-0">
+              {/* Botones de Servicios: Confección y Taxi */}
+              <div className="mb-4 flex gap-2">
+                <Button
+                  onClick={handleOpenConfeccion}
+                  variant="outline"
+                  className={`flex-1 h-11 border-dashed border-2 font-bold text-xs flex items-center justify-center gap-2 transition-colors ${
+                    cart.find((i) => i.id === "confeccion-item")
+                      ? "border-indigo-400 text-indigo-600 bg-indigo-50 hover:bg-indigo-100"
+                      : "hover:bg-primary/5 hover:text-primary"
+                  }`}
+                >
+                  <Scissors className="w-3.5 h-3.5" />
+                  {cart.find((i) => i.id === "confeccion-item") ? "EDITAR CONFECCIÓN" : "+ CONFECCIÓN"}
+                </Button>
+                <Button
+                  onClick={handleOpenTaxi}
+                  variant="outline"
+                  className={`flex-1 h-11 border-dashed border-2 font-bold text-xs flex items-center justify-center gap-2 transition-colors ${
+                    cart.find((i) => i.id === "taxi-item")
+                      ? "border-amber-400 text-amber-600 bg-amber-50 hover:bg-amber-100"
+                      : "hover:bg-primary/5 hover:text-primary"
+                  }`}
+                >
+                  <Car className="w-3.5 h-3.5" />
+                  {cart.find((i) => i.id === "taxi-item") ? "EDITAR TAXI" : "+ TAXI"}
+                </Button>
+              </div>
               {cart.length > 0 && (
                 <div className="space-y-3 mb-4">
                   <div className="flex justify-between items-center text-muted-foreground text-lg font-bold">
@@ -621,8 +955,8 @@ export default function POSPage() {
                 )}
                 <button
                   onClick={handleEmitTicket}
-                  disabled={cart.length === 0 || isEmitting}
-                  className={`flex-1 h-16 rounded-2xl text-lg font-black tracking-wide transition-all flex items-center justify-center gap-3 shadow-lg ${cart.length === 0 || isEmitting
+                  disabled={cart.length === 0 || isEmitting || !isCajaOpen}
+                  className={`flex-1 h-16 rounded-2xl text-lg font-black tracking-wide transition-all flex items-center justify-center gap-3 shadow-lg ${cart.length === 0 || isEmitting || !isCajaOpen
                       ? "bg-secondary text-muted-foreground cursor-not-allowed"
                       : "bg-emerald-600 hover:bg-emerald-700 text-white hover:scale-[1.01] active:scale-[0.99]"
                     }`}
@@ -674,7 +1008,7 @@ export default function POSPage() {
                         <span className="text-muted-foreground font-mono">{new Date(ticket.created_at).toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" })}</span>
                         <span className="font-black text-emerald-500">S/ {ticket.total.toFixed(2)}</span>
                       </div>
-                      {role === "ADMIN" && (() => {
+                      {(role === "ADMIN" || role === "MOSTRADOR") && (() => {
                           if (ticket.status === 'PENDING') {
                             return (
                               <div className="text-xs font-bold bg-orange-500/15 text-orange-600 px-2 py-0.5 rounded uppercase mt-1 inline-block">
@@ -682,9 +1016,9 @@ export default function POSPage() {
                               </div>
                             );
                           }
-                          if (ticket.status === 'COMPLETED' && ticket.source_sheet) {
+                          if (role === "ADMIN" && ticket.status === 'COMPLETED' && ticket.source_sheet) {
                             const cajeroMatch = (ticket.source_sheet as string).match(/CAJERO:([^|]+)/);
-                            const cajeroName = cajeroMatch ? cajeroMatch[1].trim() : null;
+                            const cajeroName = cajeroMatch ? (cajeroMatch[1] ?? '').trim() : null;
                             if (cajeroName) {
                               return (
                                 <div className="text-xs font-bold text-emerald-600 uppercase mt-1">
@@ -711,64 +1045,145 @@ export default function POSPage() {
       </div>
 
       {/* ════════════════════════════════════════
-          NUMPAD MODAL
+          NUMPAD MODAL — Telas (Qty + Precio Variable)
+          Optimizado para tablet horizontal:
+          - Botones reducidos (h-10) para evitar scroll vertical
+          - Modal más ancho (max-w-[540px]) para mejor ergonomía
           ════════════════════════════════════════ */}
-      {numpadProduct && (
+
+      {/* ════════════════════════════════════════
+          MODAL DE SERVICIO — Confección
+          Numpad simple de precio (sin MTS)
+          ════════════════════════════════════════ */}
+      {confeccionModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
-          <div className="w-[480px] bg-card rounded-3xl shadow-2xl border-2 border-border/50 overflow-hidden flex flex-col max-h-[85vh] overflow-y-auto animate-in zoom-in-95 duration-200">
-            <div className="p-5 border-b border-border bg-surface text-center shrink-0">
-              <div className="flex items-center justify-center gap-3">
-                <span className="font-mono text-lg font-black text-muted-foreground bg-secondary px-3 py-1 rounded-lg">{numpadProduct.code}</span>
-                <h3 className="text-xl font-black uppercase text-primary">{numpadProduct.name}</h3>
+          <div className="w-full max-w-[400px] bg-card rounded-3xl shadow-2xl border-2 border-indigo-500/30 flex flex-col animate-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="p-4 border-b border-border bg-indigo-500/5 text-center">
+              <div className="flex items-center justify-center gap-2">
+                <Scissors className="w-5 h-5 text-indigo-500" />
+                <h3 className="text-lg font-black uppercase text-indigo-600">Costo por Confección</h3>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">Ingresa el precio del servicio</p>
+            </div>
+
+            {/* Display del precio */}
+            <div className="px-4 pt-3 pb-2">
+              <div className="bg-background border-2 border-indigo-400/50 rounded-2xl p-3 text-center">
+                <div className="text-xs font-bold text-muted-foreground uppercase mb-1">Precio del Servicio</div>
+                <div className="text-4xl font-black text-indigo-600 font-mono">
+                  S/ {confeccionPrice || "0"}
+                </div>
               </div>
             </div>
-            <div className="p-6 bg-secondary/10 border-b border-border flex flex-col gap-4">
-              <div className="flex gap-4">
-                <div className="flex-1 bg-background rounded-2xl border-2 border-border p-3 text-center opacity-60">
-                  <div className="text-xs font-bold text-muted-foreground uppercase mb-1">Precio Fijo</div>
-                  <div className="text-2xl font-bold">S/ {numpadProduct.price.toFixed(2)}</div>
-                </div>
-                <div className={`flex-1 rounded-2xl border-2 p-3 text-center cursor-pointer transition-all ${numpadField === "price" ? "border-primary bg-primary/10" : "border-border bg-background"}`}
-                  onClick={() => setNumpadField("price")}>
-                  <div className={`text-xs font-bold uppercase mb-1 ${numpadField === "price" ? "text-primary" : "text-muted-foreground"}`}>Precio Variable</div>
-                  <div className={`text-2xl font-bold ${numpadField === "price" ? "text-primary" : "text-foreground"}`}>S/ {numpadPrice || "0.00"}</div>
-                </div>
-              </div>
-              <div className={`w-full rounded-2xl border-2 p-4 text-center cursor-pointer transition-all flex items-center justify-center gap-4 ${numpadField === "qty" ? "border-emerald-500 bg-emerald-500/10" : "border-border bg-background"}`}
-                onClick={() => setNumpadField("qty")}>
-                <div className={`text-sm font-bold uppercase ${numpadField === "qty" ? "text-emerald-600" : "text-muted-foreground"}`}>Cantidad:</div>
-                <div className={`text-5xl font-black font-mono tracking-tighter ${numpadField === "qty" ? "text-emerald-500" : "text-foreground"}`}>{numpadQty || "0"}</div>
-                <div className={`text-xl font-bold uppercase ${numpadField === "qty" ? "text-emerald-600" : "text-muted-foreground"}`}>mts</div>
-              </div>
-            </div>
-            <div className="px-5 pt-4 pb-3 grid grid-cols-3 gap-2 bg-card">
+
+            {/* Teclado numérico simple */}
+            <div className="px-4 pb-2 grid grid-cols-3 gap-1.5">
               {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((num) => (
-                <button key={num} onClick={() => handleNumpadKey(num)}
-                  className="h-16 text-3xl font-black rounded-xl bg-secondary/50 border-2 border-transparent hover:border-primary active:bg-primary active:text-white transition-colors touch-manipulation">
+                <button key={num}
+                  onClick={() => handleServiceNumpadKey(num, confeccionPrice, setConfeccionPrice)}
+                  className="h-10 text-2xl font-black rounded-xl bg-secondary/50 border-2 border-transparent hover:border-indigo-400 active:bg-indigo-500 active:text-white transition-colors touch-manipulation">
                   {num}
                 </button>
               ))}
-              <button onClick={() => numpadField === "price" && handleNumpadKey(".")}
-                className={`h-16 text-3xl font-black rounded-xl border-2 border-transparent transition-colors touch-manipulation ${numpadField === "price" ? "bg-secondary/50 hover:border-primary active:bg-primary active:text-white" : "bg-secondary/20 text-muted-foreground/30 cursor-not-allowed"}`}>
+              <button
+                onClick={() => handleServiceNumpadKey(".", confeccionPrice, setConfeccionPrice)}
+                className="h-10 text-2xl font-black rounded-xl bg-secondary/50 border-2 border-transparent hover:border-indigo-400 active:bg-indigo-500 active:text-white transition-colors touch-manipulation">
                 .
               </button>
-              <button onClick={() => handleNumpadKey("0")} className="h-16 text-3xl font-black rounded-xl bg-secondary/50 border-2 border-transparent hover:border-primary active:bg-primary active:text-white transition-colors touch-manipulation">0</button>
-              <button onClick={() => handleNumpadKey("DEL")} className="h-16 flex items-center justify-center rounded-xl bg-red-500/10 text-red-500 border-2 border-transparent active:bg-red-500 active:text-white transition-colors touch-manipulation">
-                <Delete className="w-8 h-8" />
+              <button
+                onClick={() => handleServiceNumpadKey("0", confeccionPrice, setConfeccionPrice)}
+                className="h-10 text-2xl font-black rounded-xl bg-secondary/50 border-2 border-transparent hover:border-indigo-400 active:bg-indigo-500 active:text-white transition-colors touch-manipulation">
+                0
+              </button>
+              <button
+                onClick={() => handleServiceNumpadKey("DEL", confeccionPrice, setConfeccionPrice)}
+                className="h-10 flex items-center justify-center rounded-xl bg-red-500/10 text-red-500 border-2 border-transparent active:bg-red-500 active:text-white transition-colors touch-manipulation">
+                <Delete className="w-5 h-5" />
               </button>
             </div>
-            <div className="px-5 pb-5 pt-2 flex flex-col gap-3">
-              <div className="bg-background border-2 border-border rounded-xl p-4 flex items-center justify-between gap-4">
-                <div className="text-base font-mono font-bold text-muted-foreground">{previewQty} MTS × S/ {previewPrice.toFixed(2)}</div>
-                <div className="text-3xl font-black text-emerald-500 font-mono">S/ {previewSubtotal.toFixed(2)}</div>
+
+            {/* Acciones */}
+            <div className="px-4 pb-4 pt-1 flex gap-3">
+              <Button variant="outline" className="flex-1 h-12 font-bold rounded-2xl"
+                onClick={() => { setConfeccionModalOpen(false); setConfeccionPrice(""); }}>
+                Cancelar
+              </Button>
+              <Button
+                className="flex-[2] h-12 text-base font-black rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white"
+                onClick={handleConfirmConfeccion}
+                disabled={!confeccionPrice || parseFloat(confeccionPrice) <= 0}>
+                {cart.find((i) => i.id === "confeccion-item") ? "Actualizar" : "Agregar"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ════════════════════════════════════════
+          MODAL DE SERVICIO — Taxi
+          Numpad simple de precio (sin MTS)
+          ════════════════════════════════════════ */}
+      {taxiModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+          <div className="w-full max-w-[400px] bg-card rounded-3xl shadow-2xl border-2 border-amber-500/30 flex flex-col animate-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="p-4 border-b border-border bg-amber-500/5 text-center">
+              <div className="flex items-center justify-center gap-2">
+                <Car className="w-5 h-5 text-amber-500" />
+                <h3 className="text-lg font-black uppercase text-amber-600">Costo por Taxi</h3>
               </div>
-              <div className="flex gap-3">
-                <Button variant="outline" className="h-20 flex-1 text-xl font-bold uppercase rounded-2xl border-2" onClick={() => setNumpadProduct(null)}>Cancelar</Button>
-                <Button className="h-20 flex-[2] text-2xl font-black uppercase rounded-2xl shadow-xl" onClick={handleNumpadOk}
-                  disabled={!numpadQty || parseInt(numpadQty) <= 0 || !numpadPrice}>
-                  {cart.find((c) => c.id === numpadProduct.id) ? "Actualizar" : "Agregar"}
-                </Button>
+              <p className="text-xs text-muted-foreground mt-1">Ingresa el precio del servicio</p>
+            </div>
+
+            {/* Display del precio */}
+            <div className="px-4 pt-3 pb-2">
+              <div className="bg-background border-2 border-amber-400/50 rounded-2xl p-3 text-center">
+                <div className="text-xs font-bold text-muted-foreground uppercase mb-1">Precio del Servicio</div>
+                <div className="text-4xl font-black text-amber-600 font-mono">
+                  S/ {taxiPrice || "0"}
+                </div>
               </div>
+            </div>
+
+            {/* Teclado numérico simple */}
+            <div className="px-4 pb-2 grid grid-cols-3 gap-1.5">
+              {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((num) => (
+                <button key={num}
+                  onClick={() => handleServiceNumpadKey(num, taxiPrice, setTaxiPrice)}
+                  className="h-10 text-2xl font-black rounded-xl bg-secondary/50 border-2 border-transparent hover:border-amber-400 active:bg-amber-500 active:text-white transition-colors touch-manipulation">
+                  {num}
+                </button>
+              ))}
+              <button
+                onClick={() => handleServiceNumpadKey(".", taxiPrice, setTaxiPrice)}
+                className="h-10 text-2xl font-black rounded-xl bg-secondary/50 border-2 border-transparent hover:border-amber-400 active:bg-amber-500 active:text-white transition-colors touch-manipulation">
+                .
+              </button>
+              <button
+                onClick={() => handleServiceNumpadKey("0", taxiPrice, setTaxiPrice)}
+                className="h-10 text-2xl font-black rounded-xl bg-secondary/50 border-2 border-transparent hover:border-amber-400 active:bg-amber-500 active:text-white transition-colors touch-manipulation">
+                0
+              </button>
+              <button
+                onClick={() => handleServiceNumpadKey("DEL", taxiPrice, setTaxiPrice)}
+                className="h-10 flex items-center justify-center rounded-xl bg-red-500/10 text-red-500 border-2 border-transparent active:bg-red-500 active:text-white transition-colors touch-manipulation">
+                <Delete className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Acciones */}
+            <div className="px-4 pb-4 pt-1 flex gap-3">
+              <Button variant="outline" className="flex-1 h-12 font-bold rounded-2xl"
+                onClick={() => { setTaxiModalOpen(false); setTaxiPrice(""); }}>
+                Cancelar
+              </Button>
+              <Button
+                className="flex-[2] h-12 text-base font-black rounded-2xl bg-amber-600 hover:bg-amber-700 text-white"
+                onClick={handleConfirmTaxi}
+                disabled={!taxiPrice || parseFloat(taxiPrice) <= 0}>
+                {cart.find((i) => i.id === "taxi-item") ? "Actualizar" : "Agregar"}
+              </Button>
             </div>
           </div>
         </div>
@@ -793,10 +1208,23 @@ export default function POSPage() {
               {lastSaleInfo.items.map((item) => {
                 const codigo = item.codigo || item.code || '';
                 const nombre = item.nombre || item.name || item.product_name || 'Producto';
+                const isService = ['TAXI', 'CONFECCION'].includes(codigo);
                 const precioFijo = Number(item.precio_fijo || item.catalog_price || item.precio_base || item.price || 0).toFixed(2);
                 const cantidad = item.cantidad || item.quantity || item.qty || 0;
                 const precioVariable = Number(item.precio_variable || item.variable_price || item.editedPrice || item.price || 0).toFixed(2);
-                const subtotal = Number(item.subtotal || (cantidad * precioVariable) || 0).toFixed(2);
+                const subtotal = Number(item.subtotal || (Number(cantidad) * Number(precioVariable)) || 0).toFixed(2);
+
+                if (isService) {
+                  return (
+                    <div key={item.id} className="ticket-item mb-4 pb-2 border-b border-gray-200">
+                      <div className="flex justify-between text-lg font-bold">
+                        <span>({codigo})</span>
+                        <span>S/ {subtotal}</span>
+                      </div>
+                    </div>
+                  );
+                }
+
                 return (
                   <div key={item.id} className="ticket-item mb-4 pb-2 border-b border-gray-200">
                     {/* Línea 1: código, nombre y precio fijo */}
@@ -822,7 +1250,7 @@ export default function POSPage() {
             ) : null}
             <div className="ticket-total-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontWeight: "900", fontSize: "36px" }}>
               <span>TOTAL FINAL</span>
-              <span>S/ {Math.round(lastSaleInfo.total).toFixed(2)}</span>
+              <span>S/ {Number(lastSaleInfo.total).toFixed(2)}</span>
             </div>
             <div className="ticket-divider"></div>
             <div style={{ display: "flex", justifyContent: "space-between", marginTop: "16px", fontSize: "14px", color: "#555", fontWeight: "bold" }}>
@@ -887,6 +1315,56 @@ export default function POSPage() {
               Salir sin Guardar
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Caja Summary Modal */}
+      <Dialog open={cajaSummaryOpen} onOpenChange={setCajaSummaryOpen}>
+        <DialogContent className="sm:max-w-md bg-card border-border">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-black text-center mb-2">Resumen del Día</DialogTitle>
+          </DialogHeader>
+          
+          {closingCajaLoading || !cajaSummary ? (
+            <div className="py-10 flex flex-col items-center justify-center gap-4 text-muted-foreground">
+              <RefreshCw className="w-8 h-8 animate-spin" />
+              <p className="font-bold">Calculando recaudación total...</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="bg-secondary/50 rounded-2xl p-4 border border-border space-y-3">
+                <div className="flex justify-between items-center text-sm font-bold text-muted-foreground">
+                  <span>EFECTIVO</span>
+                  <span className="text-foreground">S/ {cajaSummary.efectivo.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm font-bold text-muted-foreground">
+                  <span>IZIPAY</span>
+                  <span className="text-foreground">S/ {cajaSummary.izipay.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm font-bold text-muted-foreground">
+                  <span>BCP (Transferencias/Yape)</span>
+                  <span className="text-foreground">S/ {cajaSummary.bcp.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm font-bold text-muted-foreground">
+                  <span>BBVA (Plin/Transferencias)</span>
+                  <span className="text-foreground">S/ {cajaSummary.bbva.toFixed(2)}</span>
+                </div>
+                <div className="pt-3 mt-3 border-t border-border flex justify-between items-center text-lg font-black">
+                  <span>TOTAL FINAL</span>
+                  <span className="text-emerald-500">S/ {cajaSummary.total.toFixed(2)}</span>
+                </div>
+              </div>
+              
+              <div className="flex flex-col sm:flex-row gap-3 pt-4">
+                <Button variant="outline" className="flex-1 h-12 font-bold" onClick={() => setCajaSummaryOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button variant="destructive" className="flex-1 h-12 font-bold" onClick={confirmCloseCaja}>
+                  Confirmar Cierre Definitivo
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

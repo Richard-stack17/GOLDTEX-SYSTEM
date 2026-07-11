@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -20,6 +20,7 @@ import {
 } from "../lib/ticket-sequence";
 import { useRole } from "../context/RoleContext";
 import { useTheme } from "../context/ThemeContext";
+import { requestBluetoothDevice, printSaleReceipt } from '../configuracion/utils/printerEngine';
 
 // ─────────────── Types ───────────────
 type SaleStatus = "PENDING" | "COMPLETED" | "CANCELLED";
@@ -37,6 +38,7 @@ type PendingTicket = {
   created_at: string;
   voucher_type?: VoucherType | null;
   voucher_doc_number?: string | null;
+  transactions?: any[];
 };
 
 type DocField = "docNumber" | "docName" | null;
@@ -62,6 +64,202 @@ const VOUCHER_TYPES: { id: VoucherType; label: string; icon: string }[] = [
 ];
 
 // ─────────────── Component ───────────────
+
+function TicketTableRow({
+  ticket,
+  onSaveRow,
+  isEditingRef,
+  formatTicketHash,
+  parseInternalTicketNum,
+  starsoftDocNum,
+  inlineCellCls,
+  spinnerOff,
+  statusBadge,
+  handleCancel,
+  openModal,
+  handlePrintA4
+}: any) {
+  const txs = ticket.transactions || [];
+  const sumBy = (m: string) => txs.filter((t: any) => t.payment_method === m).reduce((s: number, t: any) => s + (t.amount || 0), 0);
+  const rawEfectivoAmt = sumBy("EFECTIVO") || 0;
+  const bcpAmt = sumBy("BCP") || 0;
+  const izipayAmt = sumBy("IZIPAY") || 0;
+  const bbvaAmt = sumBy("BBVA") || 0;
+
+  let confeccionAmt = 0;
+  if (Array.isArray(ticket.items)) {
+    const confItem = ticket.items.find((i: any) => i.id === 'confeccion-item' || i.name === 'COSTO POR CONFECCIÓN');
+    if (confItem) confeccionAmt += ((confItem.quantity || 0) * (confItem.price || 0)) || confItem.editedPrice || 0;
+    const taxiItem = ticket.items.find((i: any) => i.id === 'taxi-item' || i.name === 'COSTO POR TAXI');
+    if (taxiItem) confeccionAmt += ((taxiItem.quantity || 0) * (taxiItem.price || 0)) || taxiItem.editedPrice || 0;
+  }
+
+  const montoCalculado = rawEfectivoAmt - confeccionAmt;
+  const montoAmt = montoCalculado > 0 ? montoCalculado : 0;
+
+  const initialBuffer = {
+    monto: (montoAmt === 0 || isNaN(montoAmt)) ? '' : String(montoAmt),
+    confeccion: (confeccionAmt === 0 || isNaN(confeccionAmt)) ? '' : String(confeccionAmt),
+    bcp: (bcpAmt === 0 || isNaN(bcpAmt)) ? '' : String(bcpAmt),
+    bbva: (bbvaAmt === 0 || isNaN(bbvaAmt)) ? '' : String(bbvaAmt),
+    izipay: (izipayAmt === 0 || isNaN(izipayAmt)) ? '' : String(izipayAmt)
+  };
+
+  const [rowBuffer, setRowBuffer] = useState(initialBuffer);
+  const [isFocusedRow, setIsFocusedRow] = useState(false);
+
+  useEffect(() => {
+    if (!isFocusedRow) {
+      setRowBuffer(initialBuffer);
+    }
+  }, [ticket, isFocusedRow]);
+
+  const handleFocus = () => {
+    setIsFocusedRow(true);
+    isEditingRef.current = true;
+  };
+
+  const handleBlur = () => {
+    setTimeout(() => {
+      if (!document.activeElement?.closest(`#ticket-row-${ticket.id}`)) {
+        setIsFocusedRow(false);
+        isEditingRef.current = false;
+      }
+    }, 0);
+  };
+
+  const handleKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const targetInput = e.currentTarget;
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const success = await onSaveRow(ticket, rowBuffer);
+      if (!success) {
+        setRowBuffer(initialBuffer);
+      }
+      targetInput?.blur();
+    }
+    if (e.key === 'Escape') {
+      setRowBuffer(initialBuffer);
+      targetInput?.blur();
+    }
+  };
+
+  const handleChange = (field: string, val: string) => {
+    setRowBuffer(prev => ({ ...prev, [field]: val }));
+  };
+
+  const ticketNo = parseInternalTicketNum(ticket);
+  const sunatDoc = starsoftDocNum(ticket);
+  const badge = statusBadge(ticket.status);
+
+  return (
+    <tr id={`ticket-row-${ticket.id}`} className="hover:bg-secondary/30 transition-colors" onFocus={handleFocus} onBlur={handleBlur}>
+      <td className="px-6 py-4">
+        <div className="font-black text-xl">{formatTicketHash(ticketNo)}</div>
+        {sunatDoc && (
+          <span className="text-xs text-muted-foreground font-mono">Doc: {sunatDoc}</span>
+        )}
+      </td>
+      <td className="px-6 py-4 text-muted-foreground font-mono">{ticket.document_number}</td>
+      <td className="px-2 py-1 whitespace-nowrap min-w-[100px]">
+        {ticket.status === "PENDING" ? (
+          <span className="px-4 font-mono font-bold text-gray-400">—</span>
+        ) : (
+          <input type="number" step="0.01" placeholder="0.00"
+            value={rowBuffer.monto}
+            onChange={(e) => handleChange('monto', e.target.value)}
+            onKeyDown={handleKeyDown}
+            className={`${inlineCellCls} text-right text-gray-700 dark:text-gray-200 ${spinnerOff}`}
+          />
+        )}
+      </td>
+      <td className="px-2 py-1 whitespace-nowrap min-w-[100px]">
+        {ticket.status === "PENDING" ? (
+          <span className="px-4 font-mono font-bold text-gray-400">—</span>
+        ) : (
+          <input type="number" step="0.01" placeholder="0.00"
+            value={rowBuffer.confeccion}
+            onChange={(e) => handleChange('confeccion', e.target.value)}
+            onKeyDown={handleKeyDown}
+            className={`${inlineCellCls} text-right text-gray-700 dark:text-gray-200 ${spinnerOff}`}
+          />
+        )}
+      </td>
+      <td className="px-2 py-1 whitespace-nowrap min-w-[100px]">
+        {ticket.status === "PENDING" ? (
+          <span className="px-4 font-mono font-bold text-gray-400">—</span>
+        ) : (
+          <input type="number" step="0.01" placeholder="0.00"
+            value={rowBuffer.bcp}
+            onChange={(e) => handleChange('bcp', e.target.value)}
+            onKeyDown={handleKeyDown}
+            className={`${inlineCellCls} text-right text-gray-700 dark:text-gray-200 ${spinnerOff}`}
+          />
+        )}
+      </td>
+      <td className="px-2 py-1 whitespace-nowrap min-w-[100px]">
+        {ticket.status === "PENDING" ? (
+          <span className="px-4 font-mono font-bold text-gray-400">—</span>
+        ) : (
+          <input type="number" step="0.01" placeholder="0.00"
+            value={rowBuffer.bbva}
+            onChange={(e) => handleChange('bbva', e.target.value)}
+            onKeyDown={handleKeyDown}
+            className={`${inlineCellCls} text-right text-gray-700 dark:text-gray-200 ${spinnerOff}`}
+          />
+        )}
+      </td>
+      <td className="px-2 py-1 whitespace-nowrap min-w-[100px]">
+        {ticket.status === "PENDING" ? (
+          <span className="px-4 font-mono font-bold text-gray-400">—</span>
+        ) : (
+          <input type="number" step="0.01" placeholder="0.00"
+            value={rowBuffer.izipay}
+            onChange={(e) => handleChange('izipay', e.target.value)}
+            onKeyDown={handleKeyDown}
+            className={`${inlineCellCls} text-right text-gray-700 dark:text-gray-200 ${spinnerOff}`}
+          />
+        )}
+      </td>
+      <td className="px-6 py-4 font-black text-emerald-500 dark:text-emerald-400 text-lg">
+        {ticket.status === "PENDING" ? "—" : `S/ ${ticket.total.toFixed(2)}`}
+      </td>
+      <td className="px-6 py-4">
+        <span className={`text-xs font-bold px-2.5 py-1 rounded-full uppercase tracking-wider ${badge.classes}`}>
+          {badge.label}
+        </span>
+      </td>
+      <td className="px-6 py-4 text-right">
+        <div className="flex justify-end gap-2">
+          {ticket.status === "PENDING" ? (
+            <>
+              <button
+                onClick={() => handleCancel(ticket)}
+                className="px-3 py-1.5 rounded-lg text-red-500 bg-red-500/10 hover:bg-red-500/20 font-bold transition-colors"
+              >
+                Anular
+              </button>
+              <button
+                onClick={() => openModal(ticket)}
+                className="px-4 py-1.5 rounded-lg text-white bg-orange-600 hover:bg-orange-500 font-bold shadow-lg shadow-orange-500/20 transition-all"
+              >
+                Cobrar
+              </button>
+            </>
+          ) : ticket.status === "COMPLETED" ? (
+            <button
+              onClick={() => handlePrintA4(ticket)}
+              className="bg-purple-600 hover:bg-purple-700 font-bold px-4 py-1.5 rounded-lg text-white shadow-lg shadow-purple-500/20 transition-all"
+            >
+              Imprimir
+            </button>
+          ) : null}
+        </div>
+      </td>
+    </tr>
+  );
+}
+
 export default function CajaPage() {
   const { role, username, isHydrated } = useRole();
   const { theme, toggleTheme } = useTheme();
@@ -72,6 +270,37 @@ export default function CajaPage() {
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const [viewMode, setViewMode] = useState<"grid" | "list">("list");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
+  const isEditingRef = useRef(false);
+
+  // ── Printer state ──
+  const [activePrinter, setActivePrinter] = useState<any>(null);
+  const [btDeviceObj, setBtDeviceObj] = useState<any>(null);
+
+  useEffect(() => {
+    async function loadPrinter() {
+      const { data } = await supabase.from('printers').select('*').order('created_at', { ascending: false }).limit(1).single();
+      if (data) {
+        setActivePrinter(data);
+        if (data.type === 'bluetooth') {
+          const nav = navigator as any;
+          if (nav.bluetooth && nav.bluetooth.getDevices) {
+            try {
+              const devices = await nav.bluetooth.getDevices();
+              if (devices.length > 0) {
+                setBtDeviceObj(devices[0]);
+              }
+            } catch (e) {
+              console.log('No silent BT access', e);
+            }
+          }
+        }
+      }
+    }
+    loadPrinter();
+  }, []);
+
+  const spinnerOff = '[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none';
+  const inlineCellCls = 'h-7 px-1.5 border-2 border-transparent hover:border-indigo-200 focus:border-indigo-500 rounded bg-transparent focus:bg-white text-xs font-bold w-full focus:outline-none transition-colors';
 
   // ── Payment modal ──
   const [selectedTicket, setSelectedTicket] = useState<PendingTicket | null>(null);
@@ -84,6 +313,10 @@ export default function CajaPage() {
   // ── Review / Confirm modal ──
   const [isReviewing, setIsReviewing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // ── Success Modal & Print ──
+  const [successSaleData, setSuccessSaleData] = useState<any>(null);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
 
   // ── Voucher / Comprobante ──
   const [voucherType, setVoucherType] = useState<VoucherType>("TICKET");
@@ -238,6 +471,59 @@ export default function CajaPage() {
     }
   };
 
+  // ── Row save ──────────────────────────────────────────────────────────────
+  const handleSaveCajaRow = async (ticket: PendingTicket, rowBuffer: any): Promise<boolean> => {
+    try {
+      const bcp = parseFloat(rowBuffer.bcp) || 0;
+      const bbva = parseFloat(rowBuffer.bbva) || 0;
+      const izipay = parseFloat(rowBuffer.izipay) || 0;
+      const monto = parseFloat(rowBuffer.monto) || 0;
+      const confeccion = parseFloat(rowBuffer.confeccion) || 0;
+      
+      const efectivo = monto + confeccion;
+      
+      const methods = [
+        { name: "EFECTIVO", amount: efectivo },
+        { name: "BCP", amount: bcp },
+        { name: "BBVA", amount: bbva },
+        { name: "IZIPAY", amount: izipay }
+      ];
+
+      for (const m of methods) {
+        const { data: existingTx } = await supabase
+          .from('transactions')
+          .select('id')
+          .eq('sale_id', ticket.id)
+          .eq('payment_method', m.name)
+          .maybeSingle();
+
+        if (existingTx) {
+          if (m.amount > 0) {
+            await supabase.from('transactions').update({ amount: m.amount }).eq('id', existingTx.id);
+          } else {
+            await supabase.from('transactions').delete().eq('id', existingTx.id);
+          }
+        } else if (m.amount > 0) {
+          await supabase.from('transactions').insert({
+            sale_id: ticket.id,
+            payment_method: m.name,
+            amount: m.amount,
+            surcharge_pct: 0,
+            surcharge_amount: 0,
+            sequence: 99,
+            original_detail: 'Ajuste manual de caja'
+          });
+        }
+      }
+
+      fetchTickets();
+      return true;
+    } catch (err) {
+      console.error(err);
+      return false;
+    }
+  };
+
   // Phase 1: open the review pop-up (NO DB write yet)
   const openReview = () => {
     if (!canConfirm) return;
@@ -307,13 +593,68 @@ export default function CajaPage() {
         if (txErr) throw txErr;
       }
 
+      // ── Módulo de Impresión Integrada ──
+      const saleDataForPrint = {
+        ...selectedTicket,
+        ...updatePayload,
+        items: (selectedTicket as any).items || [],
+        customer_name: docName,
+        comment: (selectedTicket as any).detail,
+      };
+
+      setSuccessSaleData(saleDataForPrint);
+      setShowSuccessModal(true);
+
+      if (activePrinter && activePrinter.auto_print && activePrinter.type === 'bluetooth' && btDeviceObj) {
+        try {
+          console.log('Iniciando auto-impresión (Doble Copia)...');
+          // Primera Copia
+          await printSaleReceipt(btDeviceObj, saleDataForPrint, activePrinter.paper_width || 80);
+          
+          // Delay de 1.5s
+          await new Promise(resolve => setTimeout(resolve, 1500));
+          
+          // Segunda Copia
+          await printSaleReceipt(btDeviceObj, saleDataForPrint, activePrinter.paper_width || 80);
+          
+          console.log('Auto-impresión doble completada.');
+        } catch (e: any) {
+          console.error('Error en auto-impresión:', e);
+          alert(`Error auto-impresión: ${e.message}`);
+        }
+      }
+
       setTickets((prev) => prev.filter((t) => t.id !== selectedTicket.id));
       closeModal();
       fetchTickets();
     } catch (err) {
       console.error(err);
       alert(err instanceof Error ? err.message : "Error al procesar el cobro.");
-      setIsSubmitting(false); // re-enable only on error
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleManualPrint = async () => {
+    if (!successSaleData) return;
+    if (activePrinter?.type !== 'bluetooth') {
+      alert('Solo las impresoras Bluetooth soportan impresión directa en este módulo actualmente.');
+      return;
+    }
+
+    try {
+      let deviceToPrint = btDeviceObj;
+      if (!deviceToPrint) {
+        // Pide permisos manualmente si no estaba reconectado
+        const { device } = await requestBluetoothDevice();
+        setBtDeviceObj(device);
+        deviceToPrint = device;
+      }
+
+      await printSaleReceipt(deviceToPrint, successSaleData, activePrinter?.paper_width || 80);
+      alert('Ticket impreso con éxito');
+    } catch (e: any) {
+      console.error(e);
+      alert(`Error de impresión: ${e.message}`);
     }
   };
 
@@ -415,7 +756,7 @@ export default function CajaPage() {
     }
   };
 
-  const handlePrintA4 = (ticket: PendingTicket) => {
+  const handlePrintA4 = async (ticket: PendingTicket) => {
     const lines = ticket.detail.split("\n");
     const reconstructedItems = lines.map((l: string, idx: number) => {
       let code = "";
@@ -424,12 +765,12 @@ export default function CajaPage() {
       let editedPrice = 0;
       try {
         const parts = l.split(" — ");
-        if (parts.length === 2) {
+        if (parts.length === 2 && parts[0] !== undefined && parts[1] !== undefined) {
           const firstSpaceIdx = parts[0].indexOf(" ");
           code = firstSpaceIdx > -1 ? parts[0].substring(0, firstSpaceIdx) : "";
           name = firstSpaceIdx > -1 ? parts[0].substring(firstSpaceIdx + 1) : parts[0];
           const subParts = parts[1].split("m × S/ ");
-          if (subParts.length === 2) {
+          if (subParts.length === 2 && subParts[0] !== undefined && subParts[1] !== undefined) {
             quantity = parseFloat(subParts[0]) || 0;
             editedPrice = parseFloat(subParts[1]) || 0;
           }
@@ -448,7 +789,7 @@ export default function CajaPage() {
     });
 
     const txs = ticket.transactions || [];
-    const izipayTx = txs.find((t) => t.payment_method === "IZIPAY");
+    const izipayTx = txs.find((t: any) => t.payment_method === "IZIPAY");
     const izipayFeeAmt = izipayTx ? izipayTx.surcharge_amount || 0 : 0;
 
     setLastSaleInfo({
@@ -459,7 +800,21 @@ export default function CajaPage() {
       izipayFee: izipayFeeAmt,
     });
 
-    setTimeout(() => window.print(), 120);
+    if (activePrinter?.type === 'bluetooth' && btDeviceObj) {
+      try {
+        const saleDataForPrint = {
+          ...ticket,
+          items: reconstructedItems,
+          customer_name: (ticket as any).customer_name || docName,
+        };
+        await printSaleReceipt(btDeviceObj, saleDataForPrint, activePrinter.paper_width || 80);
+      } catch (e) {
+        console.error(e);
+        alert('Error al imprimir por Bluetooth: ' + (e as Error).message);
+      }
+    } else {
+      setTimeout(() => window.print(), 120); // Fallback to standard print if no Bluetooth
+    }
   };
 
   // ── Format helpers ──
@@ -691,67 +1046,23 @@ export default function CajaPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {filteredTickets.map((ticket) => {
-                  const badge = statusBadge(ticket.status);
-                  const ticketNo = parseInternalTicketNum(ticket);
-                  const sunatDoc = starsoftDocNum(ticket);
-                  
-                  const txs = ticket.transactions || [];
-                  const sumBy = (m: string) => txs.filter(t => t.payment_method === m).reduce((s, t) => s + t.amount, 0);
-                  const efectivoAmt = sumBy("EFECTIVO");
-                  const bcpAmt = sumBy("BCP") + sumBy("IZIPAY");
-                  const bbvaAmt = sumBy("BBVA");
-
-                  const fmt = (n: number) => n === 0 ? "—" : `S/ ${n.toFixed(2)}`;
-
-                  return (
-                    <tr key={ticket.id} className="hover:bg-secondary/30 transition-colors">
-                      <td className="px-6 py-4">
-                        <div className="font-black text-xl">{formatTicketHash(ticketNo)}</div>
-                        {sunatDoc && (
-                          <span className="text-xs text-muted-foreground font-mono">Doc: {sunatDoc}</span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 text-muted-foreground font-mono">{ticket.document_number}</td>
-                      <td className="px-6 py-4 font-mono font-bold text-gray-700">{fmt(efectivoAmt)}</td>
-                      <td className="px-6 py-4 font-mono font-bold text-gray-700">{fmt(bcpAmt)}</td>
-                      <td className="px-6 py-4 font-mono font-bold text-gray-700">{fmt(bbvaAmt)}</td>
-                      <td className="px-6 py-4 font-black text-emerald-500 text-lg">S/ {ticket.total.toFixed(2)}</td>
-                      <td className="px-6 py-4">
-                        <span className={`text-xs font-bold px-2.5 py-1 rounded-full uppercase tracking-wider ${badge.classes}`}>
-                          {badge.label}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <div className="flex justify-end gap-2">
-                          {ticket.status === "PENDING" ? (
-                            <>
-                              <button
-                                onClick={() => handleCancelTicket(ticket)}
-                                className="px-3 py-1.5 rounded-lg text-red-500 bg-red-500/10 hover:bg-red-500/20 font-bold transition-colors"
-                              >
-                                Anular
-                              </button>
-                              <button
-                                onClick={() => openModal(ticket)}
-                                className="px-4 py-1.5 rounded-lg text-white bg-orange-600 hover:bg-orange-500 font-bold shadow-lg shadow-orange-500/20 transition-all"
-                              >
-                                Cobrar
-                              </button>
-                            </>
-                          ) : ticket.status === "COMPLETED" ? (
-                            <button
-                              onClick={() => handlePrintA4(ticket)}
-                              className="px-4 py-1.5 rounded-lg text-white bg-blue-600 hover:bg-blue-500 font-bold shadow-lg shadow-blue-500/20 transition-all"
-                            >
-                              Imprimir A4
-                            </button>
-                          ) : null}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {filteredTickets.map((ticket) => (
+                  <TicketTableRow
+                    key={ticket.id}
+                    ticket={ticket}
+                    onSaveRow={handleSaveCajaRow}
+                    isEditingRef={isEditingRef}
+                    formatTicketHash={formatTicketHash}
+                    parseInternalTicketNum={parseInternalTicketNum}
+                    starsoftDocNum={starsoftDocNum}
+                    inlineCellCls={inlineCellCls}
+                    spinnerOff={spinnerOff}
+                    statusBadge={statusBadge}
+                    handleCancel={(t: any) => handleCancelTicket(t)}
+                    openModal={openModal}
+                    handlePrintA4={handlePrintA4}
+                  />
+                ))}
               </tbody>
             </table>
           </div>
@@ -1054,6 +1365,36 @@ export default function CajaPage() {
         </div>
       )}
 
+      {/* ── Success Print Modal ── */}
+      {showSuccessModal && successSaleData && (
+        <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-3xl w-full max-w-sm shadow-2xl p-6 flex flex-col items-center animate-in zoom-in-95 duration-200">
+            <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mb-4">
+              <CheckCircle2 className="w-10 h-10" />
+            </div>
+            <h2 className="text-2xl font-black text-gray-900 dark:text-white mb-2">¡Venta Exitosa!</h2>
+            <p className="text-gray-500 text-center mb-6">El cobro ha sido procesado correctamente.</p>
+            
+            {activePrinter && activePrinter.type === 'bluetooth' ? (
+              <button
+                onClick={handleManualPrint}
+                className="w-full flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold py-3.5 rounded-xl transition-colors mb-3"
+              >
+                <Receipt className="w-5 h-5 mr-2 text-gray-600" />
+                IMPRIMIR TICKET
+              </button>
+            ) : null}
+
+            <button
+              onClick={() => setShowSuccessModal(false)}
+              className="w-full font-bold py-3 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-xl transition-colors"
+            >
+              CERRAR
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* A4 Print Layout */}
       <div id="print-ticket">
         {lastSaleInfo && (
@@ -1077,7 +1418,7 @@ export default function CajaPage() {
                 const precioFijo = Number(item.precio_fijo || item.catalog_price || item.precio_base || item.price || 0).toFixed(2);
                 const cantidad = item.cantidad || item.quantity || item.qty || 0;
                 const precioVariable = Number(item.precio_variable || item.variable_price || item.editedPrice || item.price || 0).toFixed(2);
-                const subtotal = Number(item.subtotal || (cantidad * precioVariable) || 0).toFixed(2);
+                const subtotal = Number(item.subtotal || (Number(cantidad) * Number(precioVariable)) || 0).toFixed(2);
                 return (
                   <div key={item.id} className="ticket-item mb-4 pb-2 border-b border-gray-200">
                     <div className="flex justify-between text-lg font-bold">
