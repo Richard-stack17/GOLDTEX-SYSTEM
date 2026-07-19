@@ -12,7 +12,7 @@ import { useRouter } from "next/navigation";
 
 export default function HubPage() {
   const [isMounted, setIsMounted] = useState(false);
-  const { role, username, isHydrated, clearSession } = useRole();
+  const { role, username, isHydrated, clearSession, permissions } = useRole();
   const { theme, toggleTheme } = useTheme();
   const router = useRouter();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -36,7 +36,7 @@ export default function HubPage() {
     <div className="min-h-screen p-8 max-w-[1400px] mx-auto space-y-12">
       <header className="flex justify-between items-end border-b border-white/10 pb-6">
         <div>
-          <h1 className="text-4xl font-bold tracking-tight mb-2">Hola, {username || (role === 'CAJERA' ? 'Cajera' : role === 'MOSTRADOR' ? 'Mostrador' : 'Admin')} 👋</h1>
+          <h1 className="text-4xl font-bold tracking-tight mb-2">Hola, {username || role} 👋</h1>
           <p className="text-muted-foreground text-lg">¿Qué deseas hacer hoy?</p>
         </div>
         <div className="flex flex-col items-end gap-3">
@@ -65,8 +65,8 @@ export default function HubPage() {
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-6 gap-6">
-        {/* POS - Acceso: ADMIN, MOSTRADOR */}
-        {(role === 'ADMIN' || role === 'MOSTRADOR') ? (
+        {/* POS - Acceso: access_pos */}
+        {permissions?.access_pos ? (
           <Link href="/pos" className="block group">
             <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-blue-500/50 hover:shadow-[0_0_30px_rgba(59,130,246,0.2)]">
               <CardHeader>
@@ -88,21 +88,21 @@ export default function HubPage() {
               </div>
               <CardTitle className="text-2xl text-gray-400">Punto 1</CardTitle>
               <CardDescription className="text-base mt-2 text-gray-500">
-                Acceso denegado (Requiere ADMIN o MOSTRADOR).
+                Acceso denegado (Requiere permiso de Punto de Venta).
               </CardDescription>
             </CardHeader>
           </Card>
         )}
 
-        {/* Inventario - Acceso: ADMIN */}
-        {(role === 'ADMIN') ? (
+        {/* Inventario - Acceso: access_inventory */}
+        {permissions?.access_inventory ? (
           <Link href="/inventario" className="block group">
             <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-purple-500/50 hover:shadow-[0_0_30px_rgba(168,85,186,0.2)]">
               <CardHeader>
                 <div className="w-14 h-14 rounded-xl bg-purple-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
                   <PackageSearch className="w-7 h-7 text-purple-400" />
                 </div>
-                <CardTitle className="text-2xl">Catálogo</CardTitle>
+                <CardTitle className="text-2xl">Catálogo & Servicios</CardTitle>
                 <CardDescription className="text-base mt-2">
                   Gestión de stock, control de productos, y alertas de desabastecimiento.
                 </CardDescription>
@@ -115,16 +115,16 @@ export default function HubPage() {
               <div className="w-14 h-14 rounded-xl bg-gray-500/20 flex items-center justify-center mb-4">
                 <PackageSearch className="w-7 h-7 text-gray-500" />
               </div>
-              <CardTitle className="text-2xl text-gray-400">Catálogo</CardTitle>
+              <CardTitle className="text-2xl text-gray-400">Catálogo & Servicios</CardTitle>
               <CardDescription className="text-base mt-2 text-gray-500">
-                Acceso denegado (Requiere ADMIN).
+                Acceso denegado (Requiere permiso de Inventario).
               </CardDescription>
             </CardHeader>
           </Card>
         )}
 
-        {/* Dashboard - Acceso: ADMIN */}
-        {(role === 'ADMIN') ? (
+        {/* Dashboard - Acceso: access_dashboard */}
+        {permissions?.access_dashboard ? (
           <Link href="/dashboard" className="block group">
             <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-emerald-500/50 hover:shadow-[0_0_30px_rgba(16,185,129,0.2)]">
               <CardHeader>
@@ -146,14 +146,14 @@ export default function HubPage() {
               </div>
               <CardTitle className="text-2xl text-gray-400">Dashboard</CardTitle>
               <CardDescription className="text-base mt-2 text-gray-500">
-                Acceso denegado (Requiere ADMIN).
+                Acceso denegado (Requiere permiso de Dashboard).
               </CardDescription>
             </CardHeader>
           </Card>
         )}
 
-        {/* Caja - Acceso: ADMIN, CAJERA */}
-        {(role === 'ADMIN' || role === 'CAJERA') ? (
+        {/* Caja - Acceso: access_caja */}
+        {permissions?.access_caja ? (
           <Link href="/caja" className="block group">
             <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-cyan-500/50 hover:shadow-[0_0_30px_rgba(6,182,212,0.2)]">
               <CardHeader>
@@ -181,8 +181,8 @@ export default function HubPage() {
           </Card>
         )}
 
-        {/* Contabilidad - Acceso: ADMIN, CAJERA */}
-        {(role === 'ADMIN' || role === 'CAJERA') ? (
+        {/* Contabilidad - Acceso: access_contabilidad */}
+        {permissions?.access_contabilidad ? (
           <Link href="/contabilidad" className="block group w-full">
             <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-amber-500/50 hover:shadow-[0_0_30px_rgba(245,158,11,0.2)] cursor-pointer">
               <CardHeader>
@@ -210,8 +210,8 @@ export default function HubPage() {
           </Card>
         )}
 
-        {/* Clientes Frecuentes - Acceso: ADMIN, CAJERA */}
-        {(role === 'ADMIN' || role === 'CAJERA') ? (
+        {/* Clientes Frecuentes - Acceso: access_clientes */}
+        {permissions?.access_clientes ? (
           <Link href="/clientes" className="block group w-full">
             <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-pink-500/50 hover:shadow-[0_0_30px_rgba(236,72,153,0.2)] cursor-pointer">
               <CardHeader>
@@ -239,8 +239,8 @@ export default function HubPage() {
           </Card>
         )}
 
-        {/* Personal - Acceso: ADMIN only */}
-        {role === 'ADMIN' ? (
+        {/* Personal - Acceso: access_personal */}
+        {permissions?.access_personal ? (
           <Link href="/admin/personal" className="block group">
             <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-indigo-500/50 hover:shadow-[0_0_30px_rgba(99,102,241,0.2)]">
               <CardHeader>
@@ -262,14 +262,14 @@ export default function HubPage() {
               </div>
               <CardTitle className="text-2xl text-gray-400">Personal</CardTitle>
               <CardDescription className="text-base mt-2 text-gray-500">
-                Acceso denegado (Requiere ADMIN).
+                Acceso denegado (Requiere permiso de Gestión de Personal).
               </CardDescription>
             </CardHeader>
           </Card>
         )}
 
-        {/* Historial de Proformas - Acceso: ADMIN only */}
-        {role === 'ADMIN' ? (
+        {/* Historial de Proformas - Acceso: access_proformas */}
+        {permissions?.access_proformas ? (
           <Link href="/historial-proformas" className="block group">
             <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-teal-500/50 hover:shadow-[0_0_30px_rgba(20,184,166,0.2)]">
               <CardHeader>
@@ -291,14 +291,14 @@ export default function HubPage() {
               </div>
               <CardTitle className="text-2xl text-gray-400">Historial</CardTitle>
               <CardDescription className="text-base mt-2 text-gray-500">
-                Acceso denegado (Requiere ADMIN).
+                Acceso denegado (Requiere permiso de Historial).
               </CardDescription>
             </CardHeader>
           </Card>
         )}
 
-        {/* Configuración - Acceso: ADMIN only */}
-        {role === 'ADMIN' && (
+        {/* Configuración - Acceso: access_settings */}
+        {permissions?.access_settings && (
           <Link href="/configuracion" className="block group">
             <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-emerald-500/50 hover:shadow-[0_0_30px_rgba(16,185,129,0.2)]">
               <CardHeader>

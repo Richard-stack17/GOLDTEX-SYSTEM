@@ -1,4 +1,0 @@
-/* Import GOLTEX Theme and Tailwind config from the shared packages/ui styles */
-@import "@goltex/ui/globals.css";
-
-/* Additional app-specific styles could go here */

@@ -87,11 +87,10 @@ const mapSale = (sale: any): ExcelRow => {
 // ─── Toast helper ─────────────────────────────────────────────────────────────
 function Toast({ message, type }: { message: string; type: 'success' | 'error' }) {
   return (
-    <div className={`fixed bottom-5 right-5 z-50 flex items-center gap-3 px-5 py-3.5 rounded-2xl border shadow-2xl font-bold text-sm animate-in fade-in slide-in-from-bottom-4 ${
-      type === 'success'
+    <div className={`fixed bottom-5 right-5 z-50 flex items-center gap-3 px-5 py-3.5 rounded-2xl border shadow-2xl font-bold text-sm animate-in fade-in slide-in-from-bottom-4 ${type === 'success'
         ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
         : 'bg-red-500/10 border-red-500/30 text-red-500'
-    }`}>
+      }`}>
       {type === 'success' ? (
         <CheckCircle2 className="w-4 h-4 shrink-0" />
       ) : (
@@ -142,7 +141,7 @@ export default function ContabilidadPage() {
     try {
       const { data, error: e } = await querySales(start, end);
       if (e) throw new Error(e.message);
-      if (!data?.length) throw new Error(`Sin ventas COMPLETED entre ${start} y ${end}.`);
+      if (!data?.length) throw new Error("No se registraron ventas pagadas en este periodo.");
       setPreviewRows(data.map(mapSale));
       setIsDataCurrent(true);
     } catch (err) {
@@ -165,7 +164,7 @@ export default function ContabilidadPage() {
         "postgres_changes",
         { event: "*", schema: "public", table: "sales" },
         () => {
-           loadRows(startDate, endDate); // silent refresh on realtime event
+          loadRows(startDate, endDate); // silent refresh on realtime event
         }
       )
       .subscribe();
@@ -198,8 +197,8 @@ export default function ContabilidadPage() {
       const comment = rowBuffer.comentario.trim();
 
       const { error: e } = await supabase.from('sales')
-        .update({ 
-          document_number: rowBuffer.documento, 
+        .update({
+          document_number: rowBuffer.documento,
           voucher_doc_number: voucherDocNumber,
           voucher_doc_name: voucherDocName,
           comment: comment
@@ -212,7 +211,7 @@ export default function ContabilidadPage() {
         { name: isIzipay ? "IZIPAY" : "BCP", amount: bcp },
         { name: "BBVA", amount: bbva },
       ];
-      
+
       // Aseguramos de eliminar la otra contraparte que no debe existir
       if (isIzipay) {
         methods.push({ name: "BCP", amount: 0 });
@@ -224,7 +223,7 @@ export default function ContabilidadPage() {
         const { data: existingTx } = await supabase
           .from('transactions').select('id')
           .eq('sale_id', rowId).eq('payment_method', m.name).maybeSingle();
-        
+
         if (existingTx) {
           if (m.amount > 0) {
             await supabase.from('transactions').update({ amount: m.amount }).eq('id', existingTx.id);
@@ -238,7 +237,7 @@ export default function ContabilidadPage() {
           });
         }
       }
-      
+
       // Actualización inmediata del estado local (Opción A)
       setPreviewRows(prev => {
         if (!prev) return prev;
@@ -259,7 +258,7 @@ export default function ContabilidadPage() {
           return r;
         });
       });
-      
+
       showToast('Fila actualizada correctamente', 'success');
       return true;
     } catch (err: any) {
@@ -324,7 +323,7 @@ export default function ContabilidadPage() {
         const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
         const cell = ws[cellRef];
         if (!cell) continue;
-        
+
         let color = "000000"; // default black
         if (C === 4) color = "0000FF"; // BBVA: Blue
         else if (C === 5) color = "FF0000"; // BCP: Red
@@ -333,16 +332,16 @@ export default function ContabilidadPage() {
         const isHeader = R === 0;
         const isSubTotals = R === range.e.r - 1;
         const isGeneralTotal = R === range.e.r;
-        
+
         // Make the General Total cell (under BBVA) green
         if (isGeneralTotal && C === 4) color = "008000"; // Green
 
         cell.s = {
           font: { color: { rgb: color }, bold: isHeader || isSubTotals || isGeneralTotal },
-          alignment: { 
-            wrapText: isHeader && C === 1, 
+          alignment: {
+            wrapText: isHeader && C === 1,
             vertical: "center",
-            horizontal: (C >= 4 && C <= 5 || isHeader) ? "center" : "left" 
+            horizontal: (C >= 4 && C <= 5 || isHeader) ? "center" : "left"
           }
         };
       }
@@ -395,20 +394,18 @@ export default function ContabilidadPage() {
 
       <main className="flex-1 min-w-0">
         {/* Header */}
-        <header className="bg-white border-b border-gray-200 sticky top-0 z-20 shadow-sm">
-          <div className="px-8 h-16 flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <Link href="/hub" className="text-gray-400 hover:text-indigo-600 transition-colors p-1.5 rounded-lg hover:bg-indigo-50">
-                <ArrowLeft className="w-5 h-5" />
-              </Link>
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 bg-indigo-100 rounded-xl flex items-center justify-center">
-                  <BarChart3 className="w-5 h-5 text-indigo-600" />
-                </div>
-                <div>
-                  <h1 className="text-base font-bold text-gray-900 leading-none">G-SYSTEM ERP — Contabilidad</h1>
-                  <p className="text-xs text-gray-500 mt-0.5">Ventas COMPLETED · Hora local Lima (UTC-5)</p>
-                </div>
+        <header className="bg-card border-b border-border px-6 h-16 flex items-center justify-between shadow-sm">
+          <div className="flex items-center gap-4">
+            <Link href="/hub" className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-secondary">
+              <ArrowLeft className="w-5 h-5" />
+            </Link>
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center">
+                <BarChart3 className="w-4 h-4 text-white" />
+              </div>
+              <div>
+                <h1 className="text-base font-bold leading-none">Módulo de Contabilidad</h1>
+                <p className="text-xs text-muted-foreground mt-0.5">Control de Ventas y Liquidación</p>
               </div>
             </div>
           </div>
@@ -501,6 +498,9 @@ export default function ContabilidadPage() {
                     <span className="font-bold">S/ {totals!.EFECTIVO.toFixed(2)}</span>
                   </div>
                 )}
+                <div className="flex items-center ml-2 text-xs text-slate-500 italic">
+                  (Nota: Incluye ventas 100% en efectivo)
+                </div>
               </div>
             )}
           </div>

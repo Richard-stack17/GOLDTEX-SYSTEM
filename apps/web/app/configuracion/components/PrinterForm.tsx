@@ -2,10 +2,11 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Printer, Trash2, Search, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
+import { ArrowLeft, Printer, Trash2, Search, CheckCircle2, AlertCircle, Loader2, Save } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { requestBluetoothDevice, printTestReceipt } from '../utils/printerEngine';
 import ReceiptPreview from '../../components/ReceiptPreview';
+import { ConfirmDialog } from '../../../components/ConfirmDialog';
 
 // Helper de Toast (mismo estilo que Contabilidad)
 function Toast({ message, type }: { message: string; type: 'success' | 'error' }) {
@@ -45,6 +46,12 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
   const [isSearching, setIsSearching] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  // Unsaved changes tracking
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showRestoreConfirm, setShowRestoreConfirm] = useState(false);
 
   useEffect(() => {
     if (isEditing) {
@@ -103,13 +110,17 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
     if (error) {
       showToast(error.message, 'error');
     } else {
+      setHasUnsavedChanges(false);
       showToast(isEditing ? 'Impresora actualizada' : 'Impresora agregada', 'success');
       setTimeout(() => router.push('/configuracion'), 1000);
     }
   };
 
-  const handleDelete = async () => {
-    if (!confirm('¿Estás seguro de eliminar esta impresora?')) return;
+  const handleDelete = () => {
+    setShowDeleteConfirm(true);
+  };
+
+  const confirmDelete = async () => {
     setIsLoading(true);
     const { error } = await supabase.from('printers').delete().eq('id', printerId);
     setIsLoading(false);
@@ -120,6 +131,7 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
       showToast('Impresora eliminada', 'success');
       setTimeout(() => router.push('/configuracion'), 1000);
     }
+    setShowDeleteConfirm(false);
   };
 
   const handleBuscarBT = async () => {
@@ -156,56 +168,86 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
     }
   };
 
+  const handleRestoreDefaults = () => {
+    setShowRestoreConfirm(true);
+  };
+
+  const confirmRestoreDefaults = () => {
+    setName('Caja');
+    setModel('Otro modelo');
+    setType('bluetooth');
+    setPaperWidth(80);
+    setMacAddress('');
+    setIpAddress('192.168.1.100');
+    setPort(9100);
+    setPrintReceipts(true);
+    setAutoPrint(false);
+    setMaxChars(42);
+    setBtDeviceObj(null);
+    showToast('Valores predeterminados restaurados', 'success');
+    setShowRestoreConfirm(false);
+  };
+
   return (
-    <div className="max-w-2xl mx-auto min-h-screen bg-gray-50 flex flex-col relative pb-20">
-      {/* Header Estilo App */}
-      <div className="bg-white border-b border-gray-200 flex items-center justify-between px-4 py-3 shadow-sm sticky top-0 z-10">
-        <div className="flex items-center">
-          <button onClick={() => router.push('/configuracion')} className="p-2 -ml-2 hover:bg-gray-100 rounded-full transition-colors mr-2">
-            <ArrowLeft className="w-6 h-6 text-gray-700" />
+    <div className="min-h-screen bg-background text-foreground flex flex-col">
+      <header className="bg-card border-b border-border px-6 h-16 flex items-center justify-between shadow-sm shrink-0">
+        <div className="flex items-center gap-4">
+          <button 
+            onClick={() => hasUnsavedChanges ? setShowExitConfirm(true) : router.push('/configuracion')} 
+            className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-secondary"
+          >
+            <ArrowLeft className="w-5 h-5" />
           </button>
-          <h1 className="text-xl font-bold tracking-wide text-gray-900">{isEditing ? 'Editar impresora' : 'Agregar impresora'}</h1>
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-slate-500 rounded-lg flex items-center justify-center">
+              <Printer className="w-4 h-4 text-white" />
+            </div>
+            <div>
+              <h1 className="text-base font-bold leading-none">{isEditing ? 'Editar Impresora' : 'Agregar Impresora'}</h1>
+              <p className="text-xs text-muted-foreground mt-0.5">Configuración de dispositivo</p>
+            </div>
+          </div>
         </div>
         <button 
           onClick={handleSave} 
           disabled={isLoading}
-          className="font-bold text-[15px] uppercase tracking-wider px-3 py-1.5 text-emerald-600 hover:bg-emerald-50 rounded transition-colors disabled:opacity-50"
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold transition-colors shadow-sm hover:bg-primary/90 disabled:opacity-50"
         >
-          Guardar
+          <Save className="w-3.5 h-3.5" /> GUARDAR
         </button>
-      </div>
+      </header>
 
-      <div className="flex-1 mt-6">
+      <main className="flex-1 p-6 max-w-2xl mx-auto w-full space-y-6 pb-20">
         {/* Bloque 1: Básicos */}
-        <div className="bg-white border-y border-gray-200 divide-y divide-gray-100">
-          <div className="px-4 py-3">
-            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Nombre</label>
+        <div className="bg-card border border-border rounded-xl shadow-sm divide-y divide-border overflow-hidden">
+          <div className="px-5 py-4">
+            <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Nombre</label>
             <input 
               type="text" 
               value={name} 
-              onChange={e => setName(e.target.value)}
-              className="w-full text-[17px] font-medium text-gray-900 bg-transparent outline-none placeholder-gray-400 py-1"
+              onChange={e => { setName(e.target.value); setHasUnsavedChanges(true); }}
+              className="w-full text-[15px] font-medium bg-transparent outline-none placeholder:text-muted-foreground"
               placeholder="Ej: Caja"
             />
           </div>
-          <div className="px-4 py-3">
-            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Modelo de la impresora</label>
+          <div className="px-5 py-4">
+            <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Modelo de la impresora</label>
             <select 
               value={model} 
-              onChange={e => setModel(e.target.value)}
-              className="w-full text-[17px] font-medium text-gray-900 bg-transparent outline-none py-1 appearance-none cursor-pointer"
+              onChange={e => { setModel(e.target.value); setHasUnsavedChanges(true); }}
+              className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer"
             >
               <option value="Otro modelo">Otro modelo</option>
               <option value="Epson TM-T20">Epson TM-T20</option>
               <option value="Star Micronics">Star Micronics</option>
             </select>
           </div>
-          <div className="px-4 py-3">
-            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Interfaz</label>
+          <div className="px-5 py-4">
+            <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Interfaz</label>
             <select 
               value={type} 
-              onChange={e => setType(e.target.value)}
-              className="w-full text-[17px] font-medium text-gray-900 bg-transparent outline-none py-1 appearance-none cursor-pointer"
+              onChange={e => { setType(e.target.value); setHasUnsavedChanges(true); }}
+              className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer"
             >
               <option value="bluetooth">Bluetooth</option>
               <option value="wifi">WiFi</option>
@@ -215,24 +257,24 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
         </div>
 
         {/* Lógica Condicional de Interfaz */}
-        <div className="bg-white border-y border-gray-200 divide-y divide-gray-100 mt-6">
+        <div className="bg-card border border-border rounded-xl shadow-sm divide-y divide-border overflow-hidden">
           {type === 'bluetooth' && (
-            <div className="px-4 py-3 flex items-center justify-between">
+            <div className="px-5 py-4 flex items-center justify-between">
               <div className="flex-1">
-                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Impresora Bluetooth</label>
+                <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Impresora Bluetooth</label>
                 <input 
                   type="text" 
                   readOnly
                   value={macAddress} 
-                  className="w-full text-[17px] font-medium text-gray-400 bg-transparent outline-none py-1 cursor-not-allowed"
+                  className="w-full text-[15px] font-medium text-muted-foreground bg-transparent outline-none cursor-not-allowed"
                   placeholder="No seleccionada"
                 />
               </div>
               <button 
                 onClick={handleBuscarBT}
-                className="ml-4 px-4 py-2 bg-gray-100 text-gray-700 font-bold text-sm rounded-lg border border-gray-300 hover:bg-gray-200 active:bg-gray-300 transition-colors flex items-center shadow-sm"
+                className="ml-4 px-4 py-2 bg-secondary text-secondary-foreground font-bold text-sm rounded-lg border border-border hover:bg-secondary/80 active:bg-secondary/60 transition-colors flex items-center shadow-sm"
               >
-                <Search className="w-4 h-4 mr-2 text-gray-500" />
+                <Search className="w-4 h-4 mr-2" />
                 BUSCAR
               </button>
             </div>
@@ -240,46 +282,46 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
           
           {type === 'wifi' && (
             <>
-              <div className="px-4 py-3">
-                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Dirección IP</label>
+              <div className="px-5 py-4">
+                <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Dirección IP</label>
                 <input 
                   type="text" 
                   value={ipAddress} 
-                  onChange={e => setIpAddress(e.target.value)}
-                  className="w-full text-[17px] font-medium text-gray-900 bg-transparent outline-none py-1"
+                  onChange={e => { setIpAddress(e.target.value); setHasUnsavedChanges(true); }}
+                  className="w-full text-[15px] font-medium bg-transparent outline-none"
                   placeholder="192.168.1.100"
                 />
               </div>
-              <div className="px-4 py-3">
-                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Puerto</label>
+              <div className="px-5 py-4">
+                <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Puerto</label>
                 <input 
                   type="number" 
                   value={port} 
-                  onChange={e => setPort(Number(e.target.value))}
-                  className="w-full text-[17px] font-medium text-gray-900 bg-transparent outline-none py-1"
+                  onChange={e => { setPort(Number(e.target.value)); setHasUnsavedChanges(true); }}
+                  className="w-full text-[15px] font-medium bg-transparent outline-none"
                   placeholder="9100"
                 />
               </div>
             </>
           )}
 
-          <div className="px-4 py-3">
-            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Ancho de papel</label>
+          <div className="px-5 py-4">
+            <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Ancho de papel</label>
             <select 
               value={paperWidth} 
-              onChange={e => setPaperWidth(Number(e.target.value))}
-              className="w-full text-[17px] font-medium text-gray-900 bg-transparent outline-none py-1 appearance-none cursor-pointer"
+              onChange={e => { setPaperWidth(Number(e.target.value)); setHasUnsavedChanges(true); }}
+              className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer"
             >
               <option value={80}>80 mm</option>
               <option value={58}>58 mm</option>
             </select>
           </div>
-          <div className="px-4 py-3">
-            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Caracteres por línea</label>
+          <div className="px-5 py-4">
+            <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Caracteres por línea</label>
             <select 
               value={maxChars} 
-              onChange={e => setMaxChars(Number(e.target.value))}
-              className="w-full text-[17px] font-medium text-gray-900 bg-transparent outline-none py-1 appearance-none cursor-pointer"
+              onChange={e => { setMaxChars(Number(e.target.value)); setHasUnsavedChanges(true); }}
+              className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer"
             >
               <option value={32}>32 (58mm)</option>
               <option value={42}>42 (80mm genérico)</option>
@@ -289,27 +331,27 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
         </div>
 
         {/* Toggles */}
-        <div className="bg-white border-y border-gray-200 divide-y divide-gray-100 mt-6">
-          <div className="px-4 py-4 flex items-center justify-between">
-            <span className="text-[17px] font-medium text-gray-900">Imprimir recibos</span>
+        <div className="bg-card border border-border rounded-xl shadow-sm divide-y divide-border overflow-hidden">
+          <div className="px-5 py-4 flex items-center justify-between">
+            <span className="text-[15px] font-medium">Imprimir recibos</span>
             <label className="relative inline-flex items-center cursor-pointer">
-              <input type="checkbox" className="sr-only peer" checked={printReceipts} onChange={e => setPrintReceipts(e.target.checked)} />
-              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+              <input type="checkbox" className="sr-only peer" checked={printReceipts} onChange={e => { setPrintReceipts(e.target.checked); setHasUnsavedChanges(true); }} />
+              <div className="w-11 h-6 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
             </label>
           </div>
           {printReceipts && (
-            <div className="px-4 py-4 flex items-center justify-between bg-gray-50/50">
-              <span className="text-[17px] font-medium text-gray-900">Imprimir recibos automáticamente</span>
+            <div className="px-5 py-4 flex items-center justify-between bg-muted/20">
+              <span className="text-[15px] font-medium">Imprimir recibos automáticamente</span>
               <label className="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" className="sr-only peer" checked={autoPrint} onChange={e => setAutoPrint(e.target.checked)} />
-                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+                <input type="checkbox" className="sr-only peer" checked={autoPrint} onChange={e => { setAutoPrint(e.target.checked); setHasUnsavedChanges(true); }} />
+                <div className="w-11 h-6 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
               </label>
             </div>
           )}
         </div>
 
         {/* Vista Previa / Calibrador */}
-        <div className="mt-6 px-4">
+        <div className="mt-4">
           <ReceiptPreview 
             maxChars={maxChars} 
             saleData={{
@@ -327,38 +369,73 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
         </div>
 
         {/* Botones de Acción */}
-        <div className="mt-8 px-4 flex flex-col items-center space-y-4">
+        <div className="mt-8 flex flex-col items-center space-y-4">
           <button 
             onClick={handleTestPrint}
-            className="flex items-center justify-center w-full max-w-sm py-3.5 bg-white border-2 border-gray-200 text-gray-800 font-bold rounded-xl shadow-sm hover:bg-gray-50 active:bg-gray-100 transition-colors"
+            className="flex items-center justify-center w-full max-w-sm py-3 bg-card border border-border font-bold text-sm rounded-xl shadow-sm hover:bg-muted active:bg-muted/80 transition-colors"
           >
-            <Printer className="w-5 h-5 mr-2 text-gray-600" />
+            <Printer className="w-4 h-4 mr-2" />
             IMPRESIÓN DE PRUEBA
+          </button>
+          
+          <button 
+            onClick={handleRestoreDefaults}
+            className="flex items-center justify-center w-full max-w-sm py-3 text-muted-foreground font-bold text-sm rounded-xl hover:bg-muted active:bg-muted/80 transition-colors"
+          >
+            RESTAURAR VALORES PREDETERMINADOS
           </button>
 
           {isEditing && (
             <button 
               onClick={handleDelete}
               disabled={isLoading}
-              className="flex items-center justify-center w-full max-w-sm py-3.5 text-red-600 font-bold rounded-xl hover:bg-red-50 active:bg-red-100 transition-colors disabled:opacity-50"
+              className="flex items-center justify-center w-full max-w-sm py-3 text-red-500 font-bold text-sm rounded-xl hover:bg-red-500/10 active:bg-red-500/20 transition-colors disabled:opacity-50"
             >
-              <Trash2 className="w-5 h-5 mr-2" />
+              <Trash2 className="w-4 h-4 mr-2" />
               ELIMINAR IMPRESORA
             </button>
           )}
         </div>
-      </div>
+      </main>
 
       {/* Modal Básico Buscando BT */}
       {isSearching && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl p-8 max-w-xs w-full shadow-2xl flex flex-col items-center">
+          <div className="bg-card rounded-2xl p-8 max-w-xs w-full shadow-2xl flex flex-col items-center border border-border">
             <Loader2 className="w-12 h-12 text-emerald-600 animate-spin mb-4" />
-            <h3 className="text-lg font-bold text-gray-900 mb-1">Buscando...</h3>
-            <p className="text-sm text-gray-500 text-center">Asegúrate de que la impresora esté encendida y emparejada.</p>
+            <h3 className="text-lg font-bold mb-1">Buscando...</h3>
+            <p className="text-sm text-muted-foreground text-center">Asegúrate de que la impresora esté encendida y emparejada.</p>
           </div>
         </div>
       )}
+
+      {/* Modal Confirmación Salir */}
+      <ConfirmDialog
+        isOpen={showExitConfirm}
+        onCancel={() => setShowExitConfirm(false)}
+        onConfirm={() => router.push('/configuracion')}
+        title="Cambios sin guardar"
+        description="Tienes cambios que no han sido guardados. ¿Estás seguro de que quieres salir? Se perderán todas tus modificaciones."
+        isLoading={false}
+      />
+
+      <ConfirmDialog
+        isOpen={showDeleteConfirm}
+        onCancel={() => setShowDeleteConfirm(false)}
+        onConfirm={confirmDelete}
+        title="Eliminar Impresora"
+        description="¿Estás seguro de eliminar esta impresora? Esta acción no se puede deshacer."
+        isLoading={isLoading}
+      />
+
+      <ConfirmDialog
+        isOpen={showRestoreConfirm}
+        onCancel={() => setShowRestoreConfirm(false)}
+        onConfirm={confirmRestoreDefaults}
+        title="Restaurar Valores"
+        description="¿Deseas restaurar la configuración predeterminada? Se perderán los cambios no guardados."
+        isLoading={false}
+      />
 
       {toast && <Toast message={toast.message} type={toast.type} />}
     </div>

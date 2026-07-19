@@ -12,6 +12,7 @@ import {
   CheckCircle2, AlertCircle, ArrowLeft, Clock, Receipt, XCircle,
   LayoutGrid, List, Trash2, Delete, Sun, Moon, FileText, User, Printer
 } from "lucide-react";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { supabase } from "../lib/supabase";
 import {
   formatTicketHash,
@@ -39,28 +40,29 @@ type PendingTicket = {
   voucher_type?: VoucherType | null;
   voucher_doc_number?: string | null;
   transactions?: any[];
+  items?: any[] | string;
 };
 
 type DocField = "docNumber" | "docName" | null;
 
 const PAYMENT_METHODS: { id: PaymentMethod; label: string; sub: string; Icon: React.ElementType }[] = [
   { id: "EFECTIVO", label: "Efectivo", sub: "Dinero en mano", Icon: Banknote },
-  { id: "BCP",      label: "BCP",      sub: "Yape / Transf.", Icon: Smartphone },
-  { id: "BBVA",     label: "BBVA",     sub: "Plin / Transf.", Icon: Smartphone },
-  { id: "IZIPAY",   label: "Izipay",   sub: "+ Recargo 4%",   Icon: CreditCard },
+  { id: "BCP", label: "BCP", sub: "Yape / Transf.", Icon: Smartphone },
+  { id: "BBVA", label: "BBVA", sub: "Plin / Transf.", Icon: Smartphone },
+  { id: "IZIPAY", label: "Izipay", sub: "+ Recargo 4%", Icon: CreditCard },
 ];
 
 const STATUS_FILTERS: { id: StatusFilter; label: string }[] = [
-  { id: "PENDING",   label: "Pendientes" },
+  { id: "PENDING", label: "Pendientes" },
   { id: "COMPLETED", label: "Pagados" },
   { id: "CANCELLED", label: "Anulados" },
-  { id: "ALL",       label: "Todos" },
+  { id: "ALL", label: "Todos" },
 ];
 
 const VOUCHER_TYPES: { id: VoucherType; label: string; icon: string }[] = [
-  { id: "TICKET",  label: "Ticket / Simple", icon: "🎫" },
-  { id: "BOLETA",  label: "Boleta (DNI)",    icon: "📄" },
-  { id: "FACTURA", label: "Factura (RUC)",   icon: "🏢" },
+  { id: "TICKET", label: "Ticket / Simple", icon: "🎫" },
+  { id: "BOLETA", label: "Boleta (DNI)", icon: "📄" },
+  { id: "FACTURA", label: "Factura (RUC)", icon: "🏢" },
 ];
 
 // ─────────────── Component ───────────────
@@ -86,12 +88,23 @@ function TicketTableRow({
   const izipayAmt = sumBy("IZIPAY") || 0;
   const bbvaAmt = sumBy("BBVA") || 0;
 
+  const rawIzipayFee = izipayAmt > 0 ? (izipayAmt - (izipayAmt / 1.04)) : 0;
+  let izipayFee = Math.round(rawIzipayFee * 10) / 10;
+  if (izipayAmt > 0 && izipayFee < 0.50) izipayFee = 0.50;
+
   let confeccionAmt = 0;
-  if (Array.isArray(ticket.items)) {
-    const confItem = ticket.items.find((i: any) => i.id === 'confeccion-item' || i.name === 'COSTO POR CONFECCIÓN');
-    if (confItem) confeccionAmt += ((confItem.quantity || 0) * (confItem.price || 0)) || confItem.editedPrice || 0;
-    const taxiItem = ticket.items.find((i: any) => i.id === 'taxi-item' || i.name === 'COSTO POR TAXI');
-    if (taxiItem) confeccionAmt += ((taxiItem.quantity || 0) * (taxiItem.price || 0)) || taxiItem.editedPrice || 0;
+  const itemsArray = Array.isArray(ticket.items) ? ticket.items : [];
+  if (itemsArray.length > 0) {
+    const services = itemsArray.filter((i: any) => {
+      const name = (i.name || '').toUpperCase();
+      return name === 'CONFECCIÓN' || name === 'TAXI' || name.includes('CONFECCIÓN') || name.includes('TAXI') || ((!i.price || Number(i.price) === 0) && Number(i.editedPrice) > 0);
+    });
+    confeccionAmt = services.reduce((acc: number, item: any) => {
+      const q = parseFloat(item.quantity) || 0;
+      const p = parseFloat(item.price) || 0;
+      const ep = parseFloat(item.editedPrice) || 0;
+      return acc + ((q * p) || ep || 0);
+    }, 0);
   }
 
   const montoCalculado = rawEfectivoAmt - confeccionAmt;
@@ -163,7 +176,7 @@ function TicketTableRow({
       <td className="px-6 py-4 text-muted-foreground font-mono">{ticket.document_number}</td>
       <td className="px-2 py-1 whitespace-nowrap min-w-[100px]">
         {ticket.status === "PENDING" ? (
-          <span className="px-4 font-mono font-bold text-gray-400">—</span>
+          <span className="px-4 font-mono font-bold text-gray-400 text-right block w-full">—</span>
         ) : (
           <input type="number" step="0.01" placeholder="0.00"
             value={rowBuffer.monto}
@@ -175,19 +188,7 @@ function TicketTableRow({
       </td>
       <td className="px-2 py-1 whitespace-nowrap min-w-[100px]">
         {ticket.status === "PENDING" ? (
-          <span className="px-4 font-mono font-bold text-gray-400">—</span>
-        ) : (
-          <input type="number" step="0.01" placeholder="0.00"
-            value={rowBuffer.confeccion}
-            onChange={(e) => handleChange('confeccion', e.target.value)}
-            onKeyDown={handleKeyDown}
-            className={`${inlineCellCls} text-right text-gray-700 dark:text-gray-200 ${spinnerOff}`}
-          />
-        )}
-      </td>
-      <td className="px-2 py-1 whitespace-nowrap min-w-[100px]">
-        {ticket.status === "PENDING" ? (
-          <span className="px-4 font-mono font-bold text-gray-400">—</span>
+          <span className="px-4 font-mono font-bold text-gray-400 text-right block w-full">—</span>
         ) : (
           <input type="number" step="0.01" placeholder="0.00"
             value={rowBuffer.bcp}
@@ -199,7 +200,7 @@ function TicketTableRow({
       </td>
       <td className="px-2 py-1 whitespace-nowrap min-w-[100px]">
         {ticket.status === "PENDING" ? (
-          <span className="px-4 font-mono font-bold text-gray-400">—</span>
+          <span className="px-4 font-mono font-bold text-gray-400 text-right block w-full">—</span>
         ) : (
           <input type="number" step="0.01" placeholder="0.00"
             value={rowBuffer.bbva}
@@ -211,7 +212,7 @@ function TicketTableRow({
       </td>
       <td className="px-2 py-1 whitespace-nowrap min-w-[100px]">
         {ticket.status === "PENDING" ? (
-          <span className="px-4 font-mono font-bold text-gray-400">—</span>
+          <span className="px-4 font-mono font-bold text-gray-400 text-right block w-full">—</span>
         ) : (
           <input type="number" step="0.01" placeholder="0.00"
             value={rowBuffer.izipay}
@@ -221,10 +222,32 @@ function TicketTableRow({
           />
         )}
       </td>
-      <td className="px-6 py-4 font-black text-emerald-500 dark:text-emerald-400 text-lg">
-        {ticket.status === "PENDING" ? "—" : `S/ ${ticket.total.toFixed(2)}`}
+      <td className="px-6 py-4 text-right whitespace-nowrap">
+        {ticket.status === "PENDING" ? (
+          <span className="font-black text-emerald-500 dark:text-emerald-400 text-lg">—</span>
+        ) : (
+          <div className="flex flex-col items-end leading-none">
+            <span className="font-black text-emerald-500 dark:text-emerald-400 text-lg">
+              S/ {ticket.total.toFixed(2)}
+            </span>
+            {(izipayFee > 0 || confeccionAmt > 0) && (
+              <div className="flex flex-wrap justify-end gap-1 mt-1">
+                {izipayFee > 0 && (
+                  <span className="bg-slate-100 text-slate-500 text-[10px] px-1.5 py-0.5 rounded-md font-bold">
+                    💳 +S/ {izipayFee.toFixed(2)} Izi
+                  </span>
+                )}
+                {confeccionAmt > 0 && (
+                  <span className="bg-blue-50 text-blue-600 text-[10px] px-1.5 py-0.5 rounded-md font-bold">
+                    ✂️ S/ {confeccionAmt.toFixed(2)} Serv
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </td>
-      <td className="px-6 py-4">
+      <td className="px-6 py-4 text-center">
         <span className={`text-xs font-bold px-2.5 py-1 rounded-full uppercase tracking-wider ${badge.classes}`}>
           {badge.label}
         </span>
@@ -266,6 +289,7 @@ export default function CajaPage() {
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const [viewMode, setViewMode] = useState<"grid" | "list">("list");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
+  const [ticketToCancel, setTicketToCancel] = useState<PendingTicket | null>(null);
   const isEditingRef = useRef(false);
 
   // ── Printer state ──
@@ -342,7 +366,7 @@ export default function CajaPage() {
         .select("id, ruc, business_name")
         .or(`ruc.ilike.%${customerQuery}%,business_name.ilike.%${customerQuery}%`)
         .limit(5);
-      
+
       if (data && data.length > 0) {
         setCustomerResults(data);
         setShowDropdown(true);
@@ -381,11 +405,31 @@ export default function CajaPage() {
     ? Math.round((totalPaid - finalTotal) * 100) / 100
     : 0;
 
+  let totalServices = 0;
+  if (selectedTicket) {
+    let itemsArray = [];
+    if (Array.isArray(selectedTicket.items)) {
+      itemsArray = selectedTicket.items;
+    } else if (typeof selectedTicket.items === 'string') {
+      try { itemsArray = JSON.parse(selectedTicket.items); } catch (e) { }
+    }
+
+    if (itemsArray.length > 0) {
+      const services = itemsArray.filter((i: any) => {
+        if (i.is_service === true) return true;
+        // Legacy fallback only for old tickets
+        const name = (i.name || '').toUpperCase();
+        return name === 'CONFECCIÓN' || name === 'TAXI';
+      });
+      totalServices = services.reduce((acc: number, item: any) => acc + (item.editedPrice * (item.quantity || 1)), 0);
+    }
+  }
+
   // Voucher validation
   const needsDocInfo = voucherType === "BOLETA" || voucherType === "FACTURA";
   const docNumberValid = !needsDocInfo || (
     voucherType === "BOLETA" ? /^\d{8}$/.test(docNumber) :
-    voucherType === "FACTURA" ? /^\d{11}$/.test(docNumber) : true
+      voucherType === "FACTURA" ? /^\d{11}$/.test(docNumber) : true
   );
   const docNameValid = !needsDocInfo || docName.trim().length >= 3;
   const canConfirm = Math.round(totalPaid * 100) >= Math.round(finalTotal * 100) && finalTotal > 0 && docNumberValid && docNameValid;
@@ -475,9 +519,9 @@ export default function CajaPage() {
       const izipay = parseFloat(rowBuffer.izipay) || 0;
       const monto = parseFloat(rowBuffer.monto) || 0;
       const confeccion = parseFloat(rowBuffer.confeccion) || 0;
-      
+
       const efectivo = monto + confeccion;
-      
+
       const methods = [
         { name: "EFECTIVO", amount: efectivo },
         { name: "BCP", amount: bcp },
@@ -615,25 +659,42 @@ export default function CajaPage() {
 
 
 
-  const handleCancelTicket = async (ticket: PendingTicket, e?: React.MouseEvent) => {
+  const handleCancelTicket = (ticket: PendingTicket, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    if (!window.confirm(`¿Estás seguro de que deseas anular el ${ticket.document_number}?`)) return;
+    setTicketToCancel(ticket);
+  };
 
+  const confirmCancelTicket = async () => {
+    if (!ticketToCancel) return;
     setIsProcessing(true);
     try {
+      const currentSourceSheet = (ticketToCancel as any).source_sheet || '';
+      const newSourceSheet = `${currentSourceSheet}|ANULADO:${username}`;
+      const updated_at = new Date().toISOString();
+
       const { error } = await supabase
         .from("sales")
-        .update({ status: "CANCELLED" })
-        .eq("id", ticket.id);
+        .update({
+          status: "CANCELLED",
+          source_sheet: newSourceSheet,
+          updated_at: updated_at
+        })
+        .eq("id", ticketToCancel.id);
       if (error) throw error;
 
-      setTickets((prev) => prev.map(t => t.id === ticket.id ? { ...t, status: "CANCELLED" } : t));
-      if (selectedTicket?.id === ticket.id) closeModal();
+      setTickets((prev) => prev.map(t => t.id === ticketToCancel.id ? {
+        ...t,
+        status: "CANCELLED",
+        source_sheet: newSourceSheet,
+        updated_at: updated_at
+      } : t));
+      if (selectedTicket?.id === ticketToCancel.id) closeModal();
     } catch (err) {
       console.error(err);
       alert("Error al anular el ticket.");
     } finally {
       setIsProcessing(false);
+      setTicketToCancel(null);
     }
   };
 
@@ -722,9 +783,9 @@ export default function CajaPage() {
   const starsoftDocNum = (ticket: PendingTicket) => starsoftDocNumFromTicket(ticket);
 
   const statusBadge = (status: SaleStatus) => {
-    if (status === "PENDING")   return { label: "Pendiente", classes: "bg-orange-500/20 text-orange-500 border border-orange-500/30" };
-    if (status === "COMPLETED") return { label: "Pagado",    classes: "bg-emerald-500/20 text-emerald-500 border border-emerald-500/30" };
-    return                             { label: "Anulado",   classes: "bg-red-500/20 text-red-500 border border-red-500/30" };
+    if (status === "PENDING") return { label: "Pendiente", classes: "bg-orange-500/20 text-orange-500 border border-orange-500/30" };
+    if (status === "COMPLETED") return { label: "Pagado", classes: "bg-emerald-500/20 text-emerald-500 border border-emerald-500/30" };
+    return { label: "Anulado", classes: "bg-red-500/20 text-red-500 border border-red-500/30" };
   };
 
   if (!isHydrated || role === 'VENDEDOR') return null;
@@ -756,14 +817,13 @@ export default function CajaPage() {
               <button
                 key={id}
                 onClick={() => setStatusFilter(id)}
-                className={`px-3 py-1 rounded-md text-xs font-bold transition-colors ${
-                  statusFilter === id
-                    ? id === "PENDING"   ? "bg-orange-500 text-white"
+                className={`px-3 py-1 rounded-md text-xs font-bold transition-colors ${statusFilter === id
+                  ? id === "PENDING" ? "bg-orange-500 text-white"
                     : id === "COMPLETED" ? "bg-emerald-600 text-white"
-                    : id === "CANCELLED" ? "bg-red-500 text-white"
-                    : "bg-foreground text-background"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
+                      : id === "CANCELLED" ? "bg-red-500 text-white"
+                        : "bg-foreground text-background"
+                  : "text-muted-foreground hover:text-foreground"
+                  }`}
               >
                 {label}
               </button>
@@ -819,8 +879,8 @@ export default function CajaPage() {
           <span className="text-muted-foreground text-sm font-medium">
             tickets {
               statusFilter === "PENDING" ? "pendientes" :
-              statusFilter === "COMPLETED" ? "pagados" :
-              statusFilter === "CANCELLED" ? "anulados" : "en total"
+                statusFilter === "COMPLETED" ? "pagados" :
+                  statusFilter === "CANCELLED" ? "anulados" : "en total"
             }
           </span>
         </div>
@@ -863,13 +923,12 @@ export default function CajaPage() {
               return (
                 <div key={ticket.id} className="relative group">
                   <div
-                    className={`w-full bg-card border-2 rounded-2xl p-5 text-left transition-all ${
-                      ticket.status === "PENDING"
-                        ? "border-orange-500/30 hover:border-orange-500 hover:shadow-xl hover:shadow-orange-500/10 active:scale-[0.97] cursor-pointer"
-                        : ticket.status === "COMPLETED"
+                    className={`w-full bg-card border-2 rounded-2xl p-5 text-left transition-all ${ticket.status === "PENDING"
+                      ? "border-orange-500/30 hover:border-orange-500 hover:shadow-xl hover:shadow-orange-500/10 active:scale-[0.97] cursor-pointer"
+                      : ticket.status === "COMPLETED"
                         ? "border-emerald-500/20 opacity-90 cursor-default"
                         : "border-red-500/20 opacity-60 cursor-default"
-                    }`}
+                      }`}
                   >
                     <div className="flex items-start justify-between mb-4">
                       <div className="flex flex-col min-w-0">
@@ -897,16 +956,16 @@ export default function CajaPage() {
                         <span className="text-muted-foreground text-sm font-bold">Total:</span>
                         <span className="text-2xl font-black font-mono">S/ {ticket.total.toFixed(2)}</span>
                       </div>
-                      
+
                       {ticket.status === "PENDING" ? (
                         <div className="flex gap-2">
 
-                        <button
-                          onClick={() => openModal(ticket)}
-                          className="flex-[2] mt-3 h-10 rounded-xl text-white bg-orange-600 hover:bg-orange-500 font-bold shadow-lg shadow-orange-500/20 transition-all flex items-center justify-center"
-                        >
-                          Cobrar
-                        </button>
+                          <button
+                            onClick={() => openModal(ticket)}
+                            className="flex-[2] mt-3 h-10 rounded-xl text-white bg-orange-600 hover:bg-orange-500 font-bold shadow-lg shadow-orange-500/20 transition-all flex items-center justify-center"
+                          >
+                            Cobrar
+                          </button>
                         </div>
                       ) : ticket.status === "COMPLETED" ? (
                         <span className="w-full mt-3 h-10 rounded-xl text-white bg-blue-600 font-bold shadow-lg shadow-blue-500/20 flex items-center justify-center gap-1.5 cursor-default">
@@ -935,10 +994,11 @@ export default function CajaPage() {
                 <tr>
                   <th className="px-6 py-4 font-bold">Ticket</th>
                   <th className="px-6 py-4 font-bold">Documento</th>
-                  <th className="px-6 py-4 font-bold">Efectivo</th>
-                  <th className="px-6 py-4 font-bold">BCP</th>
-                  <th className="px-6 py-4 font-bold">BBVA</th>
-                  <th className="px-6 py-4 font-bold">Total</th>
+                  <th className="px-6 py-4 font-bold text-right">Efectivo</th>
+                  <th className="px-6 py-4 font-bold text-right">BCP</th>
+                  <th className="px-6 py-4 font-bold text-right">BBVA</th>
+                  <th className="px-6 py-4 font-bold text-right">Izipay</th>
+                  <th className="px-6 py-4 font-bold text-right whitespace-nowrap">Total</th>
                   <th className="px-6 py-4 font-bold">Estado</th>
                   <th className="px-6 py-4 font-bold text-right">Acciones</th>
                 </tr>
@@ -958,7 +1018,7 @@ export default function CajaPage() {
                     statusBadge={statusBadge}
                     handleCancel={(t: any) => handleCancelTicket(t)}
                     openModal={openModal}
-                    handleReprint={() => {}}
+                    handleReprint={() => { }}
                   />
                 ))}
               </tbody>
@@ -966,6 +1026,15 @@ export default function CajaPage() {
           </div>
         )}
       </main>
+
+      <ConfirmDialog
+        isOpen={!!ticketToCancel}
+        onCancel={() => setTicketToCancel(null)}
+        onConfirm={confirmCancelTicket}
+        title="Anular Proforma/Venta"
+        description={`¿Estás seguro de que deseas anular el documento ${ticketToCancel?.document_number || ''}?`}
+        isLoading={isProcessing}
+      />
 
       {/* ════════════════════════════════════════
           PAYMENT MODAL (OPTIMIZADO PARA PC / TECLADO FÍSICO)
@@ -1001,9 +1070,8 @@ export default function CajaPage() {
                       key={id}
                       className="flex items-center gap-4 p-3 rounded-xl border border-border bg-background/30"
                     >
-                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${
-                        hasValue ? "bg-orange-500/20 text-orange-500" : "bg-secondary text-muted-foreground"
-                      }`}>
+                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${hasValue ? "bg-orange-500/20 text-orange-500" : "bg-secondary text-muted-foreground"
+                        }`}>
                         <Icon className="w-5 h-5" />
                       </div>
 
@@ -1015,9 +1083,9 @@ export default function CajaPage() {
                         <button
                           type="button"
                           tabIndex={-1}
-                          onClick={(e) => { 
+                          onClick={(e) => {
                             e.preventDefault();
-                            setFullAmount(id); 
+                            setFullAmount(id);
                             setTimeout(() => {
                               document.getElementById(`payment-input-${id}`)?.focus();
                             }, 0);
@@ -1067,6 +1135,24 @@ export default function CajaPage() {
                       Recargo Izipay: S/ {izipayFee.toFixed(2)}
                     </span>
                   )}
+                  {totalServices > 0 && (
+                    <div className="flex items-center justify-between mt-3 pt-3 border-t border-emerald-500/20">
+                      <span className="text-xs text-muted-foreground">
+                        Incluye S/ {totalServices.toFixed(2)} en servicios.
+                      </span>
+                      <button
+                        onClick={() => {
+                          setPaymentAmounts(prev => ({
+                            ...prev,
+                            EFECTIVO: totalServices.toFixed(2)
+                          }));
+                        }}
+                        className="text-[10px] font-bold px-2 py-1 rounded-md border border-emerald-500/30 text-emerald-600 hover:bg-emerald-500/10 transition-colors"
+                      >
+                        💵 Efectivo
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Tipo de comprobante + inputs cliente */}
@@ -1078,11 +1164,10 @@ export default function CajaPage() {
                         key={id}
                         type="button"
                         onClick={() => { setVoucherType(id); setDocNumber(""); setDocName(""); }}
-                        className={`flex-1 py-2 px-3 rounded-lg border text-xs font-bold transition-all ${
-                          voucherType === id
-                            ? "border-indigo-500 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
-                            : "border-border bg-background/30 text-muted-foreground hover:border-muted-foreground/40"
-                        }`}
+                        className={`flex-1 py-2 px-3 rounded-lg border text-xs font-bold transition-all ${voucherType === id
+                          ? "border-indigo-500 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
+                          : "border-border bg-background/30 text-muted-foreground hover:border-muted-foreground/40"
+                          }`}
                       >
                         {label}
                       </button>
@@ -1102,13 +1187,12 @@ export default function CajaPage() {
                             setDocNumber(val);
                             setCustomerQuery(val);
                           }}
-                          className={`w-full pl-9 pr-12 py-2 rounded-lg border bg-background text-foreground font-mono text-sm outline-none transition-colors ${
-                            docNumber && !docNumberValid
-                              ? "border-red-500"
-                              : docNumberValid && docNumber
+                          className={`w-full pl-9 pr-12 py-2 rounded-lg border bg-background text-foreground font-mono text-sm outline-none transition-colors ${docNumber && !docNumberValid
+                            ? "border-red-500"
+                            : docNumberValid && docNumber
                               ? "border-emerald-500"
                               : "border-border"
-                          }`}
+                            }`}
                         />
                       </div>
                       <div className="relative">
@@ -1122,13 +1206,12 @@ export default function CajaPage() {
                             setDocName(val);
                             setCustomerQuery(val);
                           }}
-                          className={`w-full pl-9 pr-4 py-2 rounded-lg border bg-background text-foreground text-sm outline-none transition-colors ${
-                            docName && !docNameValid
-                              ? "border-red-500"
-                              : docNameValid && docName
+                          className={`w-full pl-9 pr-4 py-2 rounded-lg border bg-background text-foreground text-sm outline-none transition-colors ${docName && !docNameValid
+                            ? "border-red-500"
+                            : docNameValid && docName
                               ? "border-emerald-500"
                               : "border-border"
-                          }`}
+                            }`}
                         />
                       </div>
 
@@ -1174,11 +1257,10 @@ export default function CajaPage() {
               id="btn-confirmar-cobro"
               onClick={openReview}
               disabled={!canConfirm}
-              className={`h-12 flex-[2] rounded-xl font-black text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${
-                !canConfirm
-                  ? "bg-secondary text-muted-foreground cursor-not-allowed"
-                  : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg hover:shadow-emerald-500/30"
-              }`}
+              className={`h-12 flex-[2] rounded-xl font-black text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${!canConfirm
+                ? "bg-secondary text-muted-foreground cursor-not-allowed"
+                : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg hover:shadow-emerald-500/30"
+                }`}
             >
               <CheckCircle2 className="w-4 h-4" /> Confirmar Cobro
             </button>
@@ -1246,11 +1328,10 @@ export default function CajaPage() {
                 autoFocus
                 onClick={handleFinalSubmit}
                 disabled={isSubmitting}
-                className={`flex-[2] h-11 rounded-xl font-black text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${
-                  isSubmitting
-                    ? "bg-emerald-800 text-emerald-300 cursor-not-allowed"
-                    : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg"
-                }`}
+                className={`flex-[2] h-11 rounded-xl font-black text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2 ${isSubmitting
+                  ? "bg-emerald-800 text-emerald-300 cursor-not-allowed"
+                  : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg"
+                  }`}
               >
                 {isSubmitting ? (
                   <><RefreshCw className="w-4 h-4 animate-spin" /> Guardando...</>
@@ -1272,7 +1353,7 @@ export default function CajaPage() {
             </div>
             <h2 className="text-2xl font-black text-gray-900 dark:text-white mb-2">¡Venta Exitosa!</h2>
             <p className="text-gray-500 text-center mb-6">El cobro ha sido procesado correctamente.</p>
-            
+
 
 
             <button

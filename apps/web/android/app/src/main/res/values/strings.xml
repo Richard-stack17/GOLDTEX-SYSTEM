@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Goltex POS</string>
+    <string name="title_activity_main">Goltex POS</string>
+    <string name="package_name">com.goltex.pos</string>
+    <string name="custom_url_scheme">com.goltex.pos</string>
+</resources>

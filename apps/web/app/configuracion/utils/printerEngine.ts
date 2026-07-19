@@ -241,12 +241,14 @@ export function generateTicketLines(saleData: any, maxChars: number): TicketLine
     const code = item.code || item.codigo ? `${item.code || item.codigo} ` : '';
     const qty = item.quantity || item.cantidad || 1;
     
-    // Robust Price Fallbacks para cazar el bug de '0.50' o 'S/ 0.00'
+    // Robust Price Fallbacks
     const rawEditedPrice = item.editedPrice ?? item.precio_variable ?? item.precio_unitario ?? item.price ?? item.precio ?? 0;
-    const rawPrice = item.price ?? item.precio_fijo ?? item.precio ?? item.editedPrice ?? item.precio_variable ?? 0;
+    const rawPrice = item.price ?? item.precio_fijo ?? item.precio ?? 0;
 
-    const precioVar = Number(rawEditedPrice !== 0 ? rawEditedPrice : rawPrice).toFixed(2);
-    const precioFijo = Number(rawPrice !== 0 ? rawPrice : rawEditedPrice).toFixed(2);
+    // precioVar = lo que el vendedor realmente cobró (editedPrice)
+    const precioVar = Number(rawEditedPrice).toFixed(2);
+    // precioFijo = el precio del catálogo tal cual (puede ser 0.00 si es precio libre)
+    const precioFijo = Number(rawPrice).toFixed(2);
     
     const itemTotal = item.total !== undefined ? item.total : qty * Number(precioVar);
     sumaExacta += Number(itemTotal);

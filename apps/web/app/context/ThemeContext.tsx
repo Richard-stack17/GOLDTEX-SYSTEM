@@ -10,16 +10,16 @@ interface ThemeContextProps {
 }
 
 const ThemeContext = createContext<ThemeContextProps>({
-  theme: "dark",
+  theme: "light",
   toggleTheme: () => {},
 });
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState<Theme>("dark");
+  const [theme, setTheme] = useState<Theme>("light");
 
   useEffect(() => {
     const stored = localStorage.getItem("goltex_theme") as Theme | null;
-    const resolved = stored === "light" || stored === "dark" ? stored : "dark";
+    const resolved = stored === "light" || stored === "dark" ? stored : "light";
     setTheme(resolved);
     applyTheme(resolved);
   }, []);

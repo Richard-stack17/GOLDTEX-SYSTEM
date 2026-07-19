@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
-import { Users, Search, Plus, Edit, Trash2, CheckCircle2, ArrowLeft } from "lucide-react";
+import { Users, Search, Plus, Edit, Trash2, ArrowLeft } from "lucide-react";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
 import Link from "next/link";
 
 type Customer = {
@@ -21,6 +22,7 @@ export default function ClientesPage() {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const [customerToDelete, setCustomerToDelete] = useState<Customer | null>(null);
   const [formData, setFormData] = useState({
     business_name: "",
     ruc: "",
@@ -116,42 +118,45 @@ export default function ClientesPage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm("¿Estás seguro de eliminar este cliente?")) return;
-    const { error } = await supabase.from("customers").delete().eq("id", id);
+  const handleDelete = (customer: Customer) => {
+    setCustomerToDelete(customer);
+  };
+
+  const confirmDelete = async () => {
+    if (!customerToDelete) return;
+    const { error } = await supabase.from("customers").delete().eq("id", customerToDelete.id);
     if (!error) {
-      setCustomers(customers.filter(c => c.id !== id));
+      setCustomers(customers.filter(c => c.id !== customerToDelete.id));
     } else {
       alert("Error al eliminar. Es posible que el cliente tenga ventas asociadas.");
     }
+    setCustomerToDelete(null);
   };
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
       <main className="flex-1">
-        <header className="bg-white border-b border-gray-200 sticky top-0 z-20 shadow-sm">
-          <div className="px-8 h-16 flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <Link href="/hub" className="text-gray-400 hover:text-indigo-600 transition-colors p-1.5 rounded-lg hover:bg-indigo-50">
-                <ArrowLeft className="w-5 h-5" />
-              </Link>
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 bg-indigo-100 rounded-xl flex items-center justify-center">
-                  <Users className="w-5 h-5 text-indigo-600" />
-                </div>
-                <div>
-                  <h1 className="text-base font-bold text-gray-900 leading-none">Clientes Caseros</h1>
-                  <p className="text-xs text-gray-500 mt-0.5">Gestión de clientes frecuentes</p>
-                </div>
+        <header className="bg-card border-b border-border px-6 h-16 flex items-center justify-between shadow-sm">
+          <div className="flex items-center gap-4">
+            <Link href="/hub" className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-secondary">
+              <ArrowLeft className="w-5 h-5" />
+            </Link>
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 bg-purple-500 rounded-lg flex items-center justify-center">
+                <Users className="w-4 h-4 text-white" />
+              </div>
+              <div>
+                <h1 className="text-base font-bold leading-none">Módulo de Clientes</h1>
+                <p className="text-xs text-muted-foreground mt-0.5">Gestión de Clientes Frecuentes</p>
               </div>
             </div>
-            <button
-              onClick={() => handleOpenModal()}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-sm flex items-center gap-2 shadow-sm transition-colors"
-            >
-              <Plus className="w-4 h-4" /> Nuevo Cliente
-            </button>
           </div>
+          <button
+            onClick={() => handleOpenModal()}
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-sm flex items-center gap-2 shadow-sm transition-colors"
+          >
+            <Plus className="w-4 h-4" /> Nuevo Cliente
+          </button>
         </header>
 
         <div className="p-8 max-w-5xl mx-auto space-y-6">
@@ -183,7 +188,7 @@ export default function ClientesPage() {
                   </tr>
                 ) : filteredCustomers.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-6 py-12 text-center text-gray-500">No se encontraron clientes.</td>
+                    <td colSpan={4} className="px-6 py-12 text-center text-muted-foreground">No se encontraron clientes registrados en la base de datos.</td>
                   </tr>
                 ) : (
                   filteredCustomers.map(c => (
@@ -201,7 +206,7 @@ export default function ClientesPage() {
                         <button onClick={() => handleOpenModal(c)} className="p-2 text-gray-400 hover:text-indigo-600 transition-colors">
                           <Edit className="w-4 h-4" />
                         </button>
-                        <button onClick={() => handleDelete(c.id)} className="p-2 text-gray-400 hover:text-red-600 transition-colors ml-1">
+                        <button onClick={() => handleDelete(c)} className="p-2 text-gray-400 hover:text-red-600 transition-colors ml-1">
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </td>
@@ -213,6 +218,14 @@ export default function ClientesPage() {
           </div>
         </div>
       </main>
+
+      <ConfirmDialog
+        isOpen={!!customerToDelete}
+        onCancel={() => setCustomerToDelete(null)}
+        onConfirm={confirmDelete}
+        title="Eliminar Cliente"
+        description={`¿Estás seguro de que deseas eliminar al cliente ${customerToDelete?.business_name}? Esta acción no se puede deshacer.`}
+      />
 
       {isModalOpen && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">

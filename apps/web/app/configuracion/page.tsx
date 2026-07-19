@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { ArrowLeft, Printer, Plus, ChevronRight, Loader2, Info } from 'lucide-react';
+import { Settings, ArrowLeft, Printer, Plus, ChevronRight, Loader2, Info } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -32,21 +32,30 @@ export default function ConfiguracionPage() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto min-h-screen bg-gray-50 flex flex-col">
-      {/* Header Estilo App */}
-      <div className="bg-white border-b border-gray-200 flex items-center justify-between px-4 py-4 shadow-sm sticky top-0 z-10">
-        <div className="flex items-center">
-          <Link href="/hub" className="p-2 -ml-2 hover:bg-gray-100 rounded-full transition-colors mr-2">
-            <ArrowLeft className="w-6 h-6 text-gray-700" />
+    <div className="min-h-screen bg-background text-foreground flex flex-col">
+      {/* ── Header ── */}
+      <header className="bg-card border-b border-border px-6 h-16 flex items-center justify-between shadow-sm shrink-0">
+        <div className="flex items-center gap-4">
+          <Link href="/hub" className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-secondary">
+            <ArrowLeft className="w-5 h-5" />
           </Link>
-          <h1 className="text-xl font-bold tracking-wide text-gray-900">Impresoras</h1>
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-slate-500 rounded-lg flex items-center justify-center">
+              <Settings className="w-4 h-4 text-white" />
+            </div>
+            <div>
+              <h1 className="text-base font-bold leading-none">Módulo de Configuración</h1>
+              <p className="text-xs text-muted-foreground mt-0.5">Dispositivos e Impresoras</p>
+            </div>
+          </div>
         </div>
-        <Link href="/configuracion/impresoras/nueva" className="p-1 hover:bg-emerald-50 text-emerald-600 rounded-full transition-colors">
-          <Plus className="w-6 h-6" />
+        <Link href="/configuracion/impresoras/nueva" className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold transition-colors shadow-sm hover:bg-primary/90">
+          <Plus className="w-3.5 h-3.5" /> Nueva Impresora
         </Link>
-      </div>
+      </header>
 
-      <div className="flex-1 overflow-y-auto">
+      <main className="flex-1 p-6 max-w-screen-xl w-full mx-auto space-y-6">
+
         {isLoading ? (
           <div className="flex flex-col items-center justify-center mt-20 text-emerald-600">
             <Loader2 className="w-8 h-8 animate-spin mb-2" />
@@ -57,15 +66,15 @@ export default function ConfiguracionPage() {
             <div className="w-20 h-20 bg-gray-200 rounded-full flex items-center justify-center mb-4">
               <Printer className="w-10 h-10 text-gray-400" />
             </div>
-            <h2 className="text-lg font-bold text-gray-800 mb-2">No hay impresoras</h2>
-            <p className="text-sm text-gray-500 mb-6">Agrega una impresora para comenzar a emitir recibos desde tu punto de venta.</p>
+            <h2 className="text-lg font-bold text-gray-800 mb-2">No se encontraron impresoras</h2>
+            <p className="text-sm text-gray-500">Agrega una impresora térmica o de matriz para generar tickets.</p>
           </div>
         ) : (
-          <div className="bg-white border-y border-gray-200 mt-4 divide-y divide-gray-100">
+          <div className="divide-y divide-gray-100">
             {printers.map(printer => (
               <div 
                 key={printer.id}
-                onClick={() => router.push(`/configuracion/impresoras/${printer.id}`)}
+                onClick={() => router.push(`/configuracion/impresoras/editar?id=${printer.id}`)}
                 className="flex items-center px-4 py-4 hover:bg-gray-50 cursor-pointer transition-colors active:bg-gray-100"
               >
                 <div className="w-12 h-12 rounded-full bg-gray-100 flex flex-shrink-0 items-center justify-center mr-4 border border-gray-200">
@@ -93,7 +102,7 @@ export default function ConfiguracionPage() {
             ))}
           </div>
         )}
-      </div>
+      </main>
     </div>
   );
 }
