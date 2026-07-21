@@ -385,7 +385,9 @@ export default function DashboardPage() {
       for (const sale of sales) {
         if (!sale.created_at) continue; // fallback para datos antiguos sin hora
         const d = new Date(sale.created_at);
-        const hour = d.getHours();
+        // Huso horario de Perú (America/Lima) es estrictamente UTC-5 todo el año
+        let hour = d.getUTCHours() - 5;
+        if (hour < 0) hour += 24;
         // Encontrar el bloque al que pertenece (ej: si es 13:00 va al bloque de 12:00 o 14:00, según redondeo)
         // Redondearemos al bloque anterior más cercano (ej: 13:00 -> 12:00, 09:30 -> 08:00)
         let block = hourBlocks[0];
@@ -763,7 +765,7 @@ export default function DashboardPage() {
                   </div>
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={chartData.items} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <AreaChart data={chartData.items} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
                       <defs>
                         <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.8} />
@@ -776,7 +778,7 @@ export default function DashboardPage() {
                       </defs>
                       <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="#e2e8f0" />
                       <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#64748b' }} dy={10} />
-                      <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={(v) => `S/${v}`} />
+                      <YAxis width={65} axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={(v) => `S/ ${v}`} />
                       <RechartsTooltip
                         formatter={(value: any, name: any) => {
                           const label = name === 'prevTotal' ? 'Periodo Previo' : 'Periodo Actual';

@@ -21,7 +21,7 @@ import {
   DialogHeader,
   DialogTitle
 } from "@goltex/ui";
-import { ArrowLeft, Search, Download, Filter, Plus, Edit2, Trash2, Save, FolderPlus, PackageSearch, AlertTriangle, Scissors } from "lucide-react";
+import { ArrowLeft, Search, Download, Filter, Plus, Edit2, Trash2, Save, FolderPlus, PackageSearch, AlertTriangle, Scissors, RefreshCcw } from "lucide-react";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { supabase } from "../lib/supabase";
 
@@ -33,6 +33,7 @@ type Product = {
   price: number;
   stock: number;
   unit?: string;
+  is_active?: boolean;
 };
 
 type Family = {
@@ -41,6 +42,7 @@ type Family = {
   description: string;
   code?: string;
   created_at?: string;
+  is_active?: boolean;
 };
 
 type Service = {
@@ -48,10 +50,12 @@ type Service = {
   name: string;
   is_quick_access: boolean;
   created_at?: string;
+  is_active?: boolean;
 };
 
 export default function InventarioPage() {
   const [activeTab, setActiveTab] = useState<"catalogo" | "inventario" | "familias" | "servicios">("catalogo");
+  const [showInactive, setShowInactive] = useState(false);
 
   // Products states
   const [products, setProducts] = useState<Product[]>([]);
@@ -135,14 +139,16 @@ export default function InventarioPage() {
 
   const filteredProducts = products.filter(
     (p) =>
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      (p.sku || "").toLowerCase().includes(search.toLowerCase())
+      (showInactive ? true : p.is_active !== false) &&
+      (p.name.toLowerCase().includes(search.toLowerCase()) ||
+      (p.sku || "").toLowerCase().includes(search.toLowerCase()))
   );
 
   const filteredFamilies = families
     .filter(f =>
-      f.name.toLowerCase().includes(familySearch.toLowerCase()) ||
-      (f.code || "").toLowerCase().includes(familySearch.toLowerCase())
+      (showInactive ? true : f.is_active !== false) &&
+      (f.name.toLowerCase().includes(familySearch.toLowerCase()) ||
+      (f.code || "").toLowerCase().includes(familySearch.toLowerCase()))
     )
     .sort((a, b) => {
       const codeA = parseFloat(a.code || "") || Number.MAX_SAFE_INTEGER;
@@ -227,9 +233,10 @@ export default function InventarioPage() {
 
   const confirmDeleteProduct = async () => {
     if (!productToDelete) return;
+    const deletedSku = `${productToDelete.sku || productToDelete.id}_DELETED_${Date.now()}`;
     const { error } = await supabase
       .from("products")
-      .delete()
+      .update({ is_active: false, sku: deletedSku })
       .eq("id", productToDelete.id);
     if (!error) {
       fetchProducts();
@@ -240,7 +247,28 @@ export default function InventarioPage() {
   };
 
   // Service CRUD functions
-  const filteredServices = services.filter(s => s.name.toLowerCase().includes(serviceSearch.toLowerCase()));
+  const filteredServices = services.filter(s => 
+    (showInactive ? true : s.is_active !== false) && 
+    s.name.toLowerCase().includes(serviceSearch.toLowerCase())
+  );
+
+  const restoreProduct = async (product: Product) => {
+    const { error } = await supabase.from("products").update({ is_active: true }).eq("id", product.id);
+    if (!error) fetchProducts();
+    else alert("Error al restaurar el producto.");
+  };
+
+  const restoreFamily = async (family: Family) => {
+    const { error } = await supabase.from("families").update({ is_active: true }).eq("id", family.id);
+    if (!error) fetchFamilies();
+    else alert("Error al restaurar la familia.");
+  };
+
+  const restoreService = async (service: Service) => {
+    const { error } = await supabase.from("services").update({ is_active: true }).eq("id", service.id);
+    if (!error) fetchServices();
+    else alert("Error al restaurar el servicio.");
+  };
 
   const openServiceModal = (service?: Service) => {
     if (service) {
@@ -303,7 +331,7 @@ export default function InventarioPage() {
   const confirmDeleteService = async () => {
     if (!serviceToDelete) return;
     try {
-      const { error } = await supabase.from("services").delete().eq("id", serviceToDelete.id);
+      const { error } = await supabase.from("services").update({ is_active: false, is_quick_access: false }).eq("id", serviceToDelete.id);
       if (error) throw error;
       fetchServices();
     } catch (err: any) {
@@ -368,7 +396,8 @@ export default function InventarioPage() {
     const { count, error: countError } = await supabase
       .from("products")
       .select("*", { count: "exact", head: true })
-      .eq("family_id", family.id);
+      .eq("family_id", family.id)
+      .eq("is_active", true);
 
     if (countError) {
       alert("Error al verificar productos asociados.");
@@ -385,9 +414,10 @@ export default function InventarioPage() {
 
   const confirmDeleteFamily = async () => {
     if (!familyToDelete) return;
+    const deletedCode = `${familyToDelete.code || familyToDelete.id}_DELETED_${Date.now()}`;
     const { error } = await supabase
       .from("families")
-      .delete()
+      .update({ is_active: false, code: deletedCode })
       .eq("id", familyToDelete.id);
 
     if (!error) {
@@ -433,6 +463,11 @@ export default function InventarioPage() {
               <FolderPlus className="w-3.5 h-3.5" /> Nueva Familia
             </button>
           )}
+          {activeTab === "servicios" && (
+            <button onClick={() => openServiceModal()} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold transition-colors shadow-sm hover:bg-primary/90">
+              <Plus className="w-3.5 h-3.5" /> Nuevo Servicio
+            </button>
+          )}
 
           <div className="flex bg-secondary rounded-lg p-1 gap-1">
             {[
@@ -453,6 +488,17 @@ export default function InventarioPage() {
               </button>
             ))}
           </div>
+
+          <div className="h-6 w-px bg-border mx-2" />
+          <button 
+            onClick={() => setShowInactive(!showInactive)}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${showInactive ? 'bg-orange-50 border-orange-200 text-orange-700 shadow-inner' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'}`}
+            title="Mostrar ítems eliminados lógicamente"
+          >
+            <div className={`w-3 h-3 rounded-full ${showInactive ? 'bg-orange-500' : 'bg-gray-300'}`} />
+            {showInactive ? 'Ocultar Inactivos' : 'Ver Inactivos'}
+          </button>
+
         </div>
       </header>
 
@@ -517,12 +563,15 @@ export default function InventarioPage() {
                     </TableRow>
                   ) : (
                     filteredProducts.map((product) => (
-                      <TableRow key={product.id} className="hover:bg-white/5 transition-colors">
+                      <TableRow key={product.id} className={`hover:bg-white/5 transition-colors ${product.is_active === false ? 'opacity-50 grayscale bg-gray-50' : ''}`}>
                         <TableCell className="font-mono text-sm font-bold text-primary">
                           {product.sku}
                         </TableCell>
                         <TableCell>
-                          <div className="font-medium">{product.name}</div>
+                          <div className="font-medium">
+                            {product.name}
+                            {product.is_active === false && <span className="ml-2 text-xs bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded font-bold">INACTIVO</span>}
+                          </div>
                         </TableCell>
                         <TableCell className="text-muted-foreground text-sm">
                           {getFamilyName(product.family_id)}
@@ -530,12 +579,20 @@ export default function InventarioPage() {
                         <TableCell className="text-right font-medium">S/ {product.price?.toFixed(2) || "0.00"}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-2">
-                            <button onClick={() => openModal(product, "catalogo")} className="p-2 text-muted-foreground hover:text-primary transition-colors">
-                              <Edit2 className="w-4 h-4" />
-                            </button>
-                            <button onClick={() => handleDelete(product)} className="p-2 text-muted-foreground hover:text-red-500 transition-colors">
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            {product.is_active === false ? (
+                              <button onClick={() => restoreProduct(product)} className="p-2 text-muted-foreground hover:text-emerald-600 transition-colors" title="Restaurar Producto">
+                                <RefreshCcw className="w-4 h-4" />
+                              </button>
+                            ) : (
+                              <>
+                                <button onClick={() => openModal(product, "catalogo")} className="p-2 text-muted-foreground hover:text-primary transition-colors">
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                                <button onClick={() => handleDelete(product)} className="p-2 text-muted-foreground hover:text-red-500 transition-colors">
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -670,24 +727,33 @@ export default function InventarioPage() {
                     </TableRow>
                   ) : (
                     filteredFamilies.map((family) => (
-                      <TableRow key={family.id} className="hover:bg-white/5 transition-colors">
+                      <TableRow key={family.id} className={`hover:bg-white/5 transition-colors ${family.is_active === false ? 'opacity-50 grayscale bg-gray-50' : ''}`}>
                         <TableCell className="font-mono text-muted-foreground font-bold">
                           {family.code || "—"}
                         </TableCell>
                         <TableCell className="font-bold text-foreground">
                           {family.name}
+                          {family.is_active === false && <span className="ml-2 text-xs bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded font-bold">INACTIVO</span>}
                         </TableCell>
                         <TableCell className="text-muted-foreground">
                           {family.description || "Sin descripción"}
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-2">
-                            <button onClick={() => openFamilyModal(family)} className="p-2 text-muted-foreground hover:text-primary transition-colors">
-                              <Edit2 className="w-4 h-4" />
-                            </button>
-                            <button onClick={() => handleDeleteFamily(family)} className="p-2 text-muted-foreground hover:text-red-500 transition-colors">
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            {family.is_active === false ? (
+                              <button onClick={() => restoreFamily(family)} className="p-2 text-muted-foreground hover:text-emerald-600 transition-colors" title="Restaurar Familia">
+                                <RefreshCcw className="w-4 h-4" />
+                              </button>
+                            ) : (
+                              <>
+                                <button onClick={() => openFamilyModal(family)} className="p-2 text-muted-foreground hover:text-primary transition-colors">
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                                <button onClick={() => handleDeleteFamily(family)} className="p-2 text-muted-foreground hover:text-red-500 transition-colors">
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -740,9 +806,10 @@ export default function InventarioPage() {
                     </TableRow>
                   ) : (
                     filteredServices.map((service) => (
-                      <TableRow key={service.id} className="hover:bg-white/5 transition-colors">
+                      <TableRow key={service.id} className={`hover:bg-white/5 transition-colors ${service.is_active === false ? 'opacity-50 grayscale bg-gray-50' : ''}`}>
                         <TableCell className="font-bold text-foreground">
                           {service.name}
+                          {service.is_active === false && <span className="ml-2 text-xs bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded font-bold">INACTIVO</span>}
                         </TableCell>
                         <TableCell>
                           <Badge variant={service.is_quick_access ? 'success' : 'outline'}>
@@ -751,12 +818,20 @@ export default function InventarioPage() {
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-2">
-                            <button onClick={() => openServiceModal(service)} className="p-2 text-muted-foreground hover:text-primary transition-colors">
-                              <Edit2 className="w-4 h-4" />
-                            </button>
-                            <button onClick={() => handleDeleteService(service)} className="p-2 text-muted-foreground hover:text-red-500 transition-colors">
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            {service.is_active === false ? (
+                              <button onClick={() => restoreService(service)} className="p-2 text-muted-foreground hover:text-emerald-600 transition-colors" title="Restaurar Servicio">
+                                <RefreshCcw className="w-4 h-4" />
+                              </button>
+                            ) : (
+                              <>
+                                <button onClick={() => openServiceModal(service)} className="p-2 text-muted-foreground hover:text-primary transition-colors">
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                                <button onClick={() => handleDeleteService(service)} className="p-2 text-muted-foreground hover:text-red-500 transition-colors">
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>

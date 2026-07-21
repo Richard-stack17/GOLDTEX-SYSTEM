@@ -121,9 +121,11 @@ export async function syncCatalog() {
     // 1. Sincronizar familias
     const { data: familiesData, error: famError } = await supabase
       .from('families')
-      .select('id, name, code');
+      .select('id, name, code')
+      .eq('is_active', true);
 
     if (!famError && familiesData) {
+      await db.families.clear();
       await db.families.bulkPut(familiesData);
       console.log(`✅ ${familiesData.length} familias sincronizadas.`);
     }
@@ -131,7 +133,8 @@ export async function syncCatalog() {
     // 2. Sincronizar productos
     const { data: productsData, error: prodError } = await supabase
       .from('products')
-      .select('id, family_id, name, sku, price, stock');
+      .select('id, family_id, name, sku, price, stock')
+      .eq('is_active', true);
 
     if (!prodError && productsData) {
       const localProducts: LocalProduct[] = productsData.map(p => ({
@@ -144,6 +147,7 @@ export async function syncCatalog() {
         stock: p.stock || 0,
       }));
 
+      await db.products.clear();
       await db.products.bulkPut(localProducts);
       console.log(`✅ ${localProducts.length} productos sincronizados.`);
     }
@@ -172,9 +176,11 @@ export async function syncCatalog() {
     // 5. Sincronizar servicios
     const { data: servicesData, error: servicesError } = await supabase
       .from('services')
-      .select('id, name, is_quick_access');
+      .select('id, name, is_quick_access')
+      .eq('is_active', true);
 
     if (!servicesError && servicesData) {
+      await db.services.clear();
       await db.services.bulkPut(servicesData);
       console.log(`✅ ${servicesData.length} servicios sincronizados.`);
     }
