@@ -19,8 +19,10 @@ import {
   Dialog,
   DialogContent,
   DialogHeader,
-  DialogTitle
+  DialogTitle,
+  SortableTableHead
 } from "@goltex/ui";
+import { useTableSort } from "../hooks/useTableSort";
 import { ArrowLeft, Search, Download, Filter, Plus, Edit2, Trash2, Save, FolderPlus, PackageSearch, AlertTriangle, Scissors, RefreshCcw } from "lucide-react";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { supabase } from "../lib/supabase";
@@ -55,7 +57,7 @@ type Service = {
 
 export default function InventarioPage() {
   const [activeTab, setActiveTab] = useState<"catalogo" | "inventario" | "familias" | "servicios">("catalogo");
-  const [showInactive, setShowInactive] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<"ALL" | "ACTIVE" | "INACTIVE">("ACTIVE");
 
   // Products states
   const [products, setProducts] = useState<Product[]>([]);
@@ -65,6 +67,7 @@ export default function InventarioPage() {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [editMode, setEditMode] = useState<"catalogo" | "inventario">("catalogo");
   const [isSaving, setIsSaving] = useState(false);
+  const [modalError, setModalError] = useState("");
   const [formData, setFormData] = useState({
     sku: "",
     name: "",
@@ -72,6 +75,9 @@ export default function InventarioPage() {
     price: "",
     stock: "",
   });
+  const [familyModalError, setFamilyModalError] = useState("");
+  const [serviceModalError, setServiceModalError] = useState("");
+  const [globalError, setGlobalError] = useState<string | null>(null);
 
   // Families states
   const [familySearch, setFamilySearch] = useState("");
@@ -137,27 +143,26 @@ export default function InventarioPage() {
     setLoadingServices(false);
   };
 
-  const filteredProducts = products.filter(
+  const baseFilteredProducts = products.filter(
     (p) =>
-      (showInactive ? true : p.is_active !== false) &&
+      (statusFilter === "ALL" ? true : statusFilter === "ACTIVE" ? p.is_active !== false : p.is_active === false) &&
       (p.name.toLowerCase().includes(search.toLowerCase()) ||
       (p.sku || "").toLowerCase().includes(search.toLowerCase()))
   );
 
-  const filteredFamilies = families
-    .filter(f =>
-      (showInactive ? true : f.is_active !== false) &&
+  const { items: filteredProducts, requestSort: requestProductSort, sortConfig: productSortConfig } = useTableSort(baseFilteredProducts, { key: "sku", direction: "asc" });
+
+  const baseFilteredFamilies = families.filter(f =>
+      (statusFilter === "ALL" ? true : statusFilter === "ACTIVE" ? f.is_active !== false : f.is_active === false) &&
       (f.name.toLowerCase().includes(familySearch.toLowerCase()) ||
       (f.code || "").toLowerCase().includes(familySearch.toLowerCase()))
-    )
-    .sort((a, b) => {
-      const codeA = parseFloat(a.code || "") || Number.MAX_SAFE_INTEGER;
-      const codeB = parseFloat(b.code || "") || Number.MAX_SAFE_INTEGER;
-      return codeA - codeB;
-    });
+  );
+
+  const { items: filteredFamilies, requestSort: requestFamilySort, sortConfig: familySortConfig } = useTableSort(baseFilteredFamilies, { key: "code", direction: "asc" });
 
   // Product CRUD functions
   const openModal = (product?: Product, mode: "catalogo" | "inventario" = "catalogo") => {
+    setModalError("");
     setEditMode(mode);
     if (product) {
       setEditingProduct(product);
@@ -183,13 +188,13 @@ export default function InventarioPage() {
 
   const handleSave = async () => {
     if (editMode === "catalogo") {
-      if (!formData.sku || !formData.name || !formData.price) {
-        alert("Por favor completa los campos obligatorios (SKU, Nombre, Precio).");
+      if (!formData.sku || !formData.name || !formData.family_id || !formData.price) {
+        setModalError("Por favor completa los campos obligatorios (SKU, Nombre, Familia, Precio).");
         return;
       }
     } else {
       if (!formData.stock) {
-        alert("Por favor indica la cantidad de Stock.");
+        setModalError("Por favor indica la cantidad de Stock.");
         return;
       }
     }
@@ -221,7 +226,11 @@ export default function InventarioPage() {
       setIsModalOpen(false);
       fetchProducts();
     } catch (err: any) {
-      alert("Error al guardar producto: " + err.message);
+      if (err.message?.includes('duplicate key value violates unique constraint') || err.message?.includes('products_sku_key')) {
+        setModalError(`El código SKU "${payload.sku}" ya está en uso por otro producto. Elige un SKU diferente.`);
+      } else {
+        setModalError("Error al guardar producto: " + err.message);
+      }
     } finally {
       setIsSaving(false);
     }
@@ -233,44 +242,58 @@ export default function InventarioPage() {
 
   const confirmDeleteProduct = async () => {
     if (!productToDelete) return;
-    const deletedSku = `${productToDelete.sku || productToDelete.id}_DELETED_${Date.now()}`;
     const { error } = await supabase
       .from("products")
-      .update({ is_active: false, sku: deletedSku })
+      .update({ is_active: false })
       .eq("id", productToDelete.id);
     if (!error) {
       fetchProducts();
     } else {
-      alert("Error al eliminar el producto.");
+      setGlobalError("Error al eliminar el producto.");
     }
     setProductToDelete(null);
   };
 
   // Service CRUD functions
   const filteredServices = services.filter(s => 
-    (showInactive ? true : s.is_active !== false) && 
+    (statusFilter === "ALL" ? true : statusFilter === "ACTIVE" ? s.is_active !== false : s.is_active === false) && 
     s.name.toLowerCase().includes(serviceSearch.toLowerCase())
   );
 
   const restoreProduct = async (product: Product) => {
     const { error } = await supabase.from("products").update({ is_active: true }).eq("id", product.id);
-    if (!error) fetchProducts();
-    else alert("Error al restaurar el producto.");
+    if (!error) {
+      fetchProducts();
+    } else {
+      if (error.message?.includes('duplicate key') || error.message?.includes('products_active_sku_key')) {
+        setGlobalError(`No se puede restaurar. El SKU "${product.sku}" ya está siendo usado por un producto activo.`);
+      } else {
+        setGlobalError("Error al restaurar el producto: " + error.message);
+      }
+    }
   };
 
   const restoreFamily = async (family: Family) => {
     const { error } = await supabase.from("families").update({ is_active: true }).eq("id", family.id);
-    if (!error) fetchFamilies();
-    else alert("Error al restaurar la familia.");
+    if (!error) {
+      fetchFamilies();
+    } else {
+      if (error.message?.includes('duplicate key') || error.message?.includes('families_active_code_key')) {
+        setGlobalError(`No se puede restaurar. El código "${family.code}" ya está siendo usado por una familia activa.`);
+      } else {
+        setGlobalError("Error al restaurar la familia: " + error.message);
+      }
+    }
   };
 
   const restoreService = async (service: Service) => {
     const { error } = await supabase.from("services").update({ is_active: true }).eq("id", service.id);
     if (!error) fetchServices();
-    else alert("Error al restaurar el servicio.");
+    else setGlobalError("Error al restaurar el servicio.");
   };
 
   const openServiceModal = (service?: Service) => {
+    setServiceModalError("");
     if (service) {
       setEditingService(service);
       setServiceFormData({
@@ -299,7 +322,7 @@ export default function InventarioPage() {
 
   const handleSaveService = async () => {
     if (!serviceFormData.name.trim()) {
-      alert("El nombre del servicio es obligatorio.");
+      setServiceModalError("El nombre del servicio es obligatorio.");
       return;
     }
     setIsSavingService(true);
@@ -318,7 +341,7 @@ export default function InventarioPage() {
       setIsServiceModalOpen(false);
       fetchServices();
     } catch (err: any) {
-      alert("Error al guardar servicio: " + err.message);
+      setServiceModalError("Error al guardar servicio: " + err.message);
     } finally {
       setIsSavingService(false);
     }
@@ -335,7 +358,7 @@ export default function InventarioPage() {
       if (error) throw error;
       fetchServices();
     } catch (err: any) {
-      alert("Error al eliminar servicio: " + err.message);
+      setGlobalError("Error al eliminar servicio: " + err.message);
     } finally {
       setServiceToDelete(null);
     }
@@ -343,6 +366,7 @@ export default function InventarioPage() {
 
   // Family CRUD functions
   const openFamilyModal = (family?: Family) => {
+    setFamilyModalError("");
     if (family) {
       setEditingFamily(family);
       setFamilyFormData({
@@ -359,7 +383,7 @@ export default function InventarioPage() {
 
   const handleSaveFamily = async () => {
     if (!familyFormData.name.trim()) {
-      alert("El nombre de la familia es obligatorio.");
+      setFamilyModalError("El nombre de la familia es obligatorio.");
       return;
     }
 
@@ -386,7 +410,7 @@ export default function InventarioPage() {
       setIsFamilyModalOpen(false);
       fetchFamilies();
     } catch (err: any) {
-      alert("Error al guardar familia: " + err.message);
+      setFamilyModalError("Error al guardar familia: " + err.message);
     } finally {
       setIsSavingFamily(false);
     }
@@ -400,12 +424,12 @@ export default function InventarioPage() {
       .eq("is_active", true);
 
     if (countError) {
-      alert("Error al verificar productos asociados.");
+      setGlobalError("Error al verificar productos asociados.");
       return;
     }
 
     if (count && count > 0) {
-      alert(`No se puede eliminar la familia "${family.name}" porque tiene ${count} producto(s) asociado(s).`);
+      setGlobalError(`No se puede eliminar la familia "${family.name}" porque tiene ${count} producto(s) asociado(s).`);
       return;
     }
 
@@ -414,16 +438,15 @@ export default function InventarioPage() {
 
   const confirmDeleteFamily = async () => {
     if (!familyToDelete) return;
-    const deletedCode = `${familyToDelete.code || familyToDelete.id}_DELETED_${Date.now()}`;
     const { error } = await supabase
       .from("families")
-      .update({ is_active: false, code: deletedCode })
+      .update({ is_active: false })
       .eq("id", familyToDelete.id);
 
     if (!error) {
       fetchFamilies();
     } else {
-      alert("Error al eliminar la familia.");
+      setGlobalError("Error al eliminar la familia.");
     }
     setFamilyToDelete(null);
   };
@@ -431,6 +454,30 @@ export default function InventarioPage() {
   const getFamilyName = (family_id: string) => {
     return families.find(f => f.id === family_id)?.name || "—";
   };
+
+  const renderStatusFilter = () => (
+    <div className="flex bg-secondary/50 p-1 rounded-xl shadow-inner border border-black/5">
+      {[
+        { id: 'ALL', label: 'Todos' },
+        { id: 'ACTIVE', label: 'Activos' },
+        { id: 'INACTIVE', label: 'Inactivos' }
+      ].map((option) => (
+        <button
+          key={option.id}
+          onClick={() => setStatusFilter(option.id as any)}
+          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            statusFilter === option.id
+              ? option.id === 'ACTIVE' ? "bg-emerald-600 text-white shadow-sm"
+                : option.id === 'INACTIVE' ? "bg-gray-600 text-white shadow-sm"
+                  : "bg-foreground text-background shadow-sm"
+              : "text-muted-foreground hover:text-foreground hover:bg-black/5"
+          }`}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
@@ -478,7 +525,7 @@ export default function InventarioPage() {
             ].map(({ id, label }) => (
               <button
                 key={id}
-                onClick={() => setActiveTab(id)}
+                onClick={() => setActiveTab(id as any)}
                 className={`px-3 py-1 rounded-md text-xs font-bold transition-colors ${activeTab === id
                   ? "bg-foreground text-background"
                   : "text-muted-foreground hover:text-foreground"
@@ -488,17 +535,6 @@ export default function InventarioPage() {
               </button>
             ))}
           </div>
-
-          <div className="h-6 w-px bg-border mx-2" />
-          <button 
-            onClick={() => setShowInactive(!showInactive)}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${showInactive ? 'bg-orange-50 border-orange-200 text-orange-700 shadow-inner' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'}`}
-            title="Mostrar ítems eliminados lógicamente"
-          >
-            <div className={`w-3 h-3 rounded-full ${showInactive ? 'bg-orange-500' : 'bg-gray-300'}`} />
-            {showInactive ? 'Ocultar Inactivos' : 'Ver Inactivos'}
-          </button>
-
         </div>
       </header>
 
@@ -526,7 +562,9 @@ export default function InventarioPage() {
             <CardHeader className="border-b border-border bg-surface/50 pb-4">
               <div className="flex justify-between items-center">
                 <CardTitle className="text-lg">Telas del Catálogo</CardTitle>
-                <div className="relative w-72">
+                <div className="flex items-center gap-4">
+                  {renderStatusFilter()}
+                  <div className="relative w-72">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <Input
                     placeholder="Buscar por SKU o nombre..."
@@ -534,6 +572,7 @@ export default function InventarioPage() {
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                   />
+                  </div>
                 </div>
               </div>
             </CardHeader>
@@ -541,10 +580,10 @@ export default function InventarioPage() {
               <Table>
                 <TableHeader className="bg-secondary/30">
                   <TableRow>
-                    <TableHead className="w-[100px]">SKU</TableHead>
-                    <TableHead>Producto</TableHead>
-                    <TableHead>Familia</TableHead>
-                    <TableHead className="text-right">Precio/m</TableHead>
+                    <SortableTableHead className="w-[100px]" field="sku" currentSort={productSortConfig} onSort={requestProductSort}>SKU</SortableTableHead>
+                    <SortableTableHead field="name" currentSort={productSortConfig} onSort={requestProductSort}>Producto</SortableTableHead>
+                    <SortableTableHead field="family_id" currentSort={productSortConfig} onSort={requestProductSort}>Familia</SortableTableHead>
+                    <SortableTableHead className="text-right" field="price" currentSort={productSortConfig} onSort={requestProductSort}>Precio/m</SortableTableHead>
                     <TableHead className="text-right">Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -610,7 +649,9 @@ export default function InventarioPage() {
             <CardHeader className="border-b border-border bg-surface/50 pb-4">
               <div className="flex justify-between items-center">
                 <CardTitle className="text-lg">Inventario de Stock</CardTitle>
-                <div className="relative w-72">
+                <div className="flex items-center gap-4">
+                  {renderStatusFilter()}
+                  <div className="relative w-72">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <Input
                     placeholder="Buscar por SKU o nombre..."
@@ -618,6 +659,7 @@ export default function InventarioPage() {
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                   />
+                  </div>
                 </div>
               </div>
             </CardHeader>
@@ -625,10 +667,10 @@ export default function InventarioPage() {
               <Table>
                 <TableHeader className="bg-secondary/30">
                   <TableRow>
-                    <TableHead className="w-[100px]">SKU</TableHead>
-                    <TableHead>Producto</TableHead>
-                    <TableHead>Familia</TableHead>
-                    <TableHead className="text-right">Stock (m)</TableHead>
+                    <SortableTableHead className="w-[100px]" field="sku" currentSort={productSortConfig} onSort={requestProductSort}>SKU</SortableTableHead>
+                    <SortableTableHead field="name" currentSort={productSortConfig} onSort={requestProductSort}>Producto</SortableTableHead>
+                    <SortableTableHead field="family_id" currentSort={productSortConfig} onSort={requestProductSort}>Familia</SortableTableHead>
+                    <SortableTableHead className="text-right" field="stock" currentSort={productSortConfig} onSort={requestProductSort}>Stock (m)</SortableTableHead>
                     <TableHead className="text-center">Estado</TableHead>
                     <TableHead className="text-right">Acciones</TableHead>
                   </TableRow>
@@ -648,7 +690,7 @@ export default function InventarioPage() {
                     </TableRow>
                   ) : (
                     filteredProducts.map((product) => (
-                      <TableRow key={product.id} className="hover:bg-white/5 transition-colors">
+                      <TableRow key={product.id} className={`hover:bg-white/5 transition-colors ${product.is_active === false ? 'opacity-50 grayscale bg-gray-50' : ''}`}>
                         <TableCell className="font-mono text-sm font-bold text-primary">
                           {product.sku}
                         </TableCell>
@@ -665,8 +707,11 @@ export default function InventarioPage() {
                           </div>
                         </TableCell>
                         <TableCell className="text-center">
-                          <Badge variant={product.stock <= 10 ? 'warning' : 'success'}>
-                            {product.stock <= 10 ? 'Stock Bajo' : 'Disponible'}
+                          <Badge 
+                            variant={product.is_active === false ? 'destructive' : product.stock <= 10 ? 'warning' : 'success'}
+                            className={product.is_active === false ? 'bg-gray-500 hover:bg-gray-600' : ''}
+                          >
+                            {product.is_active === false ? 'Inactivo' : product.stock <= 10 ? 'Stock Bajo' : 'Disponible'}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right">
@@ -691,7 +736,9 @@ export default function InventarioPage() {
             <CardHeader className="border-b border-border bg-surface/50 pb-4">
               <div className="flex justify-between items-center">
                 <CardTitle className="text-lg">Familias del Sistema</CardTitle>
-                <div className="relative w-72">
+                <div className="flex items-center gap-4">
+                  {renderStatusFilter()}
+                  <div className="relative w-72">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <Input
                     placeholder="Buscar familia o código..."
@@ -699,6 +746,7 @@ export default function InventarioPage() {
                     value={familySearch}
                     onChange={(e) => setFamilySearch(e.target.value)}
                   />
+                  </div>
                 </div>
               </div>
             </CardHeader>
@@ -706,9 +754,9 @@ export default function InventarioPage() {
               <Table>
                 <TableHeader className="bg-secondary/30">
                   <TableRow>
-                    <TableHead className="w-[100px]">Código</TableHead>
-                    <TableHead className="w-[300px]">Nombre de Familia</TableHead>
-                    <TableHead>Descripción</TableHead>
+                    <SortableTableHead className="w-[100px]" field="code" currentSort={familySortConfig} onSort={requestFamilySort}>Código</SortableTableHead>
+                    <SortableTableHead className="w-[300px]" field="name" currentSort={familySortConfig} onSort={requestFamilySort}>Nombre de Familia</SortableTableHead>
+                    <SortableTableHead field="description" currentSort={familySortConfig} onSort={requestFamilySort}>Descripción</SortableTableHead>
                     <TableHead className="text-right w-[150px]">Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -770,8 +818,10 @@ export default function InventarioPage() {
           <Card className="bg-glass border-white/10 shadow-xl overflow-hidden">
             <CardHeader className="border-b border-border bg-surface/50 pb-4">
               <div className="flex justify-between items-center">
-                <CardTitle className="text-lg">Servicios del Sistema</CardTitle>
-                <div className="relative w-72">
+                <CardTitle className="text-lg">Directorio de Servicios</CardTitle>
+                <div className="flex items-center gap-4">
+                  {renderStatusFilter()}
+                  <div className="relative w-72">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <Input
                     placeholder="Buscar servicio..."
@@ -779,6 +829,7 @@ export default function InventarioPage() {
                     value={serviceSearch}
                     onChange={(e) => setServiceSearch(e.target.value)}
                   />
+                  </div>
                 </div>
               </div>
             </CardHeader>
@@ -877,13 +928,13 @@ export default function InventarioPage() {
                   </div>
                   {/* Familia */}
                   <div className="space-y-2">
-                    <label className="text-xs font-bold text-muted-foreground uppercase">Familia</label>
+                    <label className="text-xs font-bold text-muted-foreground uppercase">Familia *</label>
                     <select
                       value={formData.family_id}
                       onChange={(e) => setFormData({ ...formData, family_id: e.target.value })}
                       className="w-full h-10 px-3 rounded-md border border-input bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                     >
-                      <option value="">— Sin familia —</option>
+                      <option value="">— Selecciona una familia —</option>
                       {families.map((fam) => (
                         <option key={fam.id} value={fam.id}>
                           {fam.name}
@@ -937,6 +988,12 @@ export default function InventarioPage() {
                   </div>
                 </>
               )}
+              {modalError && (
+                <div className="flex items-start gap-2 bg-rose-50 border border-rose-200 text-rose-700 p-3 rounded-xl text-sm font-bold mt-2">
+                  <AlertTriangle className="w-5 h-5 shrink-0" />
+                  <p>{modalError}</p>
+                </div>
+              )}
             </div>
             <div className="flex justify-end gap-3 pt-4 border-t border-border">
               <Button variant="outline" onClick={() => setIsModalOpen(false)}>Cancelar</Button>
@@ -982,6 +1039,12 @@ export default function InventarioPage() {
                   placeholder="Descripción breve"
                 />
               </div>
+              {familyModalError && (
+                <div className="flex items-start gap-2 bg-rose-50 border border-rose-200 text-rose-700 p-3 rounded-xl text-sm font-bold mt-2">
+                  <AlertTriangle className="w-5 h-5 shrink-0" />
+                  <p>{familyModalError}</p>
+                </div>
+              )}
             </div>
             <div className="flex justify-end gap-3 pt-4 border-t border-border">
               <Button variant="outline" onClick={() => setIsFamilyModalOpen(false)}>Cancelar</Button>
@@ -1043,6 +1106,12 @@ export default function InventarioPage() {
                   </div>
                 </div>
               )}
+              {serviceModalError && (
+                <div className="flex items-start gap-2 bg-rose-50 border border-rose-200 text-rose-700 p-3 rounded-xl text-sm font-bold mt-2">
+                  <AlertTriangle className="w-5 h-5 shrink-0" />
+                  <p>{serviceModalError}</p>
+                </div>
+              )}
             </div>
             <div className="flex justify-end gap-3 pt-4 border-t border-border mt-4">
               <Button variant="outline" onClick={() => setIsServiceModalOpen(false)}>
@@ -1079,6 +1148,26 @@ export default function InventarioPage() {
             <div className="flex justify-end pt-2 mt-4">
               <Button className="font-bold h-11" variant="default" onClick={() => setLimitDialogOpen(false)}>
                 Entendido
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Global Error Dialog */}
+        <Dialog open={!!globalError} onOpenChange={(open) => !open && setGlobalError(null)}>
+          <DialogContent className="sm:max-w-md bg-card border-border z-[60]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-xl font-black text-rose-600">
+                <AlertTriangle className="w-5 h-5" />
+                Error
+              </DialogTitle>
+            </DialogHeader>
+            <p className="text-muted-foreground text-sm font-medium leading-relaxed mt-2">
+              {globalError}
+            </p>
+            <div className="flex justify-end pt-2 mt-4">
+              <Button className="font-bold h-11" variant="outline" onClick={() => setGlobalError(null)}>
+                Cerrar
               </Button>
             </div>
           </DialogContent>

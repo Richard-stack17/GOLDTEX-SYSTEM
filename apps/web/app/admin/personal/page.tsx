@@ -50,7 +50,9 @@ const PERMISSION_GROUPS = [
     color: 'text-blue-500',
     bgColor: 'bg-blue-500/10',
     borderColor: 'border-blue-500/20',
-    subPermissions: []
+    subPermissions: [
+      { key: 'view_cashier_name', label: 'Ver quién cobró las ventas de hoy' }
+    ]
   },
   {
     app: 'Historial de Proformas',

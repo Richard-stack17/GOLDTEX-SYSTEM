@@ -1,4 +1,5 @@
 import * as React from "react";
+import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 function Table({ className, ...props }: React.ComponentProps<"table">) {
@@ -79,6 +80,41 @@ function TableCaption({ className, ...props }: React.ComponentProps<"caption">) 
   );
 }
 
+interface SortableTableHeadProps extends React.ComponentProps<"th"> {
+  field: string;
+  currentSort?: { key: string; direction: 'asc' | 'desc' } | null;
+  onSort: (key: string) => void;
+  children: React.ReactNode;
+}
+
+function SortableTableHead({ className, field, currentSort, onSort, children, ...props }: SortableTableHeadProps) {
+  const isActive = currentSort?.key === field;
+  const isAsc = isActive && currentSort.direction === 'asc';
+  
+  return (
+    <TableHead 
+      className={cn("cursor-pointer hover:bg-muted/30 select-none group transition-colors", className)} 
+      onClick={() => onSort(field)}
+      {...props}
+    >
+      <div className="flex items-center gap-1.5">
+        {children}
+        <div className="flex flex-col items-center justify-center opacity-50 group-hover:opacity-100 transition-opacity">
+          {isActive ? (
+            isAsc ? (
+              <ArrowUp className="w-3.5 h-3.5 text-primary" />
+            ) : (
+              <ArrowDown className="w-3.5 h-3.5 text-primary" />
+            )
+          ) : (
+            <ArrowUpDown className="w-3.5 h-3.5" />
+          )}
+        </div>
+      </div>
+    </TableHead>
+  );
+}
+
 export {
   Table,
   TableHeader,
@@ -88,4 +124,5 @@ export {
   TableRow,
   TableCell,
   TableCaption,
+  SortableTableHead,
 };

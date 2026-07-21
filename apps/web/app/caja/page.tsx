@@ -97,7 +97,8 @@ function TicketTableRow({
   handleCancel,
   openModal,
   handleReprint,
-  showToast
+  showToast,
+  permissions
 }: any) {
   const txs = ticket.transactions || [];
   const sumBy = (m: string) => txs.filter((t: any) => t.payment_method === m).reduce((s: number, t: any) => s + (t.amount || 0), 0);
@@ -296,12 +297,14 @@ function TicketTableRow({
           {ticket.status === "PENDING" ? (
             <>
 
-              <button
-                onClick={() => handleCancel(ticket)}
-                className="px-3 py-1.5 rounded-lg text-red-500 bg-red-500/10 hover:bg-red-500/20 font-bold transition-colors"
-              >
-                Anular
-              </button>
+              {permissions?.delete_sales && (
+                <button
+                  onClick={() => handleCancel(ticket)}
+                  className="px-3 py-1.5 rounded-lg text-red-500 bg-red-500/10 hover:bg-red-500/20 font-bold transition-colors"
+                >
+                  Anular
+                </button>
+              )}
               <button
                 onClick={() => openModal(ticket)}
                 className="px-4 py-1.5 rounded-lg text-white bg-orange-600 hover:bg-orange-500 font-bold shadow-lg shadow-orange-500/20 transition-all"
@@ -319,7 +322,7 @@ function TicketTableRow({
 }
 
 export default function CajaPage() {
-  const { role, username, isHydrated } = useRole();
+  const { role, username, isHydrated, permissions } = useRole();
   const { theme, toggleTheme } = useTheme();
   
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -1045,7 +1048,7 @@ export default function CajaPage() {
                       ) : null}
                     </div>
                   </div>
-                  {ticket.status === "PENDING" && (
+                  {ticket.status === "PENDING" && permissions?.delete_sales && (
                     <button
                       onClick={(e) => handleCancelTicket(ticket, e)}
                       className="absolute -top-3 -right-3 w-10 h-10 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg hover:bg-red-600 hover:scale-110"
@@ -1091,6 +1094,7 @@ export default function CajaPage() {
                     openModal={openModal}
                     handleReprint={() => { }}
                     showToast={showToast}
+                    permissions={permissions}
                   />
                 ))}
               </tbody>

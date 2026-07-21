@@ -68,7 +68,7 @@ type HistoryTicket = {
 };
 
 export default function POSPage() {
-  const { role, username, isHydrated } = useRole();
+  const { role, username, isHydrated, permissions } = useRole();
   const { theme, toggleTheme } = useTheme();
   const router = useRouter();
   const [showConfigAlert, setShowConfigAlert] = useState(false);
@@ -1077,7 +1077,7 @@ export default function POSPage() {
                         <span className="text-muted-foreground font-mono">{new Date(ticket.created_at).toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" })}</span>
                         <span className="font-black text-emerald-500 text-sm">S/ {ticket.total.toFixed(2)}</span>
                       </div>
-                      {(role === "ADMIN" || role === "MOSTRADOR") && (() => {
+                      {(() => {
                           if (ticket.status === 'PENDING') {
                             return (
                               <div className="text-[10px] font-medium text-muted-foreground mt-0.5">
@@ -1085,7 +1085,7 @@ export default function POSPage() {
                               </div>
                             );
                           }
-                          if (role === "ADMIN" && ticket.status === 'COMPLETED' && ticket.source_sheet) {
+                          if (permissions?.view_cashier_name && ticket.status === 'COMPLETED' && ticket.source_sheet) {
                             const cajeroMatch = (ticket.source_sheet as string).match(/CAJERO:([^|]+)/);
                             const cajeroName = cajeroMatch ? (cajeroMatch[1] ?? '').trim() : null;
                             if (cajeroName) {
