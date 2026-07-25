@@ -8,7 +8,7 @@ import { useRouter } from 'next/navigation';
 import { useRole } from '../context/RoleContext';
 
 export default function ConfiguracionPage() {
-  const { role, isHydrated } = useRole();
+  const { role, isHydrated, permissions } = useRole();
   const router = useRouter();
 
   // Tabs state
@@ -24,10 +24,10 @@ export default function ConfiguracionPage() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   useEffect(() => {
-    if (isHydrated && role === 'VENDEDOR') {
-      router.push('/pos');
+    if (isHydrated && !permissions?.access_settings) {
+      router.push('/hub');
     }
-  }, [isHydrated, role, router]);
+  }, [isHydrated, permissions, router]);
 
   useEffect(() => {
     if (activeTab === 'PRINTERS') {

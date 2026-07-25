@@ -28,8 +28,20 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const stored = localStorage.getItem("goltex_role");
+    const localPerms = localStorage.getItem("goltex_permissions");
+
     if (stored) {
       setRoleState(stored);
+      if (localPerms) {
+        try {
+          const parsed = JSON.parse(localPerms);
+          if (stored === 'ADMIN') {
+            setPermissions(new Proxy(parsed, { get: () => true }));
+          } else {
+            setPermissions(parsed);
+          }
+        } catch (e) {}
+      }
       fetchPermissions(stored);
     }
     const storedUsername = localStorage.getItem("goltex_username");

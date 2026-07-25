@@ -6,14 +6,14 @@ import { useRole } from '../context/RoleContext';
 import { Loader2 } from 'lucide-react';
 
 export default function ConfiguracionLayout({ children }: { children: React.ReactNode }) {
-  const { role, isHydrated } = useRole();
+  const { role, isHydrated, permissions } = useRole();
   const router = useRouter();
 
   useEffect(() => {
-    if (isHydrated && role !== 'ADMIN') {
-      router.push('/pos');
+    if (isHydrated && !permissions?.access_settings) {
+      router.push('/hub');
     }
-  }, [role, isHydrated, router]);
+  }, [permissions, isHydrated, router]);
 
   if (!isHydrated) {
     return (
@@ -23,7 +23,7 @@ export default function ConfiguracionLayout({ children }: { children: React.Reac
     );
   }
 
-  if (role !== 'ADMIN') {
+  if (!permissions?.access_settings) {
     return null;
   }
 

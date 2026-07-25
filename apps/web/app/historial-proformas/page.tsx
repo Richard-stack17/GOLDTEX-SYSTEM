@@ -8,9 +8,25 @@ import Link from 'next/link';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import {
   Search, ClipboardList, Trash2, Calendar, Filter,
-  ChevronDown, ChevronUp, AlertCircle, ShoppingBag, ArrowLeft
+  ChevronDown, ChevronUp, AlertCircle, ShoppingBag, ArrowLeft,
+  UserCheck, CreditCard, XCircle
 } from 'lucide-react';
 import { formatTicketHash, parseInternalTicketNum } from '../lib/ticket-sequence';
+
+const formatPeruDateTimeFull = (isoString?: string | null) => {
+  if (!isoString) return null;
+  const date = new Date(isoString);
+  if (isNaN(date.getTime())) return null;
+  
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const seconds = String(date.getSeconds()).padStart(2, '0');
+  
+  return `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
+};
 
 const limaToday = (): string => {
   return new Intl.DateTimeFormat('en-CA', {
@@ -46,14 +62,14 @@ type SaleRow = {
 
 export default function HistorialProformasPage() {
   const router = useRouter();
-  const { role, isHydrated } = useRole();
+  const { role, username, isHydrated, permissions } = useRole();
 
-  // Redirect if not ADMIN
+  // Redirect if no permission
   useEffect(() => {
-    if (isHydrated && role !== 'ADMIN') {
+    if (isHydrated && !permissions?.access_proformas) {
       router.push('/hub');
     }
-  }, [role, isHydrated, router]);
+  }, [permissions, isHydrated, router]);
 
   // State
   const todayLima = limaToday();
@@ -79,10 +95,12 @@ export default function HistorialProformasPage() {
       let query = supabase
         .from('sales')
         .select(`
-          id, internal_ticket_number, proforma_number, invoice_number, issue_date, total, status, items, seller_id, cashier_id,
+          id, internal_ticket_number, proforma_number, invoice_number, issue_date, created_at, updated_at, total, status, items, seller_id, cashier_id, cancelled_by_id,
           seller:profiles!seller_id(username),
+          cashier:profiles!cashier_id(username),
+          cancelled_by:profiles!cancelled_by_id(username),
           customers ( business_name, ruc ),
-          transactions ( payment_method, amount, sequence )
+          transactions ( payment_method, amount, sequence, created_at )
         `)
         .gte('issue_date', startDate)
         .lte('issue_date', endDate)
@@ -106,10 +124,10 @@ export default function HistorialProformasPage() {
   };
 
   useEffect(() => {
-    if (role === 'ADMIN') {
+    if (permissions?.access_proformas) {
       loadData();
     }
-  }, [startDate, endDate, statusFilter, role]);
+  }, [startDate, endDate, statusFilter, permissions]);
 
   // Derived state
   const filteredSales = useMemo(() => {
@@ -139,14 +157,33 @@ export default function HistorialProformasPage() {
     if (!saleToCancel) return;
     setIsCanceling(true);
     try {
+      const nowIso = new Date().toISOString();
+      let cancellerId: string | null = null;
+      if (username) {
+        try {
+          const { data: profData } = await supabase.from('profiles').select('id').eq('username', username).maybeSingle();
+          if (profData?.id) cancellerId = profData.id;
+        } catch (e) {}
+      }
+
       const { error: err } = await supabase
         .from('sales')
-        .update({ status: 'CANCELLED' })
+        .update({ 
+          status: 'CANCELLED',
+          updated_at: nowIso,
+          cancelled_by_id: cancellerId
+        })
         .eq('id', saleToCancel.id);
 
       if (err) throw err;
 
-      setSales(prev => prev.map(s => s.id === saleToCancel.id ? { ...s, status: 'CANCELLED' } : s));
+      setSales(prev => prev.map(s => s.id === saleToCancel.id ? { 
+        ...s, 
+        status: 'CANCELLED', 
+        updated_at: nowIso,
+        cancelled_by_id: cancellerId,
+        cancelled_by: { username }
+      } : s));
     } catch (err: any) {
       alert(err.message || 'Error al anular');
     } finally {
@@ -160,7 +197,7 @@ export default function HistorialProformasPage() {
     setSaleToCancel({ id, document_number });
   };
 
-  if (!isHydrated || role !== 'ADMIN') return null;
+  if (!isHydrated || !permissions?.access_proformas) return null;
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
@@ -358,7 +395,7 @@ export default function HistorialProformasPage() {
                               >
                                 {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
                               </button>
-                              {!isCancelled && (
+                              {!isCancelled && permissions?.history_cancel_proforma && (
                                 <button
                                   onClick={() => handleSoftDelete(sale.id, sale.status, sale.proforma_number || sale.invoice_number || '')}
                                   className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
@@ -379,11 +416,45 @@ export default function HistorialProformasPage() {
                                     <ShoppingBag className="w-4 h-4" /> Desglose de Ítems
                                   </h4>
                                   {(() => {
-                                    const atendidoName = (sale as any).seller?.username || 'ADMIN';
+                                    const sellerName = (sale as any).seller?.username || 'ADMIN';
+                                    const cashierName = (sale as any).cashier?.username;
+                                    const createdTime = formatPeruDateTimeFull(sale.created_at);
+                                    
+                                    const txList = Array.isArray(sale.transactions) ? sale.transactions : [];
+                                    const rawTxTime = txList.find((t: any) => t?.created_at)?.created_at || (txList[0] as any)?.created_at;
+                                    const cobradoTime = formatPeruDateTimeFull(rawTxTime || (sale.updated_at !== sale.created_at ? sale.updated_at : null) || sale.created_at);
+                                    const anuladoTime = formatPeruDateTimeFull(sale.updated_at || sale.created_at);
+
+                                    const isPaid = sale.status === 'COMPLETED' || !!cashierName || (sale.transactions && sale.transactions.length > 0);
+                                    const isCancelled = sale.status === 'CANCELLED';
+
                                     return (
-                                      <span className="text-xs font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full uppercase">
-                                        ATENDIDO POR: {atendidoName}
-                                      </span>
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        {/* 1. Atendido */}
+                                        <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-full text-xs font-bold">
+                                          <UserCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                          <span>ATENDIDO POR: <strong className="uppercase">{sellerName}</strong></span>
+                                          {createdTime && <span className="text-[10px] text-emerald-700 font-mono font-medium">({createdTime})</span>}
+                                        </div>
+
+                                        {/* 2. Cobrado (Si existió cobro) */}
+                                        {isPaid && (
+                                          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-50 border border-blue-200 text-blue-800 rounded-full text-xs font-bold">
+                                            <CreditCard className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                                            <span>COBRADO POR: <strong className="uppercase">{cashierName || 'ADMIN'}</strong></span>
+                                            {cobradoTime && <span className="text-[10px] text-blue-700 font-mono font-medium">({cobradoTime})</span>}
+                                          </div>
+                                        )}
+
+                                        {/* 3. Anulado (Si fue anulada) */}
+                                        {isCancelled && (
+                                          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-rose-50 border border-rose-200 text-rose-800 rounded-full text-xs font-bold">
+                                            <XCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                                            <span>ANULADO POR: <strong className="uppercase">{(sale as any).cancelled_by?.username || 'ADMIN'}</strong></span>
+                                            {anuladoTime && <span className="text-[10px] text-rose-700 font-mono font-medium">({anuladoTime})</span>}
+                                          </div>
+                                        )}
+                                      </div>
                                     );
                                   })()}
                                 </div>

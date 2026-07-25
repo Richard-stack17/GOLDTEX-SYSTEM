@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useRole } from "../context/RoleContext";
 import {
   Button,
   Input,
@@ -56,8 +58,19 @@ type Service = {
 };
 
 export default function InventarioPage() {
+  const router = useRouter();
+  const { isHydrated, permissions } = useRole();
+
   const [activeTab, setActiveTab] = useState<"catalogo" | "inventario" | "familias" | "servicios">("catalogo");
   const [statusFilter, setStatusFilter] = useState<"ALL" | "ACTIVE" | "INACTIVE">("ACTIVE");
+
+  useEffect(() => {
+    if (isHydrated && !permissions?.access_inventory) {
+      router.push('/hub');
+    }
+  }, [isHydrated, permissions, router]);
+
+  if (!isHydrated || !permissions?.access_inventory) return null;
 
   // Products states
   const [products, setProducts] = useState<Product[]>([]);
@@ -500,17 +513,17 @@ export default function InventarioPage() {
         </div>
 
         <div className="flex items-center gap-4">
-          {activeTab === "catalogo" && (
+          {activeTab === "catalogo" && permissions?.inventory_create !== false && (
             <button onClick={() => openModal(undefined, "catalogo")} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold transition-colors shadow-sm hover:bg-primary/90">
               <Plus className="w-3.5 h-3.5" /> Nuevo Producto
             </button>
           )}
-          {activeTab === "familias" && (
+          {activeTab === "familias" && permissions?.inventory_create !== false && (
             <button onClick={() => openFamilyModal()} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold transition-colors shadow-sm hover:bg-primary/90">
               <FolderPlus className="w-3.5 h-3.5" /> Nueva Familia
             </button>
           )}
-          {activeTab === "servicios" && (
+          {activeTab === "servicios" && permissions?.inventory_create !== false && (
             <button onClick={() => openServiceModal()} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold transition-colors shadow-sm hover:bg-primary/90">
               <Plus className="w-3.5 h-3.5" /> Nuevo Servicio
             </button>
@@ -623,14 +636,18 @@ export default function InventarioPage() {
                                 <RefreshCcw className="w-4 h-4" />
                               </button>
                             ) : (
-                              <>
-                                <button onClick={() => openModal(product, "catalogo")} className="p-2 text-muted-foreground hover:text-primary transition-colors">
-                                  <Edit2 className="w-4 h-4" />
-                                </button>
-                                <button onClick={() => handleDelete(product)} className="p-2 text-muted-foreground hover:text-red-500 transition-colors">
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </>
+                              <div className="flex items-center justify-end gap-1">
+                                {permissions?.inventory_edit !== false && (
+                                  <button onClick={() => openModal(product, "catalogo")} className="p-2 text-muted-foreground hover:text-indigo-600 transition-colors" title="Editar Producto">
+                                    <Edit2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                                {permissions?.inventory_delete !== false && (
+                                  <button onClick={() => openDeleteConfirm(product)} className="p-2 text-muted-foreground hover:text-rose-600 transition-colors" title="Eliminar Producto">
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
                             )}
                           </div>
                         </TableCell>
@@ -716,9 +733,11 @@ export default function InventarioPage() {
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-2">
-                            <button onClick={() => openModal(product, "inventario")} className="p-2 text-muted-foreground hover:text-primary transition-colors">
-                              <Edit2 className="w-4 h-4" />
-                            </button>
+                            {permissions?.inventory_edit !== false && (
+                              <button onClick={() => openModal(product, "inventario")} className="p-2 text-muted-foreground hover:text-indigo-600 transition-colors" title="Ajustar Stock">
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -793,14 +812,18 @@ export default function InventarioPage() {
                                 <RefreshCcw className="w-4 h-4" />
                               </button>
                             ) : (
-                              <>
-                                <button onClick={() => openFamilyModal(family)} className="p-2 text-muted-foreground hover:text-primary transition-colors">
-                                  <Edit2 className="w-4 h-4" />
-                                </button>
-                                <button onClick={() => handleDeleteFamily(family)} className="p-2 text-muted-foreground hover:text-red-500 transition-colors">
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </>
+                              <div className="flex items-center justify-end gap-1">
+                                {permissions?.inventory_edit !== false && (
+                                  <button onClick={() => openFamilyModal(family)} className="p-2 text-muted-foreground hover:text-indigo-600 transition-colors" title="Editar Familia">
+                                    <Edit2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                                {permissions?.inventory_delete !== false && (
+                                  <button onClick={() => handleDeleteFamily(family)} className="p-2 text-muted-foreground hover:text-rose-600 transition-colors" title="Eliminar Familia">
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
                             )}
                           </div>
                         </TableCell>
@@ -874,14 +897,18 @@ export default function InventarioPage() {
                                 <RefreshCcw className="w-4 h-4" />
                               </button>
                             ) : (
-                              <>
-                                <button onClick={() => openServiceModal(service)} className="p-2 text-muted-foreground hover:text-primary transition-colors">
-                                  <Edit2 className="w-4 h-4" />
-                                </button>
-                                <button onClick={() => handleDeleteService(service)} className="p-2 text-muted-foreground hover:text-red-500 transition-colors">
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </>
+                              <div className="flex items-center justify-end gap-1">
+                                {permissions?.inventory_edit !== false && (
+                                  <button onClick={() => openServiceModal(service)} className="p-2 text-muted-foreground hover:text-indigo-600 transition-colors" title="Editar Servicio">
+                                    <Edit2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                                {permissions?.inventory_delete !== false && (
+                                  <button onClick={() => handleDeleteService(service)} className="p-2 text-muted-foreground hover:text-rose-600 transition-colors" title="Eliminar Servicio">
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
                             )}
                           </div>
                         </TableCell>

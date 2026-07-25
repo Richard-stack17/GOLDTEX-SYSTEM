@@ -66,7 +66,9 @@ const PERMISSION_GROUPS = [
     color: 'text-teal-500',
     bgColor: 'bg-teal-500/10',
     borderColor: 'border-teal-500/20',
-    subPermissions: []
+    subPermissions: [
+      { key: 'history_cancel_proforma', label: 'Anular / Eliminar Proformas' }
+    ]
   },
   {
     app: 'Caja',
@@ -104,7 +106,11 @@ const PERMISSION_GROUPS = [
     color: 'text-purple-500',
     bgColor: 'bg-purple-500/10',
     borderColor: 'border-purple-500/20',
-    subPermissions: []
+    subPermissions: [
+      { key: 'inventory_create', label: 'Crear Productos, Familias y Servicios' },
+      { key: 'inventory_edit', label: 'Editar Productos, Precios, Familias y Servicios' },
+      { key: 'inventory_delete', label: 'Eliminar Productos, Familias y Servicios' }
+    ]
   },
   {
     app: 'Personal',
@@ -113,7 +119,12 @@ const PERMISSION_GROUPS = [
     color: 'text-indigo-500',
     bgColor: 'bg-indigo-500/10',
     borderColor: 'border-indigo-500/20',
-    subPermissions: []
+    subPermissions: [
+      { key: 'personal_create_user', label: 'Crear y Vincular Empleados o Cuentas de Usuario' },
+      { key: 'personal_edit_user', label: 'Editar Empleados, Usuarios, Contraseñas y Roles' },
+      { key: 'personal_delete_user', label: 'Dar de Baja o Eliminar Empleados y Usuarios' },
+      { key: 'personal_manage_roles', label: 'Gestionar Matriz de Roles y Permisos' }
+    ]
   },
   {
     app: 'Dashboard',
@@ -152,7 +163,7 @@ function Toast({ message, type }: { message: string; type: 'success' | 'error' }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function PersonalPage() {
-  const { role, isHydrated } = useRole();
+  const { role, isHydrated, permissions } = useRole();
   const router = useRouter();
 
   const [activeTab, setActiveTab] = useState<Tab>('empleados');
@@ -163,6 +174,7 @@ export default function PersonalPage() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   // ── Empleados form state
+  const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
   const [fullName, setFullName] = useState('');
   const [dni, setDni] = useState('');
@@ -343,16 +355,16 @@ export default function PersonalPage() {
 
   useEffect(() => {
     if (!isHydrated) return;
-    if (role !== 'ADMIN') { router.push('/hub'); return; }
+    if (!permissions?.access_personal) { router.push('/hub'); return; }
     loadData();
-  }, [isHydrated, role]);
+  }, [isHydrated, permissions]);
 
   const showToast = (message: string, type: 'success' | 'error') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3500);
   };
 
-  // ── Create employee (+ Optional Profile)
+  // ── Create / Edit employee (+ Optional Profile)
   const handleCreateEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!fullName.trim() || !dni.trim()) {
@@ -360,47 +372,81 @@ export default function PersonalPage() {
       return;
     }
 
-    if (createAccess && (!empUsername.trim() || !empPassword)) {
+    if (!editingEmployee && createAccess && (!empUsername.trim() || !empPassword)) {
       showToast('Usuario y contraseña son obligatorios para crear el acceso', 'error');
       return;
     }
 
     setSavingEmployee(true);
     try {
-      // 1. Insert Employee
-      const { data: newEmp, error: empErr } = await supabase.from('employees').insert({
-        full_name: fullName.trim(),
-        dni: dni.trim(),
-        phone: phone.trim() || null,
-      }).select('id').single();
+      if (editingEmployee) {
+        // Update existing employee
+        const { error: empErr } = await supabase.from('employees').update({
+          full_name: fullName.trim(),
+          dni: dni.trim(),
+          phone: phone.trim() || null,
+        }).eq('id', editingEmployee.id);
 
-      if (empErr) throw empErr;
+        if (empErr) throw empErr;
+        showToast('Empleado actualizado correctamente', 'success');
+      } else {
+        // 1. Insert Employee
+        const { data: newEmp, error: empErr } = await supabase.from('employees').insert({
+          full_name: fullName.trim(),
+          dni: dni.trim(),
+          phone: phone.trim() || null,
+        }).select('id').single();
 
-      // 2. Insert Profile (if toggled)
-      if (createAccess && newEmp) {
-        const hash = bcrypt.hashSync(empPassword, 8);
-        const { error: profErr } = await supabase.from('profiles').insert({
-          username: empUsername.trim(),
-          role: empRole,
-          password_hash: hash,
-          employee_id: newEmp.id,
-          email: empEmail.trim() || null
-        });
-        if (profErr) throw profErr;
+        if (empErr) throw empErr;
+
+        // 2. Insert Profile (if toggled)
+        if (createAccess && newEmp) {
+          const hash = bcrypt.hashSync(empPassword, 8);
+          const { error: profErr } = await supabase.from('profiles').insert({
+            username: empUsername.trim(),
+            role: empRole,
+            password_hash: hash,
+            employee_id: newEmp.id,
+            email: empEmail.trim() || null
+          });
+          if (profErr) throw profErr;
+        }
+
+        showToast(createAccess ? 'Empleado y acceso creados correctamente' : 'Empleado registrado correctamente', 'success');
       }
-
-      showToast(createAccess ? 'Empleado y acceso creados correctamente' : 'Empleado registrado correctamente', 'success');
 
       // Reset form
       setIsEmployeeModalOpen(false);
+      setEditingEmployee(null);
       setFullName(''); setDni(''); setPhone('');
       setCreateAccess(false); setEmpUsername(''); setEmpPassword(''); setEmpEmail(''); setEmpRole('CAJERA');
 
       loadData();
     } catch (err: any) {
-      showToast(err.message || 'Error al registrar empleado', 'error');
+      showToast(err.message || 'Error al guardar empleado', 'error');
     } finally {
       setSavingEmployee(false);
+    }
+  };
+
+  const handleEditEmployeeClick = (emp: Employee) => {
+    setEditingEmployee(emp);
+    setFullName(emp.full_name);
+    setDni(emp.dni);
+    setPhone(emp.phone || '');
+    setCreateAccess(false);
+    setIsEmployeeModalOpen(true);
+  };
+
+  const handleDeleteEmployeeClick = async (empId: string, empName: string) => {
+    if (!confirm(`¿Estás seguro de eliminar el empleado "${empName}"?`)) return;
+    try {
+      const { error } = await supabase.from('employees').delete().eq('id', empId);
+      if (error) throw error;
+      showToast('Empleado eliminado correctamente', 'success');
+      loadData();
+    } catch (err: any) {
+      showToast(err.message || 'Error al eliminar empleado', 'error');
     }
   };
 
@@ -522,7 +568,7 @@ export default function PersonalPage() {
     setIsUserModalOpen(false);
   };
 
-  if (!isHydrated || role !== 'ADMIN') return null;
+  if (!isHydrated || !permissions?.access_personal) return null;
 
   const profileByEmployeeId = Object.fromEntries(
     allProfiles.filter(p => p.employee_id && p.role !== 'DELETED').map(p => [p.employee_id!, p]),
@@ -565,7 +611,7 @@ export default function PersonalPage() {
             {[
               { id: 'empleados' as Tab, label: 'Empleados' },
               { id: 'usuarios' as Tab, label: 'Usuarios (Perfiles)' },
-              { id: 'roles' as Tab, label: 'Roles y Permisos' }
+              ...(permissions?.personal_manage_roles !== false ? [{ id: 'roles' as Tab, label: 'Roles y Permisos' }] : [])
             ].map(({ id, label }) => (
               <button
                 key={id}
@@ -599,15 +645,18 @@ export default function PersonalPage() {
                     {employees.length} empleado{employees.length !== 1 ? 's' : ''}
                   </span>
                 </div>
-                <button
-                  onClick={() => {
-                    setFullName(''); setDni(''); setPhone(''); setCreateAccess(false);
-                    setIsEmployeeModalOpen(true);
-                  }}
-                  className="h-9 px-4 flex items-center justify-center gap-2 rounded-lg font-bold text-xs bg-indigo-600 hover:bg-indigo-700 text-white transition-colors shadow-sm"
-                >
-                  <Plus className="w-3.5 h-3.5" /> Nuevo Empleado
-                </button>
+                {permissions?.personal_create_user !== false && (
+                  <button
+                    onClick={() => {
+                      setEditingEmployee(null);
+                      setFullName(''); setDni(''); setPhone(''); setCreateAccess(false);
+                      setIsEmployeeModalOpen(true);
+                    }}
+                    className="h-9 px-4 flex items-center justify-center gap-2 rounded-lg font-bold text-xs bg-indigo-600 hover:bg-indigo-700 text-white transition-colors shadow-sm"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Nuevo Empleado
+                  </button>
+                )}
               </div>
               {loading ? (
                 <div className="p-10 flex items-center justify-center gap-3 text-muted-foreground">
@@ -663,15 +712,35 @@ export default function PersonalPage() {
                               )}
                             </td>
                             <td className="px-5 py-3.5 text-center">
-                              {!profile && (
-                                <button
-                                  onClick={() => setLinkingEmployee(emp)}
-                                  className="p-1.5 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors inline-flex"
-                                  title="Vincular a un Acceso"
-                                >
-                                  <KeyRound className="w-4 h-4 mx-auto" />
-                                </button>
-                              )}
+                              <div className="flex items-center justify-center gap-1.5">
+                                {!profile && permissions?.personal_create_user !== false && (
+                                  <button
+                                    onClick={() => setLinkingEmployee(emp)}
+                                    className="p-1.5 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors inline-flex"
+                                    title="Vincular a un Acceso"
+                                  >
+                                    <KeyRound className="w-4 h-4" />
+                                  </button>
+                                )}
+                                {permissions?.personal_edit_user !== false && (
+                                  <button
+                                    onClick={() => handleEditEmployeeClick(emp)}
+                                    className="p-1.5 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors inline-flex"
+                                    title="Editar datos de empleado"
+                                  >
+                                    <Edit2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                                {permissions?.personal_delete_user !== false && (
+                                  <button
+                                    onClick={() => handleDeleteEmployeeClick(emp.id, emp.full_name)}
+                                    className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors inline-flex"
+                                    title="Eliminar empleado"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         );
@@ -696,15 +765,17 @@ export default function PersonalPage() {
                     {activeProfiles.length} usuario{activeProfiles.length !== 1 ? 's' : ''}
                   </span>
                 </div>
-                <button
-                  onClick={() => {
-                    handleCancelEdit();
-                    setIsUserModalOpen(true);
-                  }}
-                  className="h-9 px-4 flex items-center justify-center gap-2 rounded-lg font-bold text-xs bg-indigo-600 hover:bg-indigo-700 text-white transition-colors shadow-sm"
-                >
-                  <Plus className="w-3.5 h-3.5" /> Nuevo Acceso
-                </button>
+                {permissions?.personal_create_user !== false && (
+                  <button
+                    onClick={() => {
+                      handleCancelEdit();
+                      setIsUserModalOpen(true);
+                    }}
+                    className="h-9 px-4 flex items-center justify-center gap-2 rounded-lg font-bold text-xs bg-indigo-600 hover:bg-indigo-700 text-white transition-colors shadow-sm"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Nuevo Acceso
+                  </button>
+                )}
               </div>
               {loading ? (
                 <div className="p-10 flex items-center justify-center gap-3 text-muted-foreground">
@@ -754,23 +825,27 @@ export default function PersonalPage() {
                             </td>
                             <td className="px-5 py-3.5 text-center">
                               <div className="flex items-center justify-center gap-2">
-                                <button
-                                  onClick={() => handleEditClick(profile)}
-                                  className="p-1.5 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors"
-                                  title="Editar usuario"
-                                >
-                                  <Edit2 className="w-4 h-4" />
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    setDeletingUserId(profile.id);
-                                    setDeletingUsername(profile.username);
-                                  }}
-                                  className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
-                                  title="Desactivar usuario"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
+                                {permissions?.personal_edit_user !== false && (
+                                  <button
+                                    onClick={() => handleEditClick(profile)}
+                                    className="p-1.5 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors"
+                                    title="Editar usuario"
+                                  >
+                                    <Edit2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                                {permissions?.personal_delete_user !== false && (
+                                  <button
+                                    onClick={() => {
+                                      setDeletingUserId(profile.id);
+                                      setDeletingUsername(profile.username);
+                                    }}
+                                    className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
+                                    title="Desactivar usuario"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -1011,10 +1086,13 @@ export default function PersonalPage() {
             <div className="px-5 py-4 border-b flex items-center justify-between bg-muted/20 border-border text-foreground">
               <div className="flex items-center gap-2">
                 <UserPlus className="w-4 h-4 text-indigo-500" />
-                <h2 className="text-sm font-bold uppercase tracking-wider">Nuevo Empleado</h2>
+                <h2 className="text-sm font-bold uppercase tracking-wider">{editingEmployee ? 'Editar Empleado' : 'Nuevo Empleado'}</h2>
               </div>
               <button
-                onClick={() => setIsEmployeeModalOpen(false)}
+                onClick={() => {
+                  setIsEmployeeModalOpen(false);
+                  setEditingEmployee(null);
+                }}
                 className="transition-colors p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted"
               >
                 <X className="w-4 h-4" />
@@ -1063,73 +1141,77 @@ export default function PersonalPage() {
                 </div>
               </div>
 
-              {/* Toggle Acceso Rápido */}
-              <div className="pt-2 border-t border-border mt-4">
-                <label className="flex items-center gap-3 cursor-pointer p-2 -mx-2 rounded-xl hover:bg-secondary/50 transition-colors">
-                  <div className="relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-border transition-colors group">
-                    <input
-                      type="checkbox"
-                      className="peer sr-only"
-                      checked={createAccess}
-                      onChange={(e) => setCreateAccess(e.target.checked)}
-                    />
-                    <div className={`h-5 w-9 rounded-full transition-colors ${createAccess ? 'bg-indigo-500' : 'bg-muted'}`} />
-                    <div className={`absolute left-0.5 h-4 w-4 rounded-full bg-white transition-transform ${createAccess ? 'translate-x-4' : 'translate-x-0'}`} />
+              {/* Toggle Acceso Rápido (solo para nuevo empleado) */}
+              {!editingEmployee && (
+                <>
+                  <div className="pt-2 border-t border-border mt-4">
+                    <label className="flex items-center gap-3 cursor-pointer p-2 -mx-2 rounded-xl hover:bg-secondary/50 transition-colors">
+                      <div className="relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-border transition-colors group">
+                        <input
+                          type="checkbox"
+                          className="peer sr-only"
+                          checked={createAccess}
+                          onChange={(e) => setCreateAccess(e.target.checked)}
+                        />
+                        <div className={`h-5 w-9 rounded-full transition-colors ${createAccess ? 'bg-indigo-500' : 'bg-muted'}`} />
+                        <div className={`absolute left-0.5 h-4 w-4 rounded-full bg-white transition-transform ${createAccess ? 'translate-x-4' : 'translate-x-0'}`} />
+                      </div>
+                      <span className="text-sm font-bold select-none text-foreground">¿Crear acceso al sistema?</span>
+                    </label>
                   </div>
-                  <span className="text-sm font-bold select-none text-foreground">¿Crear acceso al sistema?</span>
-                </label>
-              </div>
 
-              {/* Campos de Acceso Ocultos */}
-              {createAccess && (
-                <div className="space-y-4 pt-2 animate-in slide-in-from-top-2 fade-in duration-200">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Usuario</label>
-                    <input
-                      type="text"
-                      placeholder="Ej: yuriko"
-                      value={empUsername}
-                      onChange={e => setEmpUsername(e.target.value)}
-                      required
-                      className="w-full h-10 bg-secondary/30 border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors font-mono"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Contraseña/PIN</label>
-                      <input
-                        type="password"
-                        placeholder="Mín. 4 caracteres"
-                        value={empPassword}
-                        onChange={e => setEmpPassword(e.target.value)}
-                        required
-                        className="w-full h-10 bg-secondary/30 border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors"
-                      />
+                  {/* Campos de Acceso Ocultos */}
+                  {createAccess && (
+                    <div className="space-y-4 pt-2 animate-in slide-in-from-top-2 fade-in duration-200">
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Usuario</label>
+                        <input
+                          type="text"
+                          placeholder="Ej: yuriko"
+                          value={empUsername}
+                          onChange={e => setEmpUsername(e.target.value)}
+                          required
+                          className="w-full h-10 bg-secondary/30 border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors font-mono"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Contraseña/PIN</label>
+                          <input
+                            type="password"
+                            placeholder="Mín. 4 caracteres"
+                            value={empPassword}
+                            onChange={e => setEmpPassword(e.target.value)}
+                            required
+                            className="w-full h-10 bg-secondary/30 border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Rol</label>
+                          <select
+                            value={empRole}
+                            onChange={e => setEmpRole(e.target.value)}
+                            className="w-full h-10 bg-secondary/30 border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors"
+                          >
+                            {roles.map(r => (
+                              <option key={r.id} value={r.name}>{r.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Correo Gmail <span className="normal-case font-normal">(Opcional)</span></label>
+                        <input
+                          type="email"
+                          placeholder="Para login con Google"
+                          value={empEmail}
+                          onChange={e => setEmpEmail(e.target.value)}
+                          className="w-full h-10 bg-secondary/30 border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors"
+                        />
+                      </div>
                     </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Rol</label>
-                      <select
-                        value={empRole}
-                        onChange={e => setEmpRole(e.target.value)}
-                        className="w-full h-10 bg-secondary/30 border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors"
-                      >
-                        {roles.map(r => (
-                          <option key={r.id} value={r.name}>{r.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Correo Gmail <span className="normal-case font-normal">(Opcional)</span></label>
-                    <input
-                      type="email"
-                      placeholder="Para login con Google"
-                      value={empEmail}
-                      onChange={e => setEmpEmail(e.target.value)}
-                      className="w-full h-10 bg-secondary/30 border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors"
-                    />
-                  </div>
-                </div>
+                  )}
+                </>
               )}
 
               <button

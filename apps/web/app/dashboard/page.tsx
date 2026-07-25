@@ -2,6 +2,8 @@
 
 import React, { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useRole } from "../context/RoleContext";
 import {
   Button,
   Card,
@@ -37,10 +39,21 @@ const formatYMD = (d: Date) => {
 };
 
 export default function DashboardPage() {
+  const router = useRouter();
+  const { isHydrated, permissions } = useRole();
+
   const [dateFilter, setDateFilter] = useState<DateFilter>("THIS_WEEK");
   const [selectedYear, setSelectedYear] = useState<number | "">(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState<number | "">(new Date().getMonth());
   const [selectedDay, setSelectedDay] = useState<number | "">("");
+
+  useEffect(() => {
+    if (isHydrated && !permissions?.access_dashboard) {
+      router.push('/hub');
+    }
+  }, [isHydrated, permissions, router]);
+
+  if (!isHydrated || !permissions?.access_dashboard) return null;
 
   // Sync on mount
   useEffect(() => {

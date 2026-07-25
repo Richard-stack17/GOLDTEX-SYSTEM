@@ -447,12 +447,12 @@ export default function CajaPage() {
     setCustomerQuery("");
   };
 
-  // ── Redirect if wrong role ──
+  // ── Redirect if no access ──
   useEffect(() => {
-    if (isHydrated && role === 'VENDEDOR') {
-      router.push('/pos');
+    if (isHydrated && !permissions?.access_caja) {
+      router.push('/hub');
     }
-  }, [isHydrated, role, router]);
+  }, [isHydrated, permissions, router]);
 
   // ── Derived payment values ──
   const ticketTotal = selectedTicket?.total ?? 0;
@@ -675,6 +675,7 @@ export default function CajaPage() {
         voucher_doc_number: needsDocInfo ? docNumber : String(internalTicketNum),
         voucher_doc_name: needsDocInfo ? docName.trim() : null,
         cashier_id: cashierId,
+        updated_at: new Date().toISOString(),
       };
 
       const { error: updateErr } = await supabase
@@ -751,12 +752,20 @@ export default function CajaPage() {
     setIsProcessing(true);
     try {
       const updated_at = new Date().toISOString();
+      let cancellerId: string | null = null;
+      if (username) {
+        try {
+          const { data: profData } = await supabase.from('profiles').select('id').eq('username', username).maybeSingle();
+          if (profData?.id) cancellerId = profData.id;
+        } catch (e) {}
+      }
 
       const { error } = await supabase
         .from("sales")
         .update({
           status: "CANCELLED",
-          updated_at: updated_at
+          updated_at: updated_at,
+          cancelled_by_id: cancellerId
         })
         .eq("id", ticketToCancel.id);
       if (error) throw error;
@@ -868,7 +877,7 @@ export default function CajaPage() {
     return { label: "Anulado", classes: "bg-red-500/20 text-red-500 border border-red-500/30" };
   };
 
-  if (!isHydrated || role === 'VENDEDOR') return null;
+  if (!isHydrated || !permissions?.access_caja) return null;
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
