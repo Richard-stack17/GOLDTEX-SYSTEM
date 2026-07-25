@@ -57,6 +57,21 @@ export default function LoginPage() {
       setUsername(profileData.username);
       setEmployeeId(profileData.employee_id ?? null);
 
+      // Guardar historial de cuentas para selector rápido
+      try {
+        const savedAccountsStr = localStorage.getItem("goltex_saved_accounts");
+        let savedAccounts = savedAccountsStr ? JSON.parse(savedAccountsStr) : [];
+        savedAccounts = savedAccounts.filter((acc: any) => acc.username !== profileData.username);
+        savedAccounts.unshift({ 
+          username: profileData.username, 
+          role: userRole, 
+          employee_id: profileData.employee_id 
+        });
+        localStorage.setItem("goltex_saved_accounts", JSON.stringify(savedAccounts.slice(0, 10))); // Max 10 cuentas
+      } catch (e) {
+        console.error("No se pudo guardar el historial de cuentas", e);
+      }
+
       router.push("/hub");
     } catch (err: any) {
       setError(err.message || "Error al iniciar sesión");

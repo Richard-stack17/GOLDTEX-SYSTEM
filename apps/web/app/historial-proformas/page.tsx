@@ -31,7 +31,8 @@ type SaleItem = {
 type SaleRow = {
   id: string;
   internal_ticket_number: number | null;
-  document_number: string;
+  proforma_number: string | null;
+  invoice_number: string | null;
   issue_date: string;
   total: number;
   status: string;
@@ -78,7 +79,8 @@ export default function HistorialProformasPage() {
       let query = supabase
         .from('sales')
         .select(`
-          id, internal_ticket_number, document_number, issue_date, total, status, items,
+          id, internal_ticket_number, proforma_number, invoice_number, issue_date, total, status, items, seller_id, cashier_id,
+          seller:profiles!seller_id(username),
           customers ( business_name, ruc ),
           transactions ( payment_method, amount, sequence )
         `)
@@ -114,7 +116,8 @@ export default function HistorialProformasPage() {
     if (!searchTerm) return sales;
     const lower = searchTerm.toLowerCase();
     return sales.filter(s =>
-      s.document_number?.toLowerCase().includes(lower) ||
+      s.proforma_number?.toLowerCase().includes(lower) ||
+      s.invoice_number?.toLowerCase().includes(lower) ||
       s.customers?.business_name?.toLowerCase().includes(lower) ||
       s.customers?.ruc?.toLowerCase().includes(lower)
     );
@@ -321,7 +324,8 @@ export default function HistorialProformasPage() {
                             <div className="font-black text-sm">{formatTicketHash(ticketNo)}</div>
                           </td>
                           <td className="px-4 py-3 font-mono text-gray-600 whitespace-nowrap">
-                            {sale.document_number}
+                            <div>{sale.proforma_number}</div>
+                            {sale.invoice_number && <div className="text-[10px] text-emerald-600 font-bold">{sale.invoice_number}</div>}
                           </td>
                           <td className="px-4 py-3 font-mono whitespace-nowrap">{fmtAmt(montoAmt, "text-emerald-600")}</td>
                           <td className="px-4 py-3 font-mono whitespace-nowrap">{fmtAmt(confeccionAmt, "text-fuchsia-600")}</td>
@@ -356,7 +360,7 @@ export default function HistorialProformasPage() {
                               </button>
                               {!isCancelled && (
                                 <button
-                                  onClick={() => handleSoftDelete(sale.id, sale.status, sale.document_number)}
+                                  onClick={() => handleSoftDelete(sale.id, sale.status, sale.proforma_number || sale.invoice_number || '')}
                                   className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                                   title="Anular"
                                 >
@@ -370,9 +374,19 @@ export default function HistorialProformasPage() {
                           <tr className="bg-gray-50/80 border-b border-gray-200">
                             <td colSpan={10} className="px-8 py-4">
                               <div className="bg-white border rounded-xl p-4 shadow-sm">
-                                <h4 className="text-xs font-extrabold text-gray-500 uppercase tracking-wider flex items-center gap-2 mb-3">
-                                  <ShoppingBag className="w-4 h-4" /> Desglose de Ítems
-                                </h4>
+                                <div className="flex justify-between items-center mb-3">
+                                  <h4 className="text-xs font-extrabold text-gray-500 uppercase tracking-wider flex items-center gap-2">
+                                    <ShoppingBag className="w-4 h-4" /> Desglose de Ítems
+                                  </h4>
+                                  {(() => {
+                                    const atendidoName = (sale as any).seller?.username || 'ADMIN';
+                                    return (
+                                      <span className="text-xs font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full uppercase">
+                                        ATENDIDO POR: {atendidoName}
+                                      </span>
+                                    );
+                                  })()}
+                                </div>
                                 {Array.isArray(sale.items) && sale.items.length > 0 ? (
                                   <table className="w-full text-xs">
                                     <thead>

@@ -51,7 +51,12 @@ const PERMISSION_GROUPS = [
     bgColor: 'bg-blue-500/10',
     borderColor: 'border-blue-500/20',
     subPermissions: [
-      { key: 'view_cashier_name', label: 'Ver quién cobró las ventas de hoy' }
+      { key: 'view_cashier_name', label: 'Ver quién atendió la proforma' },
+      { key: 'pos_open_caja', label: 'Apertura de Caja' },
+      { key: 'pos_close_caja', label: 'Cierre de Caja' },
+      { key: 'pos_switch_account', label: 'Ver Cuentas Guardadas en este Equipo' },
+      { key: 'pos_remove_saved_account', label: 'Quitar Cuentas Guardadas' },
+      { key: 'pos_logout', label: 'Cerrar todas las Cuentas Guardadas' }
     ]
   },
   {
@@ -133,11 +138,10 @@ const PERMISSION_GROUPS = [
 // ─── Toast helper ─────────────────────────────────────────────────────────────
 function Toast({ message, type }: { message: string; type: 'success' | 'error' }) {
   return (
-    <div className={`fixed bottom-5 right-5 z-50 flex items-center gap-3 px-5 py-3.5 rounded-2xl border shadow-2xl font-bold text-sm animate-in fade-in slide-in-from-bottom-4 ${
-      type === 'success'
-        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
-        : 'bg-red-500/10 border-red-500/30 text-red-500'
-    }`}>
+    <div className={`fixed bottom-5 right-5 z-50 flex items-center gap-3 px-5 py-3.5 rounded-2xl border shadow-2xl font-bold text-sm animate-in fade-in slide-in-from-bottom-4 ${type === 'success'
+      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
+      : 'bg-red-500/10 border-red-500/30 text-red-500'
+      }`}>
       {type === 'success'
         ? <CheckCircle2 className="w-4 h-4 shrink-0" />
         : <ShieldAlert className="w-4 h-4 shrink-0" />}
@@ -165,7 +169,7 @@ export default function PersonalPage() {
   const [phone, setPhone] = useState('');
   const [savingEmployee, setSavingEmployee] = useState(false);
   const [createAccess, setCreateAccess] = useState(false);
-  
+
   // Campos extra si createAccess es true:
   const [empUsername, setEmpUsername] = useState('');
   const [empPassword, setEmpPassword] = useState('');
@@ -198,7 +202,7 @@ export default function PersonalPage() {
   const [newRoleName, setNewRoleName] = useState('');
   const [newRoleDesc, setNewRoleDesc] = useState('');
   const [savingRole, setSavingRole] = useState(false);
-  
+
   // ── Draft Permissions State
   const [originalRoles, setOriginalRoles] = useState<Role[]>([]);
   const [hasUnsavedRoleChanges, setHasUnsavedRoleChanges] = useState(false);
@@ -246,7 +250,7 @@ export default function PersonalPage() {
       setRoles(rolesData ?? []);
       setOriginalRoles(rolesData ?? []);
       setHasUnsavedRoleChanges(false);
-      
+
       // Update default selected roles if needed
       if (rolesData && rolesData.length > 0) {
         if (empRole === 'CAJERA' || !empRole) setEmpRole(rolesData[0].name);
@@ -286,7 +290,7 @@ export default function PersonalPage() {
 
   const handleTogglePermission = (roleId: string, currentPerms: Record<string, boolean>, permKey: string, newValue: boolean) => {
     let updatedPerms = { ...currentPerms, [permKey]: newValue };
-    
+
     // Si se está APAGANDO un permiso principal, apagar también sus sub-permisos
     if (!newValue) {
       const group = PERMISSION_GROUPS.find(g => g.mainKey === permKey);
@@ -355,7 +359,7 @@ export default function PersonalPage() {
       showToast('Nombre completo y DNI son obligatorios', 'error');
       return;
     }
-    
+
     if (createAccess && (!empUsername.trim() || !empPassword)) {
       showToast('Usuario y contraseña son obligatorios para crear el acceso', 'error');
       return;
@@ -386,12 +390,12 @@ export default function PersonalPage() {
       }
 
       showToast(createAccess ? 'Empleado y acceso creados correctamente' : 'Empleado registrado correctamente', 'success');
-      
+
       // Reset form
       setIsEmployeeModalOpen(false);
       setFullName(''); setDni(''); setPhone('');
       setCreateAccess(false); setEmpUsername(''); setEmpPassword(''); setEmpEmail(''); setEmpRole('CAJERA');
-      
+
       loadData();
     } catch (err: any) {
       showToast(err.message || 'Error al registrar empleado', 'error');
@@ -556,7 +560,7 @@ export default function PersonalPage() {
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             Actualizar
           </button>
-          
+
           <div className="flex bg-secondary rounded-lg p-1 gap-1">
             {[
               { id: 'empleados' as Tab, label: 'Empleados' },
@@ -566,11 +570,10 @@ export default function PersonalPage() {
               <button
                 key={id}
                 onClick={() => setActiveTab(id)}
-                className={`px-3 py-1 rounded-md text-xs font-bold transition-colors ${
-                  activeTab === id
-                    ? "bg-foreground text-background"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
+                className={`px-3 py-1 rounded-md text-xs font-bold transition-colors ${activeTab === id
+                  ? "bg-foreground text-background"
+                  : "text-muted-foreground hover:text-foreground"
+                  }`}
               >
                 {label}
               </button>
@@ -606,80 +609,79 @@ export default function PersonalPage() {
                   <Plus className="w-3.5 h-3.5" /> Nuevo Empleado
                 </button>
               </div>
-                {loading ? (
-                  <div className="p-10 flex items-center justify-center gap-3 text-muted-foreground">
-                    <RefreshCw className="w-5 h-5 animate-spin" />
-                    <span className="text-sm font-medium">Cargando...</span>
-                  </div>
-                ) : employees.length === 0 ? (
-                  <div className="p-10 text-center">
-                    <Users className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
-                    <p className="text-sm text-muted-foreground font-medium">No hay empleados registrados</p>
-                    <p className="text-xs text-muted-foreground/60 mt-1">Usa el formulario de la izquierda para añadir personal</p>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="bg-muted/30 border-b border-border text-muted-foreground">
-                        <tr>
-                          <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">Nombre Completo</th>
-                          <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">DNI</th>
-                          <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">Rol de Acceso</th>
-                          <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">Usuario Vinculado</th>
-                          <th className="px-5 py-3 text-center text-xs font-bold uppercase tracking-wider">Acciones</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border">
-                        {employees.map(emp => {
-                          const profile = profileByEmployeeId[emp.id];
-                          return (
-                            <tr key={emp.id} className="hover:bg-secondary/20 transition-colors">
-                              <td className="px-5 py-3.5 font-bold">{emp.full_name}</td>
-                              <td className="px-5 py-3.5 font-mono text-xs text-muted-foreground font-bold">{emp.dni}</td>
-                              <td className="px-5 py-3.5">
-                                {profile ? (
-                                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${
-                                    profile.role === 'ADMIN'
-                                      ? 'bg-purple-500/10 border-purple-500/30 text-purple-500'
-                                      : profile.role === 'CAJERA'
-                                      ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-500'
-                                      : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
+              {loading ? (
+                <div className="p-10 flex items-center justify-center gap-3 text-muted-foreground">
+                  <RefreshCw className="w-5 h-5 animate-spin" />
+                  <span className="text-sm font-medium">Cargando...</span>
+                </div>
+              ) : employees.length === 0 ? (
+                <div className="p-10 text-center">
+                  <Users className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
+                  <p className="text-sm text-muted-foreground font-medium">No hay empleados registrados</p>
+                  <p className="text-xs text-muted-foreground/60 mt-1">Usa el formulario de la izquierda para añadir personal</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/30 border-b border-border text-muted-foreground">
+                      <tr>
+                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">Nombre Completo</th>
+                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">DNI</th>
+                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">Rol de Acceso</th>
+                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">Usuario Vinculado</th>
+                        <th className="px-5 py-3 text-center text-xs font-bold uppercase tracking-wider">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {employees.map(emp => {
+                        const profile = profileByEmployeeId[emp.id];
+                        return (
+                          <tr key={emp.id} className="hover:bg-secondary/20 transition-colors">
+                            <td className="px-5 py-3.5 font-bold">{emp.full_name}</td>
+                            <td className="px-5 py-3.5 font-mono text-xs text-muted-foreground font-bold">{emp.dni}</td>
+                            <td className="px-5 py-3.5">
+                              {profile ? (
+                                <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${profile.role === 'ADMIN'
+                                  ? 'bg-purple-500/10 border-purple-500/30 text-purple-500'
+                                  : profile.role === 'CAJERA'
+                                    ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-500'
+                                    : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
                                   }`}>
-                                    {profile.role}
-                                  </span>
-                                ) : (
-                                  <span className="text-xs font-bold px-2 py-0.5 rounded-full border bg-amber-500/10 border-amber-500/30 text-amber-500">
-                                    Sin acceso
-                                  </span>
-                                )}
-                              </td>
-                              <td className="px-5 py-3.5">
-                                {profile ? (
-                                  <span className="text-xs text-indigo-500 font-bold font-mono">@{profile.username}</span>
-                                ) : (
-                                  <span className="text-xs text-muted-foreground italic">—</span>
-                                )}
-                              </td>
-                              <td className="px-5 py-3.5 text-center">
-                                {!profile && (
-                                  <button
-                                    onClick={() => setLinkingEmployee(emp)}
-                                    className="p-1.5 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors inline-flex"
-                                    title="Vincular a un Acceso"
-                                  >
-                                    <KeyRound className="w-4 h-4 mx-auto" />
-                                  </button>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
+                                  {profile.role}
+                                </span>
+                              ) : (
+                                <span className="text-xs font-bold px-2 py-0.5 rounded-full border bg-amber-500/10 border-amber-500/30 text-amber-500">
+                                  Sin acceso
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-5 py-3.5">
+                              {profile ? (
+                                <span className="text-xs text-indigo-500 font-bold font-mono">@{profile.username}</span>
+                              ) : (
+                                <span className="text-xs text-muted-foreground italic">—</span>
+                              )}
+                            </td>
+                            <td className="px-5 py-3.5 text-center">
+                              {!profile && (
+                                <button
+                                  onClick={() => setLinkingEmployee(emp)}
+                                  className="p-1.5 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors inline-flex"
+                                  title="Vincular a un Acceso"
+                                >
+                                  <KeyRound className="w-4 h-4 mx-auto" />
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
+          </div>
         )}
 
         {/* ════ TAB 2: USUARIOS Y ACCESOS ════ */}
@@ -704,83 +706,82 @@ export default function PersonalPage() {
                   <Plus className="w-3.5 h-3.5" /> Nuevo Acceso
                 </button>
               </div>
-                {loading ? (
-                  <div className="p-10 flex items-center justify-center gap-3 text-muted-foreground">
-                    <RefreshCw className="w-5 h-5 animate-spin" />
-                    <span className="text-sm font-medium">Cargando...</span>
-                  </div>
-                ) : activeProfiles.length === 0 ? (
-                  <div className="p-10 text-center">
-                    <ShieldCheck className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
-                    <p className="text-sm text-muted-foreground font-medium">No hay usuarios registrados</p>
-                    <p className="text-xs text-muted-foreground/60 mt-1">Usa el formulario para crear accesos al sistema</p>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="bg-muted/30 border-b border-border text-muted-foreground">
-                        <tr>
-                          <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">Usuario</th>
-                          <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">Rol</th>
-                          <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">Empleado Vinculado</th>
-                          <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">Gmail</th>
-                          <th className="px-5 py-3 text-center text-xs font-bold uppercase tracking-wider">Acciones</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border">
-                        {activeProfiles.map(profile => {
-                          return (
-                            <tr key={profile.id} className="hover:bg-secondary/20 transition-colors">
-                              <td className="px-5 py-3.5 font-mono text-xs font-bold text-indigo-500">
-                                @{profile.username}
-                              </td>
-                              <td className="px-5 py-3.5">
-                                <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${
-                                  profile.role === 'ADMIN'
-                                    ? 'bg-purple-500/10 border-purple-500/30 text-purple-500'
-                                    : profile.role === 'CAJERA'
-                                    ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-500'
-                                    : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
+              {loading ? (
+                <div className="p-10 flex items-center justify-center gap-3 text-muted-foreground">
+                  <RefreshCw className="w-5 h-5 animate-spin" />
+                  <span className="text-sm font-medium">Cargando...</span>
+                </div>
+              ) : activeProfiles.length === 0 ? (
+                <div className="p-10 text-center">
+                  <ShieldCheck className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
+                  <p className="text-sm text-muted-foreground font-medium">No hay usuarios registrados</p>
+                  <p className="text-xs text-muted-foreground/60 mt-1">Usa el formulario para crear accesos al sistema</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/30 border-b border-border text-muted-foreground">
+                      <tr>
+                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">Usuario</th>
+                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">Rol</th>
+                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">Empleado Vinculado</th>
+                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">Gmail</th>
+                        <th className="px-5 py-3 text-center text-xs font-bold uppercase tracking-wider">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {activeProfiles.map(profile => {
+                        return (
+                          <tr key={profile.id} className="hover:bg-secondary/20 transition-colors">
+                            <td className="px-5 py-3.5 font-mono text-xs font-bold text-indigo-500">
+                              @{profile.username}
+                            </td>
+                            <td className="px-5 py-3.5">
+                              <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${profile.role === 'ADMIN'
+                                ? 'bg-purple-500/10 border-purple-500/30 text-purple-500'
+                                : profile.role === 'CAJERA'
+                                  ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-500'
+                                  : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
                                 }`}>
-                                  {profile.role}
-                                </span>
-                              </td>
-                              <td className="px-5 py-3.5 text-xs text-muted-foreground font-medium">
-                                {profile.employee_id && employeeById[profile.employee_id] ? employeeById[profile.employee_id].full_name : '—'}
-                              </td>
-                              <td className="px-5 py-3.5 text-xs text-muted-foreground">
-                                {profile.email || '—'}
-                              </td>
-                              <td className="px-5 py-3.5 text-center">
-                                <div className="flex items-center justify-center gap-2">
-                                  <button
-                                    onClick={() => handleEditClick(profile)}
-                                    className="p-1.5 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors"
-                                    title="Editar usuario"
-                                  >
-                                    <Edit2 className="w-4 h-4" />
-                                  </button>
-                                  <button
-                                    onClick={() => {
-                                      setDeletingUserId(profile.id);
-                                      setDeletingUsername(profile.username);
-                                    }}
-                                    className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
-                                    title="Desactivar usuario"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
+                                {profile.role}
+                              </span>
+                            </td>
+                            <td className="px-5 py-3.5 text-xs text-muted-foreground font-medium">
+                              {profile.employee_id && employeeById[profile.employee_id] ? employeeById[profile.employee_id].full_name : '—'}
+                            </td>
+                            <td className="px-5 py-3.5 text-xs text-muted-foreground">
+                              {profile.email || '—'}
+                            </td>
+                            <td className="px-5 py-3.5 text-center">
+                              <div className="flex items-center justify-center gap-2">
+                                <button
+                                  onClick={() => handleEditClick(profile)}
+                                  className="p-1.5 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors"
+                                  title="Editar usuario"
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setDeletingUserId(profile.id);
+                                    setDeletingUsername(profile.username);
+                                  }}
+                                  className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
+                                  title="Desactivar usuario"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
+          </div>
         )}
 
         {/* ════ TAB 3: ROLES Y PERMISOS ════ */}
@@ -792,18 +793,16 @@ export default function PersonalPage() {
                 <button
                   onClick={handleRestorePermissions}
                   disabled={!hasUnsavedRoleChanges || savingPermissions}
-                  className={`h-9 px-4 flex items-center justify-center gap-2 rounded-lg font-bold text-xs transition-colors shadow-sm ${
-                    hasUnsavedRoleChanges ? 'bg-secondary hover:bg-secondary/80 text-foreground' : 'bg-secondary/50 text-muted-foreground cursor-not-allowed'
-                  }`}
+                  className={`h-9 px-4 flex items-center justify-center gap-2 rounded-lg font-bold text-xs transition-colors shadow-sm ${hasUnsavedRoleChanges ? 'bg-secondary hover:bg-secondary/80 text-foreground' : 'bg-secondary/50 text-muted-foreground cursor-not-allowed'
+                    }`}
                 >
                   Restaurar
                 </button>
                 <button
                   onClick={handleSavePermissions}
                   disabled={!hasUnsavedRoleChanges || savingPermissions}
-                  className={`h-9 px-4 flex items-center justify-center gap-2 rounded-lg font-bold text-xs transition-colors shadow-sm ${
-                    hasUnsavedRoleChanges ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'bg-secondary/50 text-muted-foreground cursor-not-allowed'
-                  }`}
+                  className={`h-9 px-4 flex items-center justify-center gap-2 rounded-lg font-bold text-xs transition-colors shadow-sm ${hasUnsavedRoleChanges ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'bg-secondary/50 text-muted-foreground cursor-not-allowed'
+                    }`}
                 >
                   {savingPermissions ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                   Guardar Cambios
@@ -985,7 +984,7 @@ export default function PersonalPage() {
                   className="w-full h-10 bg-background border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors"
                 />
               </div>
-              
+
               <div className="pt-2 text-xs text-muted-foreground text-center">
                 Una vez creado, podrás configurar sus permisos en la Matriz.
               </div>
@@ -1164,7 +1163,7 @@ export default function PersonalPage() {
                 <X className="w-4 h-4" />
               </button>
             </div>
-            
+
             <div className="p-5 space-y-5">
               <div className="bg-secondary/50 px-4 py-3 rounded-xl border border-border/50 text-center">
                 <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider mb-1">Empleado Seleccionado</p>
@@ -1173,13 +1172,13 @@ export default function PersonalPage() {
               </div>
 
               <div className="flex bg-muted/50 p-1 rounded-xl border border-border/50">
-                <button 
+                <button
                   onClick={() => setLinkMode('new')}
                   className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${linkMode === 'new' ? 'bg-background shadow-sm text-foreground border border-border/50' : 'text-muted-foreground hover:text-foreground'}`}
                 >
                   Crear Nuevo
                 </button>
-                <button 
+                <button
                   onClick={() => setLinkMode('existing')}
                   className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${linkMode === 'existing' ? 'bg-background shadow-sm text-foreground border border-border/50' : 'text-muted-foreground hover:text-foreground'}`}
                 >
@@ -1348,9 +1347,8 @@ export default function PersonalPage() {
               <button
                 type="submit"
                 disabled={savingUser}
-                className={`w-full h-11 mt-2 flex items-center justify-center gap-2 rounded-xl font-bold text-sm text-white transition-colors disabled:opacity-60 disabled:cursor-not-allowed shadow-md ${
-                  editingUserId ? 'bg-amber-500 hover:bg-amber-600' : 'bg-indigo-600 hover:bg-indigo-700'
-                }`}
+                className={`w-full h-11 mt-2 flex items-center justify-center gap-2 rounded-xl font-bold text-sm text-white transition-colors disabled:opacity-60 disabled:cursor-not-allowed shadow-md ${editingUserId ? 'bg-amber-500 hover:bg-amber-600' : 'bg-indigo-600 hover:bg-indigo-700'
+                  }`}
               >
                 {savingUser
                   ? <><RefreshCw className="w-4 h-4 animate-spin" /> Guardando...</>

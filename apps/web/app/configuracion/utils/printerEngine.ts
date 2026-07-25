@@ -287,7 +287,8 @@ export function generateTicketLines(saleData: any, maxChars: number): TicketLine
   const dateStr = `${String(dateObj.getDate()).padStart(2, '0')}/${String(dateObj.getMonth() + 1).padStart(2, '0')}/${dateObj.getFullYear()} ${String(dateObj.getHours()).padStart(2, '0')}:${String(dateObj.getMinutes()).padStart(2, '0')}`;
 
   center(dateStr);
-  const cleanDocNum = (saleData.document_number || 'N/A').replace(/^TKT-/, '');
+  const docNum = saleData.proforma_number || saleData.invoice_number || saleData.document_number || 'N/A';
+  const cleanDocNum = docNum.replace(/^TKT-/, '');
   center(`TKT-${cleanDocNum} - Caja 1`);
 
   return lines;

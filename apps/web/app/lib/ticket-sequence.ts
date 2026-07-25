@@ -2,11 +2,12 @@
 export const MAX_DAILY_TICKET_NUM = 999;
 
 export type TicketNumSource = {
-  document_number: string;
+  proforma_number: string | null;
+  invoice_number?: string | null;
   internal_ticket_number?: number | null;
 };
 
-export const isStarsoftDocument = (doc: string) => /^B\d{3}-/.test(doc);
+export const isStarsoftDocument = (doc: string) => /^[BF]\d{3}-/.test(doc);
 
 const isValidDailyTicketNum = (num: number) =>
   !isNaN(num) && num > 0 && num <= MAX_DAILY_TICKET_NUM;
@@ -37,7 +38,7 @@ export function formatTicketHash(ticketNum: number | null): string {
 export const starsoftDocNumFromTicket = (
   ticket: TicketNumSource & { status?: string },
 ): string | null => {
-  if (ticket.status !== "COMPLETED" || !isStarsoftDocument(ticket.document_number)) return null;
-  const parts = ticket.document_number.split("-");
+  if (ticket.status !== "COMPLETED" || !ticket.invoice_number || !isStarsoftDocument(ticket.invoice_number)) return null;
+  const parts = ticket.invoice_number.split("-");
   return parts[parts.length - 1] ?? null;
 };

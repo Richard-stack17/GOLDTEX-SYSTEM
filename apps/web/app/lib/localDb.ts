@@ -32,6 +32,7 @@ export interface LocalProfile {
   email: string | null;
 }
 
+
 export interface LocalRole {
   id: string;
   name: string;
@@ -43,12 +44,13 @@ export interface LocalRole {
 export interface LocalSale {
   id: string;
   internal_ticket_number: string | null;
-  document_number: string | null;
+  proforma_number: string | null;
+  invoice_number: string | null;
   issue_date: string;
   total: number;
   status: string;
-  items: any[];
-  source_sheet: string | null; // For tracking who made the sale (e.g. VENDEDOR:jhon)
+  seller_id?: string | null;
+  cashier_id?: string | null;
   created_at?: string;
 }
 
@@ -94,9 +96,9 @@ export class GoltexPosDB extends Dexie {
       families: 'id, name, code',
       services: 'id, name, is_quick_access',
       pending_sales: '++local_id, id, customer_id, total, status, created_at',
-      profiles: 'id, username, password_hash, role, email',
+      profiles: 'id, username, employee_id, password_hash, role, email',
       roles: 'id, name',
-      sales: 'id, issue_date, status, source_sheet',
+      sales: 'id, issue_date, status',
       transactions: 'id, sale_id, payment_method',
       employees: 'id, full_name, document_number'
     });
@@ -201,7 +203,7 @@ export async function syncCatalog() {
     
     const { data: salesData, error: salesError } = await supabase
       .from('sales')
-      .select('id, internal_ticket_number, document_number, issue_date, created_at, total, status, items, source_sheet')
+      .select('id, internal_ticket_number, proforma_number, invoice_number, issue_date, created_at, total, status, items, seller_id, cashier_id')
       .gte('issue_date', twoYearsAgo.toISOString());
 
     if (!salesError && salesData) {

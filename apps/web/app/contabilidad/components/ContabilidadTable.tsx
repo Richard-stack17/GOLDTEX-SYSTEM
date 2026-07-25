@@ -14,7 +14,8 @@ export default function ContabilidadTable({
   setShowFullEfectivo,
   toggleFullscreen,
   isFullscreen,
-  tableWrapperRef
+  tableWrapperRef,
+  toastNode
 }: any) {
   const totales = filteredRows.reduce((acc: any, r: ExcelRow) => ({
     bbva: acc.bbva + (Number(r.BBVA) || 0),
@@ -51,8 +52,8 @@ export default function ContabilidadTable({
         </div>
       </div>
 
-      <div ref={tableWrapperRef} className={`overflow-x-auto ${isFullscreen ? 'bg-white p-4 overflow-y-auto' : ''}`}>
-        <table className="min-w-max w-full text-xs">
+      <div ref={tableWrapperRef} className={`overflow-x-auto ${isFullscreen ? 'w-screen h-screen bg-white p-8 overflow-y-auto' : ''}`}>
+        <table className={`${isFullscreen ? 'w-full' : 'min-w-max w-full'} text-xs`}>
           <thead className="bg-[#FACC15] border-b border-gray-300 text-gray-800">
             <tr>
               {['FECHA', 'DOCUMENTO', 'NOMBRE Y (O) RAZON', 'DETALLE', 'BBVA', 'BCP', 'EFECTIVO', 'TOTAL', 'COMENTARIO'].map(col => {
@@ -90,6 +91,7 @@ export default function ContabilidadTable({
             </tr>
           </tfoot>
         </table>
+        {toastNode}
       </div>
     </div>
   );

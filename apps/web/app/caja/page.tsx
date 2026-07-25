@@ -31,7 +31,9 @@ type VoucherType = "TICKET" | "BOLETA" | "FACTURA";
 
 type PendingTicket = {
   id: string;
-  document_number: string;
+  proforma_number: string | null;
+  invoice_number?: string | null;
+  document_number?: string | null;
   internal_ticket_number: number | null;
   total: number;
   detail: string;
@@ -203,7 +205,10 @@ function TicketTableRow({
           <span className="text-xs text-muted-foreground font-mono">Doc: {sunatDoc}</span>
         )}
       </td>
-      <td className="px-6 py-4 text-muted-foreground font-mono">{ticket.document_number}</td>
+      <td className="px-6 py-4 text-muted-foreground font-mono">
+        <div>{ticket.proforma_number}</div>
+        {ticket.invoice_number && <div className="text-[10px] text-emerald-600 font-bold">{ticket.invoice_number}</div>}
+      </td>
       <td className="px-2 py-1 whitespace-nowrap min-w-[100px]">
         {ticket.status === "PENDING" ? (
           <span className="px-4 font-mono font-bold text-gray-400 text-right block w-full">—</span>
@@ -503,7 +508,7 @@ export default function CajaPage() {
 
     const query = supabase
       .from("sales")
-      .select("id, document_number, internal_ticket_number, total, detail, items, status, created_at, voucher_type, voucher_doc_number, transactions(payment_method, amount, surcharge_pct, surcharge_amount)")
+      .select("id, proforma_number, invoice_number, internal_ticket_number, total, detail, items, status, created_at, voucher_type, voucher_doc_number, seller_id, cashier_id, seller:profiles!seller_id(username), transactions(payment_method, amount, surcharge_pct, surcharge_amount)")
       .eq("record_date", todayStr)
       .order("created_at", { ascending: true });
 
@@ -654,17 +659,22 @@ export default function CajaPage() {
         throw new Error("No se pudo determinar el número interno del ticket.");
       }
 
-      // Encode cajero into source_sheet: keep vendedor prefix, append cajero
-      const cajeroTag = username ? `|CAJERO:${username}` : "";
+      let cashierId: string | null = null;
+      if (username) {
+        try {
+          const { data: profData } = await supabase.from('profiles').select('id').eq('username', username).maybeSingle();
+          if (profData?.id) cashierId = profData.id;
+        } catch (e) {}
+      }
 
       const updatePayload: Record<string, unknown> = {
         status: "COMPLETED",
         total: finalTotal,
-        document_number: starsoftDoc,
+        invoice_number: starsoftDoc,
         voucher_type: voucherType,
         voucher_doc_number: needsDocInfo ? docNumber : String(internalTicketNum),
         voucher_doc_name: needsDocInfo ? docName.trim() : null,
-        source_sheet: `${(selectedTicket as any).source_sheet || ""}${cajeroTag}`,
+        cashier_id: cashierId,
       };
 
       const { error: updateErr } = await supabase
@@ -740,15 +750,12 @@ export default function CajaPage() {
     if (!ticketToCancel) return;
     setIsProcessing(true);
     try {
-      const currentSourceSheet = (ticketToCancel as any).source_sheet || '';
-      const newSourceSheet = `${currentSourceSheet}|ANULADO:${username}`;
       const updated_at = new Date().toISOString();
 
       const { error } = await supabase
         .from("sales")
         .update({
           status: "CANCELLED",
-          source_sheet: newSourceSheet,
           updated_at: updated_at
         })
         .eq("id", ticketToCancel.id);
@@ -757,7 +764,6 @@ export default function CajaPage() {
       setTickets((prev) => prev.map(t => t.id === ticketToCancel.id ? {
         ...t,
         status: "CANCELLED",
-        source_sheet: newSourceSheet,
         updated_at: updated_at
       } : t));
       if (selectedTicket?.id === ticketToCancel.id) closeModal();
@@ -1023,7 +1029,7 @@ export default function CajaPage() {
                     <div className="space-y-2 border-t border-border pt-4">
                       <div className="flex items-center justify-between">
                         <span className="text-muted-foreground text-xs font-mono">{time}</span>
-                        <span className="text-muted-foreground text-xs font-mono truncate max-w-[120px]">{ticket.document_number}</span>
+                        <span className="text-muted-foreground text-xs font-mono truncate max-w-[120px]">{ticket.proforma_number || ticket.invoice_number}</span>
                       </div>
                       <div className="text-muted-foreground text-xs truncate">{ticket.detail.split('\n')[0]}...</div>
                       <div className="flex items-center justify-between mt-3">
@@ -1108,7 +1114,7 @@ export default function CajaPage() {
         onCancel={() => setTicketToCancel(null)}
         onConfirm={confirmCancelTicket}
         title="Anular Proforma/Venta"
-        description={`¿Estás seguro de que deseas anular el documento ${ticketToCancel?.document_number || ''}?`}
+        description={`¿Estás seguro de que deseas anular el documento ${ticketToCancel?.proforma_number || ticketToCancel?.invoice_number || ''}?`}
         isLoading={isProcessing}
       />
 
@@ -1125,7 +1131,7 @@ export default function CajaPage() {
             <DialogHeader>
               <DialogTitle className="text-2xl font-black flex items-center gap-3 flex-wrap">
                 <span>Cobrar Ticket {selectedTicket ? formatTicketHash(parseInternalTicketNum(selectedTicket)) : ""}</span>
-                <span className="text-sm font-mono text-muted-foreground font-normal">{selectedTicket?.document_number}</span>
+                <span className="text-sm font-mono text-muted-foreground font-normal">{selectedTicket?.proforma_number || selectedTicket?.invoice_number}</span>
               </DialogTitle>
               <DialogDescription className="hidden">Modal de cobro para PC</DialogDescription>
             </DialogHeader>

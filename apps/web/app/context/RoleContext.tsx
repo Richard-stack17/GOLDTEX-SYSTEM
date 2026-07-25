@@ -20,8 +20,8 @@ interface RoleContextProps {
 const RoleContext = createContext<RoleContextProps | undefined>(undefined);
 
 export function RoleProvider({ children }: { children: React.ReactNode }) {
-  const [role, setRoleState] = useState<Role>("ADMIN");
-  const [username, setUsernameState] = useState<string>("Propietario");
+  const [role, setRoleState] = useState<Role>("");
+  const [username, setUsernameState] = useState<string>("");
   const [employeeId, setEmployeeIdState] = useState<string | null>(null);
   const [permissions, setPermissions] = useState<Record<string, boolean>>({});
   const [isHydrated, setIsHydrated] = useState(false);
@@ -31,9 +31,6 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     if (stored) {
       setRoleState(stored);
       fetchPermissions(stored);
-    } else {
-      // Default fallback
-      fetchPermissions("ADMIN");
     }
     const storedUsername = localStorage.getItem("goltex_username");
     if (storedUsername) {
@@ -106,7 +103,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
   };
 
   const clearSession = () => {
-    setRoleState("ADMIN");
+    setRoleState("");
     setUsernameState("");
     setEmployeeIdState(null);
     setPermissions({});

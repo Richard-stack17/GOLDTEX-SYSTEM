@@ -64,7 +64,7 @@ const mapSale = (sale: any): ExcelRow => {
 
   const vType: string | null = sale.voucher_type ?? null;
   const vDocNum: string | null = sale.voucher_doc_number ?? null;
-  let documento: string = sale.document_number ?? '';
+  let documento: string = sale.proforma_number || sale.invoice_number || '';
   if (vType && vType !== 'TICKET' && vDocNum) {
     documento = `${vType === 'FACTURA' ? 'FT' : 'BV'}-${vDocNum}`;
   }
@@ -125,7 +125,7 @@ export default function ContabilidadPage() {
     supabase
       .from('sales')
       .select(`
-        id, document_number, issue_date, detail, total, comment, source_type,
+        id, proforma_number, invoice_number, issue_date, detail, total, comment, source_type,
         voucher_type, voucher_doc_number, voucher_doc_name,
         customers ( business_name ),
         transactions ( payment_method, amount )
@@ -198,7 +198,8 @@ export default function ContabilidadPage() {
 
       const { error: e } = await supabase.from('sales')
         .update({
-          document_number: rowBuffer.documento,
+          proforma_number: rowBuffer.documento.includes('TKT') ? rowBuffer.documento : null,
+          invoice_number: !rowBuffer.documento.includes('TKT') ? rowBuffer.documento : null,
           voucher_doc_number: voucherDocNumber,
           voucher_doc_name: voucherDocName,
           comment: comment
@@ -519,11 +520,11 @@ export default function ContabilidadPage() {
               toggleFullscreen={toggleFullscreen}
               isFullscreen={isFullscreen}
               tableWrapperRef={tableWrapperRef}
+              toastNode={toast ? <Toast message={toast.message} type={toast.type} /> : null}
             />
           )}
         </div>
       </main>
-      {toast && <Toast message={toast.message} type={toast.type} />}
     </div>
   );
 }

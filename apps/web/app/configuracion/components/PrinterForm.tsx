@@ -355,7 +355,7 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
           <ReceiptPreview 
             maxChars={maxChars} 
             saleData={{
-              document_number: 'T001-00001234',
+              proforma_number: 'T001-00001234',
               customer_name: 'Cliente Prueba',
               items: [
                 { name: 'TELA ALGODON PREMIUM 100%', quantity: 2, price: 15.5 },

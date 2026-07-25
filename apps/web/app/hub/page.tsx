@@ -21,6 +21,12 @@ export default function HubPage() {
     setIsMounted(true);
   }, []);
 
+  useEffect(() => {
+    if (isHydrated && (!role || !username)) {
+      router.push("/login");
+    }
+  }, [isHydrated, role, username, router]);
+
   const currentDateTime = new Date().toLocaleString("es-PE", {
     weekday: "long",
     year: "numeric",
@@ -30,7 +36,7 @@ export default function HubPage() {
     minute: "2-digit",
   });
 
-  if (!isHydrated) return null;
+  if (!isHydrated || !role || !username) return null;
 
   return (
     <div className="min-h-screen p-8 max-w-[1400px] mx-auto space-y-12">

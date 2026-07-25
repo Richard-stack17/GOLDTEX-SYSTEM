@@ -341,27 +341,43 @@ export default function DashboardPage() {
     return { topProducts: sortedProducts, topFamilies: sortedFamilies };
   }, [sales, families]);
 
-  // 4. Ranking de Vendedores
+  // 4. Ranking por Atención de Proformas (Estrictamente Proformas Pagadas)
   const sellerRanking = useMemo(() => {
     if (!sales || !profiles || !employees) return [];
-    const sellerStats: Record<string, number> = {};
+    const sellerStats: Record<string, { total: number; count: number }> = {};
     let totalSellersSales = 0;
+
     for (const sale of sales) {
-      if (sale.status === 'CANCELLED') continue;
-      let sellerName = 'Propietario';
-      if (sale.source_sheet?.startsWith('VENDEDOR:')) {
-        sellerName = sale.source_sheet.replace('VENDEDOR:', '');
+      if (sale.status !== 'COMPLETED') continue;
+
+      let sellerKey = 'ADMIN';
+
+      if ((sale as any).seller_id) {
+        const foundProf = profiles.find(p => p.id === (sale as any).seller_id);
+        if (foundProf) {
+          sellerKey = foundProf.username;
+        }
+      } else if ((sale as any).seller?.username) {
+        const foundProf = profiles.find(p => p.username.toLowerCase() === (sale as any).seller.username.toLowerCase());
+        if (foundProf) {
+          sellerKey = foundProf.username;
+        }
       }
-      sellerStats[sellerName] = (sellerStats[sellerName] || 0) + sale.total;
+
+      if (!sellerStats[sellerKey]) {
+        sellerStats[sellerKey] = { total: 0, count: 0 };
+      }
+      sellerStats[sellerKey].total += sale.total;
+      sellerStats[sellerKey].count += 1;
       totalSellersSales += sale.total;
     }
 
-    return Object.entries(sellerStats).map(([sellerName, total]) => {
+    return Object.entries(sellerStats).map(([sellerName, stats]) => {
       const profile = profiles.find(p => p.username === sellerName);
       const employee = profile?.employee_id ? employees.find(e => e.id === profile.employee_id) : null;
       const displayName = employee ? employee.full_name : sellerName;
-      const pct = totalSellersSales > 0 ? (total / totalSellersSales) * 100 : 0;
-      return { id: sellerName, name: displayName, total, pct };
+      const pct = totalSellersSales > 0 ? (stats.total / totalSellersSales) * 100 : 0;
+      return { id: sellerName, name: displayName, total: stats.total, count: stats.count, pct };
     }).sort((a, b) => b.total - a.total);
   }, [sales, profiles, employees]);
 
@@ -520,8 +536,8 @@ export default function DashboardPage() {
                   key={tab.id}
                   onClick={() => handleQuickFilter(tab.id as DateFilter)}
                   className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all ${dateFilter === tab.id
-                      ? "bg-foreground text-background shadow-sm"
-                      : "text-muted-foreground hover:text-foreground hover:bg-secondary-foreground/5"
+                    ? "bg-foreground text-background shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-secondary-foreground/5"
                     }`}
                 >
                   {tab.label}
@@ -568,12 +584,12 @@ export default function DashboardPage() {
         </div>
 
         {/* ── TOP KPIs ── */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-4">
           {/* 1. Total Facturado (Tarjeta Principal) */}
           {(() => {
             const isAlert = !salesTrend.noData && salesTrend.status === 'red';
             return (
-              <Card className={`relative overflow-hidden transition-colors border-transparent shadow-lg text-white ${isAlert ? 'bg-gradient-to-br from-rose-600 to-rose-800 shadow-rose-600/20' : 'bg-gradient-to-br from-indigo-500 to-indigo-700 shadow-indigo-500/20'}`}>
+              <Card className={`relative overflow-hidden transition-colors border-transparent shadow-lg text-white lg:col-span-3 ${isAlert ? 'bg-gradient-to-br from-rose-600 to-rose-800 shadow-rose-600/20' : 'bg-gradient-to-br from-indigo-500 to-indigo-700 shadow-indigo-500/20'}`}>
                 <div className={`absolute right-[-10%] top-[-10%] opacity-10 text-white`}>
                   <DollarSign className="w-48 h-48" />
                 </div>
@@ -603,7 +619,7 @@ export default function DashboardPage() {
           })()}
 
           {/* 2. Rendimiento del Periodo (Fusión) */}
-          <Card className="bg-card border border-border shadow-sm">
+          <Card className="bg-card border border-border shadow-sm lg:col-span-3">
             <CardHeader className="pb-2">
               <CardTitle className="text-muted-foreground font-medium text-sm uppercase tracking-wider font-bold">Rendimiento del Periodo</CardTitle>
             </CardHeader>
@@ -665,30 +681,30 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          {/* 3. Conversión Proformas */}
-          <Card className="bg-card border border-border shadow-sm">
-            <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
-              <CardTitle className="text-muted-foreground font-medium text-sm uppercase tracking-wider font-bold">Conversión Proformas</CardTitle>
-              <div className="w-8 h-8 rounded-full bg-indigo-500/10 flex items-center justify-center">
-                <BarChart3 className="w-4 h-4 text-indigo-500" />
+          {/* 3. Conversión Proformas (Reducida a col-span-2) */}
+          <Card className="bg-card border border-border shadow-sm lg:col-span-2">
+            <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0 px-3">
+              <CardTitle className="text-muted-foreground font-medium text-xs uppercase tracking-wider font-bold whitespace-normal leading-tight">Conversión Proformas</CardTitle>
+              <div className="w-7 h-7 rounded-full bg-indigo-500/10 flex items-center justify-center shrink-0">
+                <BarChart3 className="w-3.5 h-3.5 text-indigo-500" />
               </div>
             </CardHeader>
-            <CardContent>
-              <div className={`text-3xl font-black tabular-nums tracking-tight ${proformaStats.conversionPct >= 70 ? 'text-emerald-600' : proformaStats.conversionPct < 40 ? 'text-rose-600' : 'text-amber-600'}`}>
+            <CardContent className="px-3">
+              <div className={`text-2xl font-black tabular-nums tracking-tight ${proformaStats.conversionPct >= 70 ? 'text-emerald-600' : proformaStats.conversionPct < 40 ? 'text-rose-600' : 'text-amber-600'}`}>
                 {proformaStats.conversionPct.toFixed(0)}%
               </div>
-              <div className="mt-2 flex flex-col gap-1 text-[10px] font-bold">
+              <div className="mt-1.5 flex flex-col gap-0.5 text-[10px] font-bold">
                 <span className="text-slate-500">Emitidas: {proformaStats.emitidas}</span>
-                <span className="text-emerald-600">Ejecutadas: {proformaStats.ejecutadas}</span>
+                <span className="text-emerald-600">Pagadas: {proformaStats.ejecutadas}</span>
                 <span className="text-red-500">Anuladas: {proformaStats.anuladas}</span>
               </div>
             </CardContent>
           </Card>
 
-          {/* 4. Ranking de Vendedores (movido aquí) */}
-          <Card className="bg-card border border-border shadow-sm flex flex-col">
+          {/* 4. Ranking por Atención (Aumentada a col-span-4) */}
+          <Card className="bg-card border border-border shadow-sm flex flex-col lg:col-span-4">
             <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
-              <CardTitle className="text-muted-foreground font-medium text-sm uppercase tracking-wider font-bold">Top Vendedores</CardTitle>
+              <CardTitle className="text-muted-foreground font-medium text-sm uppercase tracking-wider font-bold">Ranking por Atención</CardTitle>
               <div className="w-8 h-8 rounded-full bg-indigo-500/10 flex items-center justify-center">
                 <Users className="w-4 h-4 text-indigo-500" />
               </div>
@@ -697,10 +713,10 @@ export default function DashboardPage() {
               <Table>
                 <TableHeader className="bg-secondary/30">
                   <TableRow className="hover:bg-transparent">
-                    <TableHead className="w-[40px] text-center font-bold text-[10px] uppercase text-muted-foreground py-2">#</TableHead>
-                    <TableHead className="font-bold text-[10px] uppercase text-muted-foreground py-2">Vendedor</TableHead>
-                    <TableHead className="text-right font-bold text-[10px] uppercase text-muted-foreground py-2">Ventas</TableHead>
-                    <TableHead className="text-right font-bold text-[10px] uppercase text-muted-foreground py-2">%</TableHead>
+                    <TableHead className="w-[30px] text-center font-bold text-[10px] uppercase text-muted-foreground py-2">#</TableHead>
+                    <TableHead className="font-bold text-[10px] uppercase text-muted-foreground py-2">Atendió</TableHead>
+                    <TableHead className="text-center font-bold text-[10px] uppercase text-muted-foreground py-2">Proformas Pagadas</TableHead>
+                    <TableHead className="text-right font-bold text-[10px] uppercase text-muted-foreground py-2">Total Soles</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -713,12 +729,12 @@ export default function DashboardPage() {
                   ) : (
                     sellerRanking.slice(0, 5).map((seller, i) => (
                       <TableRow key={seller.id} className="hover:bg-secondary/30 border-border/50 last:border-0 transition-colors">
-                        <TableCell className="text-center px-2 py-2">
-                          <div className={`w-6 h-6 mx-auto rounded-full flex items-center justify-center text-[10px] font-black shrink-0
+                        <TableCell className="text-center px-1 py-2">
+                          <div className={`w-5 h-5 mx-auto rounded-full flex items-center justify-center text-[10px] font-black shrink-0
                             ${i === 0 ? 'bg-amber-100 text-amber-600' :
                               i === 1 ? 'bg-slate-200 text-slate-600' :
                                 i === 2 ? 'bg-orange-100 text-orange-700' : 'bg-secondary text-muted-foreground'}`}>
-                            {i === 0 ? <Medal className="w-3.5 h-3.5" /> : i + 1}
+                            {i === 0 ? <Medal className="w-3 h-3" /> : i + 1}
                           </div>
                         </TableCell>
                         <TableCell className="px-2 py-2">
@@ -729,11 +745,11 @@ export default function DashboardPage() {
                             <span className="font-bold text-[11px] whitespace-normal break-words capitalize truncate max-w-[80px]" title={seller.name}>{seller.name.toLowerCase()}</span>
                           </div>
                         </TableCell>
-                        <TableCell className="text-right px-2 py-2 font-black tabular-nums text-primary text-[11px]">
-                          S/ {seller.total.toFixed(0)}
+                        <TableCell className="text-center px-2 py-2 font-mono font-black text-[11px] text-slate-600">
+                          {seller.count} ticket{seller.count !== 1 ? 's' : ''}
                         </TableCell>
-                        <TableCell className="text-right px-2 py-2 font-bold tabular-nums text-muted-foreground text-[10px]">
-                          {seller.pct.toFixed(1)}%
+                        <TableCell className="text-right px-2 py-2 font-black tabular-nums text-emerald-600 text-[11px]">
+                          S/ {seller.total.toFixed(0)}
                         </TableCell>
                       </TableRow>
                     ))
@@ -751,7 +767,7 @@ export default function DashboardPage() {
               <CardTitle className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-muted-foreground">
                 <BarChart3 className="w-4 h-4 text-indigo-500" />
                 Evolución de Ventas
-                <span className="text-[10px] font-normal lowercase bg-secondary px-2 py-0.5 rounded ml-2">({dateFilter === "TODAY" ? "Por horas" : dateRange.start + ' al ' + dateRange.end})</span>
+                <span className="text-[10px] font-normal lowercase bg-secondary px-2 py-0.5 rounded ml-2">({dateFilter === "TODAY" ? "Por horas" : `${dateRange.start.split('-').reverse().join('-')} al ${dateRange.end.split('-').reverse().join('-')}`})</span>
               </CardTitle>
             </div>
           </CardHeader>

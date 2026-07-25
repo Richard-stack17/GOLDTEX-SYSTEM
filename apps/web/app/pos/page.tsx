@@ -6,6 +6,7 @@ import {
   Button, Card, CardContent, Dialog, DialogContent,
   DialogHeader, DialogTitle, Input, Separator,
 } from "@goltex/ui";
+import AccountSwitcher from "../components/AccountSwitcher";
 export type Product = {
   id: string;
   familyId: string;
@@ -26,7 +27,7 @@ export type Family = {
 import {
   Search, ArrowLeft, Trash2, Printer,
   Delete, ShoppingCart, XCircle, RefreshCw,
-  Clock, CheckCircle2, Sun, Moon, Scissors, Car, Eye
+  Clock, CheckCircle2, Sun, Moon, Scissors, Car, Eye, AlertTriangle, Lock
 } from "lucide-react";
 import { db, type LocalService } from "../lib/localDb";
 import { supabase } from "../lib/supabase";
@@ -55,7 +56,8 @@ type VoucherType = "TICKET" | "BOLETA" | "FACTURA";
 
 type HistoryTicket = {
   id: string;
-  document_number: string;
+  proforma_number: string | null;
+  invoice_number?: string | null;
   internal_ticket_number: number | null;
   total: number;
   detail: string;
@@ -63,8 +65,13 @@ type HistoryTicket = {
   created_at: string;
   voucher_type?: VoucherType | null;
   voucher_doc_number?: string | null;
-  source_sheet?: string | null;
   transactions?: { payment_method: string; amount: number; surcharge_amount?: number }[];
+};
+
+const getLimaTodayStr = () => {
+  const now = new Date();
+  const formatter = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima", year: "numeric", month: "2-digit", day: "2-digit" });
+  return formatter.format(now);
 };
 
 export default function POSPage() {
@@ -165,10 +172,126 @@ export default function POSPage() {
     }
   };
 
-  const confirmCloseCaja = () => {
+  const confirmCloseCaja = async () => {
     setIsCajaOpen(false);
     localStorage.setItem("isCajaOpen", "false");
     setCajaSummaryOpen(false);
+
+    try {
+      const channel = new BroadcastChannel("goltex_caja_channel");
+      channel.postMessage({ type: "CAJA_STATE_CHANGED", isCajaOpen: false });
+      channel.close();
+    } catch (e) {}
+
+    try {
+      await supabase.from('settings').upsert([
+        { key: 'pos_caja_open', value: 'false', updated_at: new Date().toISOString() }
+      ], { onConflict: 'key' });
+    } catch (e) {
+      console.warn("Error guardando cierre en Supabase:", e);
+    }
+  };
+
+  const [isCajaOpen, setIsCajaOpen] = useState(() => {
+    if (typeof window !== "undefined") {
+      const today = getLimaTodayStr();
+      const savedDate = localStorage.getItem("cajaOpenDate");
+      if (savedDate !== today) {
+        localStorage.setItem("isCajaOpen", "false");
+        return false;
+      }
+      const saved = localStorage.getItem("isCajaOpen");
+      return saved === "true";
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    const syncCajaStateFromCloud = async () => {
+      try {
+        const { data } = await supabase.from('settings').select('key, value').in('key', ['pos_caja_open', 'pos_caja_open_date']);
+        if (data) {
+          const openSetting = data.find(s => s.key === 'pos_caja_open');
+          const dateSetting = data.find(s => s.key === 'pos_caja_open_date');
+          const today = getLimaTodayStr();
+          
+          if (dateSetting?.value === today && String(openSetting?.value) === "true") {
+            setIsCajaOpen(true);
+            localStorage.setItem("isCajaOpen", "true");
+            localStorage.setItem("cajaOpenDate", today);
+          } else if (dateSetting?.value !== today || String(openSetting?.value) === "false") {
+            setIsCajaOpen(false);
+            localStorage.setItem("isCajaOpen", "false");
+          }
+        }
+      } catch (e) {
+        console.warn("No se pudo consultar estado de caja en Supabase:", e);
+      }
+    };
+
+    syncCajaStateFromCloud();
+
+    // Sincronizar en tiempo real entre distintas computadoras mediante Supabase Realtime
+    const cloudChannel = supabase
+      .channel("pos-caja-changes")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "settings" },
+        () => {
+          syncCajaStateFromCloud();
+        }
+      )
+      .subscribe();
+
+    // Polling de respaldo cada 5s
+    const pollInterval = setInterval(syncCajaStateFromCloud, 5000);
+
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === "isCajaOpen") {
+        setIsCajaOpen(e.newValue === "true");
+      }
+    };
+
+    let channel: BroadcastChannel | null = null;
+    try {
+      channel = new BroadcastChannel("goltex_caja_channel");
+      channel.onmessage = (e) => {
+        if (e.data?.type === "CAJA_STATE_CHANGED") {
+          setIsCajaOpen(!!e.data.isCajaOpen);
+        }
+      };
+    } catch (e) {}
+
+    window.addEventListener("storage", handleStorage);
+
+    return () => {
+      clearInterval(pollInterval);
+      supabase.removeChannel(cloudChannel);
+      window.removeEventListener("storage", handleStorage);
+      if (channel) channel.close();
+    };
+  }, []);
+
+  const handleOpenCaja = async () => {
+    const today = getLimaTodayStr();
+    setIsCajaOpen(true);
+    localStorage.setItem("isCajaOpen", "true");
+    localStorage.setItem("cajaOpenDate", today);
+
+    try {
+      const channel = new BroadcastChannel("goltex_caja_channel");
+      channel.postMessage({ type: "CAJA_STATE_CHANGED", isCajaOpen: true, date: today });
+      channel.close();
+    } catch (e) {}
+
+    try {
+      await supabase.from('settings').upsert([
+        { key: 'pos_caja_open', value: 'true', updated_at: new Date().toISOString() },
+        { key: 'pos_caja_open_date', value: today, updated_at: new Date().toISOString() }
+      ], { onConflict: 'key' });
+    } catch (e) {
+      console.warn("Error guardando apertura en Supabase:", e);
+    }
   };
 
   // ── Vendedor History ──
@@ -189,16 +312,13 @@ export default function POSPage() {
   const [qwertyOpen, setQwertyOpen] = useState(false);
   const [familyPage, setFamilyPage] = useState(1);
   const familyPageSize = 12;
+  const [servicesPage, setServicesPage] = useState(1);
+  const servicesPageSize = 12;
   const [searchPage, setSearchPage] = useState(1);
   const searchPageSize = 12;
   const [exitGuardOpen, setExitGuardOpen] = useState(false);
 
-  // ── Helpers ──
-  const getLimaTodayStr = () => {
-    const now = new Date();
-    const formatter = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima", year: "numeric", month: "2-digit", day: "2-digit" });
-    return formatter.format(now);
-  };
+
 
   const starsoftDocNum = (ticket: HistoryTicket) => starsoftDocNumFromTicket(ticket);
 
@@ -210,6 +330,7 @@ export default function POSPage() {
     
     if (activeFamily !== null) {
       setActiveFamily(null);
+      setNumpadProduct(null);
       setSearch("");
       setQwertyOpen(false);
       return;
@@ -222,13 +343,7 @@ export default function POSPage() {
     }
   };
 
-  const [isCajaOpen, setIsCajaOpen] = useState(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("isCajaOpen");
-      return saved !== "false";
-    }
-    return true;
-  });
+
 
   const localServices = useLiveQuery(() => db.services.toArray(), []) || [];
   const localFamilies = useLiveQuery(() => db.families.toArray(), []) || [];
@@ -289,7 +404,7 @@ export default function POSPage() {
     const todayStr = getLimaTodayStr();
     const { data } = await supabase
       .from("sales")
-      .select("*, transactions(payment_method, amount, surcharge_amount)")
+      .select("*, seller:profiles!seller_id(username), transactions(payment_method, amount, surcharge_amount)")
       .eq("record_date", todayStr)
       .eq("source_type", "POS")
       .order("created_at", { ascending: false });
@@ -438,9 +553,17 @@ export default function POSPage() {
         return `${i.code} ${i.name} — ${i.quantity}m × S/ ${i.editedPrice.toFixed(2)}`;
       };
 
+      const sellerName = username || "Propietario";
+      let sellerId: string | null = null;
+      try {
+        const { data: profData } = await supabase.from('profiles').select('id').eq('username', sellerName).maybeSingle();
+        if (profData?.id) sellerId = profData.id;
+      } catch (e) {}
+
       const { error: saleError } = await supabase.from("sales").insert({
         customer_id: customerId,
-        document_number: docNum,
+        proforma_number: docNum,
+        invoice_number: null,
         internal_ticket_number: nextInternalNum,
         document_type: "TICKET",
         issue_date: todayStr,
@@ -448,7 +571,7 @@ export default function POSPage() {
         detail: cart.map(formatItemDetail).join('\n'),
         items: cart,
         total: total,
-        source_sheet: `VENDEDOR:${username || "Propietario"}`,
+        seller_id: sellerId,
         source_type: "POS",
         is_fractional: false,
         status: "PENDING",
@@ -465,7 +588,7 @@ export default function POSPage() {
       // Imprimir silenciosamente
       try {
         const saleDataForPrint = {
-          document_number: docNum,
+          proforma_number: docNum,
           customer_name: username || "Propietario",
           items: cart,
           total: total
@@ -535,7 +658,7 @@ export default function POSPage() {
 
     setLastSaleInfo({
       ticketNum: parseInternalTicketNum(ticket),
-      docNum: ticket.document_number,
+      docNum: ticket.proforma_number || ticket.invoice_number || '',
       items: reconstructedItems,
       total: ticket.total,
       izipayFee: izipayFeeAmt
@@ -543,7 +666,7 @@ export default function POSPage() {
 
     try {
       const saleDataForPrint = {
-        document_number: ticket.document_number,
+        proforma_number: ticket.proforma_number || ticket.invoice_number || '',
         customer_name: "Cliente General",
         items: reconstructedItems,
         total: ticket.total
@@ -587,33 +710,33 @@ export default function POSPage() {
 
             {/* Theme toggle + ticket badge */}
             <div className="flex items-center gap-3">
-              {role === 'ADMIN' && (
-                <>
-                  <button
-                    onClick={() => {
-                      setIsCajaOpen(true);
-                      localStorage.setItem("isCajaOpen", "true");
-                    }}
-                    className={`px-4 h-12 rounded-2xl text-xs font-black uppercase transition-all ${
-                      isCajaOpen 
-                        ? "bg-emerald-600/10 text-emerald-600 border border-emerald-500/30" 
-                        : "bg-secondary text-muted-foreground hover:bg-emerald-500/10 hover:text-emerald-500 border border-border"
-                    }`}
-                  >
-                    Apertura de Caja
-                  </button>
-                  <button
-                    onClick={handleCloseCajaAttempt}
-                    className={`px-4 h-12 rounded-2xl text-xs font-black uppercase transition-all ${
-                      !isCajaOpen 
-                        ? "bg-red-600/10 text-red-600 border border-red-500/30" 
-                        : "bg-secondary text-muted-foreground hover:bg-red-500/10 hover:text-red-500 border border-border"
-                    }`}
-                  >
-                    Cerrar Caja
-                  </button>
-                </>
+              {permissions?.pos_open_caja && (
+                <button
+                  disabled={isCajaOpen}
+                  onClick={handleOpenCaja}
+                  className={`px-4 h-12 rounded-2xl text-xs font-black uppercase transition-all ${
+                    !isCajaOpen 
+                      ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-md cursor-pointer animate-pulse" 
+                      : "bg-secondary/40 text-muted-foreground/50 border border-border cursor-not-allowed opacity-50"
+                  }`}
+                >
+                  Apertura de Caja
+                </button>
               )}
+              {permissions?.pos_close_caja && (
+                <button
+                  disabled={!isCajaOpen}
+                  onClick={handleCloseCajaAttempt}
+                  className={`px-4 h-12 rounded-2xl text-xs font-black uppercase transition-all ${
+                    isCajaOpen 
+                      ? "bg-red-600/10 text-red-600 border border-red-500/30 hover:bg-red-600 hover:text-white cursor-pointer" 
+                      : "bg-secondary/40 text-muted-foreground/50 border border-border cursor-not-allowed opacity-50"
+                  }`}
+                >
+                  Cerrar Caja
+                </button>
+              )}
+              <AccountSwitcher />
               <button
                 onClick={toggleTheme}
                 title={theme === 'dark' ? 'Modo Claro' : 'Modo Oscuro'}
@@ -662,33 +785,80 @@ export default function POSPage() {
           )}
         </div>
 
-        {/* Catalog Grid */}
-        <div className={`flex-1 overflow-auto bg-secondary/10 flex ${numpadProduct ? "flex-col lg:grid lg:grid-cols-2" : "flex-col"}`}>
-          <div className={`flex flex-col h-full overflow-auto ${numpadProduct ? "hidden lg:flex border-r border-border" : ""}`}>
-          <div className="px-6 pt-6 flex justify-between items-center shrink-0">
-            {viewMode === 'FAMILIES' && !activeFamily && !search ? (
-              <div className="flex gap-1 bg-background border-2 border-border/60 rounded-xl p-1 shadow-sm">
-                <Button variant="ghost" className="h-10 px-4 rounded-lg text-xs font-bold hover:bg-emerald-50 hover:text-emerald-600 transition-colors" disabled={familyPage === 1} onClick={() => setFamilyPage(p => p - 1)}>Anterior</Button>
-                <div className="flex items-center px-3 text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                  Pág {familyPage} de {Math.max(1, Math.ceil(families.length / familyPageSize))}
-                </div>
-                <Button variant="ghost" className="h-10 px-4 rounded-lg text-xs font-bold hover:bg-emerald-50 hover:text-emerald-600 transition-colors" disabled={familyPage === Math.max(1, Math.ceil(families.length / familyPageSize))} onClick={() => setFamilyPage(p => p + 1)}>Siguiente</Button>
-              </div>
-            ) : <div />}
-            {viewMode !== 'SERVICES' && (
-              <Button 
-                onClick={() => setViewMode('SERVICES')}
-                className="rounded-xl px-6 h-12 text-sm font-bold uppercase tracking-wider bg-purple-600 hover:bg-purple-700 text-white shadow-md hover:shadow-lg transition-all"
+        {/* Catalog Grid or Closed Box State */}
+        {!isCajaOpen ? (
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-secondary/5">
+            <div className="w-20 h-20 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center mb-6 shadow-inner animate-bounce">
+              <Lock className="w-10 h-10" />
+            </div>
+            <h2 className="text-2xl font-black tracking-tight mb-2">Caja Actualmente Cerrada</h2>
+            <p className="text-muted-foreground max-w-md text-sm mb-6 leading-relaxed">
+              {permissions?.pos_open_caja 
+                ? "Para comenzar a explorar productos, seleccionar telas y emitir tickets de corte, realiza la apertura de caja." 
+                : "Todavía no se ha aperturado la caja del día. Solicita a un usuario administrador o supervisor realizar la apertura."}
+            </p>
+            {permissions?.pos_open_caja && (
+              <button
+                onClick={handleOpenCaja}
+                className="px-6 h-14 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black text-sm uppercase tracking-wider transition-all shadow-lg hover:scale-105 active:scale-95 flex items-center gap-3 cursor-pointer"
               >
-                ✨ Servicios
-              </Button>
+                <CheckCircle2 className="w-5 h-5" />
+                Aperturar Caja Ahora
+              </button>
             )}
           </div>
+        ) : (
+          <div className="flex-1 overflow-auto bg-secondary/10 flex flex-col">
+            <div className={`flex flex-col h-full overflow-auto ${numpadProduct ? "hidden" : ""}`}>
+              <div className="px-6 pt-6 flex justify-between items-center shrink-0">
+                {viewMode === 'SERVICES' ? (
+                  <div className="flex gap-1 bg-background border-2 border-border/60 rounded-xl p-1 shadow-sm">
+                    <Button variant="ghost" className="h-10 px-4 rounded-lg text-xs font-bold hover:bg-purple-50 hover:text-purple-600 transition-colors" disabled={servicesPage === 1} onClick={() => setServicesPage(p => p - 1)}>Anterior</Button>
+                    <div className="flex items-center px-3 text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                      Pág {servicesPage} de {Math.max(1, Math.ceil(localServices.length / servicesPageSize))}
+                    </div>
+                    <Button variant="ghost" className="h-10 px-4 rounded-lg text-xs font-bold hover:bg-purple-50 hover:text-purple-600 transition-colors" disabled={servicesPage === Math.max(1, Math.ceil(localServices.length / servicesPageSize))} onClick={() => setServicesPage(p => p + 1)}>Siguiente</Button>
+                  </div>
+                ) : viewMode === 'FAMILIES' && !activeFamily && !search ? (
+                  <div className="flex gap-1 bg-background border-2 border-border/60 rounded-xl p-1 shadow-sm">
+                    <Button variant="ghost" className="h-10 px-4 rounded-lg text-xs font-bold hover:bg-emerald-50 hover:text-emerald-600 transition-colors" disabled={familyPage === 1} onClick={() => setFamilyPage(p => p - 1)}>Anterior</Button>
+                    <div className="flex items-center px-3 text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                      Pág {familyPage} de {Math.max(1, Math.ceil(families.length / familyPageSize))}
+                    </div>
+                    <Button variant="ghost" className="h-10 px-4 rounded-lg text-xs font-bold hover:bg-emerald-50 hover:text-emerald-600 transition-colors" disabled={familyPage === Math.max(1, Math.ceil(families.length / familyPageSize))} onClick={() => setFamilyPage(p => p + 1)}>Siguiente</Button>
+                  </div>
+                ) : (
+                  <div></div>
+                )}
+
+                {localServices.length > 0 && (
+                  <button
+                    onClick={() => {
+                      setNumpadProduct(null);
+                      if (viewMode === 'SERVICES') {
+                        setViewMode('FAMILIES');
+                        setActiveFamily(null);
+                      } else {
+                        setViewMode('SERVICES');
+                        setActiveFamily(null);
+                      }
+                    }}
+                    className={`h-11 px-5 rounded-2xl font-black text-xs uppercase tracking-wider transition-all flex items-center gap-2 shadow-sm ${
+                      viewMode === 'SERVICES'
+                        ? 'bg-purple-600 text-white shadow-purple-500/20'
+                        : 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:opacity-90 active:scale-95'
+                    }`}
+                  >
+                    <Scissors className="w-4 h-4" />
+                    {viewMode === 'SERVICES' ? 'Volver a Telas' : 'Servicios'}
+                  </button>
+                )}
+              </div>
           {viewMode === 'SERVICES' ? (
             <div className="p-6">
               <h2 className="text-sm font-bold text-muted-foreground uppercase tracking-wider mb-4">Todos los Servicios</h2>
               <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-                {localServices.map((svc) => (
+                {localServices.slice((servicesPage - 1) * servicesPageSize, servicesPage * servicesPageSize).map((svc) => (
                   <button key={svc.id} onClick={() => {
                       const productObj: Product = {id: svc.id, familyId: 'SERVICE', name: svc.name, code: 'SVC', price: 0, is_service: true};
                       const existing = cart.find(i => i.id === svc.id);
@@ -708,7 +878,7 @@ export default function POSPage() {
               <h2 className="text-sm font-bold text-muted-foreground uppercase tracking-wider mb-4">Familias de Tela</h2>
               <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 flex-1 content-start">
                 {families.slice((familyPage - 1) * familyPageSize, familyPage * familyPageSize).map((fam) => (
-                  <button key={fam.id} onClick={() => setActiveFamily(fam)}
+                  <button key={fam.id} onClick={() => { setActiveFamily(fam); setNumpadProduct(null); }}
                     className="text-left p-3 rounded-2xl border-2 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer shadow-sm bg-emerald-50 border-emerald-200 text-emerald-800 hover:bg-emerald-100 flex flex-col items-start gap-1">
                     <div className="text-2xl font-black mb-1 opacity-80">{fam.code}</div>
                     <div className="text-base font-semibold tracking-tight">{fam.name}</div>
@@ -731,7 +901,7 @@ export default function POSPage() {
                       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
                         {searchFamiliesInPage.map((fam) => (
                           <button key={fam.id}
-                            onClick={() => { setActiveFamily(fam); setSearch(""); setQwertyOpen(false); }}
+                            onClick={() => { setActiveFamily(fam); setSearch(""); setQwertyOpen(false); setNumpadProduct(null); }}
                             className={`text-left p-3 rounded-2xl border-2 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer bg-glass shadow-sm ${fam.color || "border-border hover:border-primary"}`}>
                             <div className="text-2xl font-black mb-1 opacity-80">{fam.code}</div>
                             <div className="text-base font-semibold tracking-tight">{fam.name}</div>
@@ -790,8 +960,7 @@ export default function POSPage() {
             </div>
           )}
         </div>
-      </div>
-      {numpadProduct && (
+        {numpadProduct && (
         <div className="flex flex-col justify-center items-center p-4 bg-background h-full overflow-auto">
           <div className="w-full max-w-[540px] bg-card rounded-3xl border-2 border-border/50 flex flex-col animate-in zoom-in-95 duration-200">
             {/* Header */}
@@ -875,7 +1044,9 @@ export default function POSPage() {
           </div>
         </div>
       )}
-        </div>
+    </div>
+  )}
+</div>
 
       {/* ════════════════════════════════════════
           RIGHT PANEL — Proforma + Emitir + Historial
@@ -891,8 +1062,9 @@ export default function POSPage() {
               Nueva Proforma
             </button>
             <button
-              className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${rightPanelMode === 'history' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-              onClick={() => setRightPanelMode('history')}
+              disabled={!isCajaOpen}
+              className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${!isCajaOpen ? 'opacity-40 cursor-not-allowed text-muted-foreground' : rightPanelMode === 'history' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+              onClick={() => isCajaOpen && setRightPanelMode('history')}
             >
               Mis Proformas
             </button>
@@ -1003,12 +1175,7 @@ export default function POSPage() {
                 </div>
               )}
               {cart.length > 0 && (
-                <div className="space-y-2 mb-3">
-                  <div className="flex justify-between items-center text-muted-foreground text-base font-bold">
-                    <span>SUBTOTAL</span>
-                    <span>S/ {total.toFixed(2)}</span>
-                  </div>
-                  <Separator className="opacity-40" />
+                <div className="mb-3">
                   <div className="flex justify-between items-center text-xl font-black font-mono">
                     <span>TOTAL</span>
                     <span className="text-emerald-500">S/ {total.toFixed(2)}</span>
@@ -1062,10 +1229,15 @@ export default function POSPage() {
                     <CardContent className="p-3 flex flex-col gap-1.5">
                       <div className="flex items-start justify-between">
                         <div className="flex flex-col min-w-0">
-                          <div className="text-base font-black text-foreground">{formatTicketHash(ticketNo)}</div>
-                          {sunatDoc && (
-                            <span className="text-[10px] text-muted-foreground font-mono mt-0.5">
-                              Doc: {sunatDoc}
+                          <div className="text-base font-black text-foreground">
+                            {formatTicketHash(ticketNo)}
+                            <span className="text-[10px] text-muted-foreground font-mono ml-2">
+                              ({ticket.proforma_number})
+                            </span>
+                          </div>
+                          {ticket.invoice_number && (
+                            <span className="text-[10px] text-emerald-600 font-mono mt-0.5 font-bold">
+                              Doc: {ticket.invoice_number}
                             </span>
                           )}
                         </div>
@@ -1078,26 +1250,21 @@ export default function POSPage() {
                         <span className="font-black text-emerald-500 text-sm">S/ {ticket.total.toFixed(2)}</span>
                       </div>
                       {(() => {
-                          if (ticket.status === 'PENDING') {
-                            return (
-                              <div className="text-[10px] font-medium text-muted-foreground mt-0.5">
-                                Aún no se ha cobrado
-                              </div>
-                            );
-                          }
-                          if (permissions?.view_cashier_name && ticket.status === 'COMPLETED' && ticket.source_sheet) {
-                            const cajeroMatch = (ticket.source_sheet as string).match(/CAJERO:([^|]+)/);
-                            const cajeroName = cajeroMatch ? (cajeroMatch[1] ?? '').trim() : null;
-                            if (cajeroName) {
-                              return (
-                                <div className="text-[10px] font-bold text-emerald-600 uppercase mt-0.5">
-                                  CAJERO: {cajeroName}
-                                </div>
-                              );
-                            }
-                          }
-                          return null;
-                        })()}
+                        if (ticket.status === 'PENDING') {
+                          return (
+                            <div className="text-[10px] font-medium text-muted-foreground mt-0.5">
+                              Aún no se ha cobrado
+                            </div>
+                          );
+                        }
+                        if (!permissions?.view_cashier_name) return null;
+                        const atendidoName = (ticket as any).seller?.username || 'ADMIN';
+                        return (
+                          <div className="text-[10px] font-bold text-emerald-600 uppercase mt-0.5">
+                            ATENDIDO POR: {atendidoName}
+                          </div>
+                        );
+                      })()}
                       <div className="flex gap-2 mt-1">
                         <button
                           onClick={() => handleReprint(ticket)}
@@ -1144,9 +1311,11 @@ export default function POSPage() {
                               return { code, name, price: basePrice, editedPrice, quantity };
                             });
 
+                            const atendidoName = permissions?.view_cashier_name ? ((ticket as any).seller?.username || 'ADMIN') : null;
+
                             const saleDataForPrint = {
-                              document_number: ticket.document_number,
-                              cajero: ticket.source_sheet ? (ticket.source_sheet as string).match(/CAJERO:([^|]+)/)?.[1]?.trim() : 'Caja',
+                              proforma_number: ticket.proforma_number || ticket.invoice_number || '',
+                              cajero: atendidoName,
                               customer_name: "Cliente General",
                               items: reconstructedItems,
                               total: ticket.total
