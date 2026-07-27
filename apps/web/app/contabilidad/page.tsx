@@ -7,6 +7,10 @@ import {
   Eye, Database, ArrowLeft, RefreshCw, Landmark, Maximize2, Minimize2
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useRole } from '../context/RoleContext';
+import { AccessDeniedView } from '../components/AccessDeniedView';
+import { useStore } from '../context/StoreContext';
+import StoreSwitcher from "../components/StoreSwitcher";
 import Link from 'next/link';
 
 import { ExcelRow } from './types';
@@ -62,12 +66,7 @@ const mapSale = (sale: any): ExcelRow => {
     sale.customers?.business_name ||
     'CLIENTES VARIOS';
 
-  const vType: string | null = sale.voucher_type ?? null;
-  const vDocNum: string | null = sale.voucher_doc_number ?? null;
-  let documento: string = sale.proforma_number || sale.invoice_number || '';
-  if (vType && vType !== 'TICKET' && vDocNum) {
-    documento = `${vType === 'FACTURA' ? 'FT' : 'BV'}-${vDocNum}`;
-  }
+  const documento: string = sale.invoice_number || '';
 
   return {
     id: sale.id,
@@ -87,21 +86,33 @@ const mapSale = (sale: any): ExcelRow => {
 // ─── Toast helper ─────────────────────────────────────────────────────────────
 function Toast({ message, type }: { message: string; type: 'success' | 'error' }) {
   return (
-    <div className={`fixed bottom-5 right-5 z-50 flex items-center gap-3 px-5 py-3.5 rounded-2xl border shadow-2xl font-bold text-sm animate-in fade-in slide-in-from-bottom-4 ${type === 'success'
-        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
-        : 'bg-red-500/10 border-red-500/30 text-red-500'
+    <div className={`fixed bottom-5 right-5 z-50 inline-flex items-center gap-2 px-4 py-2.5 rounded-full border shadow-lg text-xs font-semibold animate-in fade-in slide-in-from-bottom-4 ${type === 'success'
+        ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+        : 'bg-rose-50 border-rose-200 text-rose-900'
       }`}>
       {type === 'success' ? (
-        <CheckCircle2 className="w-4 h-4 shrink-0" />
+        <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-600" />
       ) : (
-        <AlertCircle className="w-4 h-4 shrink-0" />
+        <AlertCircle className="w-5 h-5 shrink-0 text-rose-600" />
       )}
-      <span>{message}</span>
+      <span className={type === 'success' ? 'text-emerald-900' : 'text-rose-900'}>{message}</span>
     </div>
   );
 }
 
 export default function ContabilidadPage() {
+  const { isHydrated, permissions } = useRole();
+  const { activeStoreId } = useStore();
+
+  const [dateFilter, setDateFilter] = useState<'TODAY' | 'MONTH' | 'CUSTOM'>('TODAY');
+  const [customStart, setCustomStart] = useState(limaToday());
+  const [customEnd, setCustomEnd] = useState(limaToday());
+
+  if (!isHydrated) return null;
+  if (!permissions?.access_contabilidad) {
+    return <AccessDeniedView moduleName="Módulo de Contabilidad" />;
+  }
+
   const [startDate, setStartDate] = useState<string>(limaToday);
   const [endDate, setEndDate] = useState<string>(limaToday);
   const [isLoading, setIsLoading] = useState(false);
@@ -121,8 +132,8 @@ export default function ContabilidadPage() {
 
 
   // ── Supabase query ─────────────────────────────────────────────────────────
-  const querySales = (start: string, end: string) =>
-    supabase
+  const querySales = (start: string, end: string) => {
+    let query = supabase
       .from('sales')
       .select(`
         id, proforma_number, invoice_number, issue_date, detail, total, comment, source_type,
@@ -134,6 +145,13 @@ export default function ContabilidadPage() {
       .lte('issue_date', end)
       .eq('status', 'COMPLETED')
       .order('issue_date', { ascending: true });
+      
+    if (activeStoreId) {
+      query = query.eq('store_id', activeStoreId);
+    }
+    
+    return query;
+  };
 
   const loadRows = useCallback(async (start: string, end: string) => {
     if (isEditingRef.current) return;
@@ -149,7 +167,7 @@ export default function ContabilidadPage() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [activeStoreId]);
 
   // ── Auto-load on mount ─────────────────────────────────────────────────────
   React.useEffect(() => {
@@ -190,20 +208,22 @@ export default function ContabilidadPage() {
       const efectivo = parseFloat(rowBuffer.efectivo) || 0;
 
       const voucherDocName = rowBuffer.nombre.trim() || 'CLIENTES VARIOS';
-      let voucherDocNumber = rowBuffer.documento;
-      if (voucherDocNumber.startsWith('FT-') || voucherDocNumber.startsWith('BV-')) {
-        voucherDocNumber = voucherDocNumber.substring(3);
+      const docInput = rowBuffer.documento.trim();
+      const isTicketCode = docInput.startsWith('TKT-');
+      const invoiceNumber = isTicketCode ? null : (docInput || null);
+      const comment = (rowBuffer.comentario || '').trim();
+
+      const updateFields: Record<string, any> = {
+        invoice_number: invoiceNumber,
+        voucher_doc_name: voucherDocName,
+        comment: comment
+      };
+      if (isTicketCode) {
+        updateFields.proforma_number = docInput;
       }
-      const comment = rowBuffer.comentario.trim();
 
       const { error: e } = await supabase.from('sales')
-        .update({
-          proforma_number: rowBuffer.documento.includes('TKT') ? rowBuffer.documento : null,
-          invoice_number: !rowBuffer.documento.includes('TKT') ? rowBuffer.documento : null,
-          voucher_doc_number: voucherDocNumber,
-          voucher_doc_name: voucherDocName,
-          comment: comment
-        })
+        .update(updateFields)
         .eq('id', rowId);
       if (e) throw e;
 
@@ -211,32 +231,43 @@ export default function ContabilidadPage() {
         { name: "EFECTIVO", amount: efectivo },
         { name: isIzipay ? "IZIPAY" : "BCP", amount: bcp },
         { name: "BBVA", amount: bbva },
+        { name: isIzipay ? "BCP" : "IZIPAY", amount: 0 }
       ];
 
-      // Aseguramos de eliminar la otra contraparte que no debe existir
-      if (isIzipay) {
-        methods.push({ name: "BCP", amount: 0 });
-      } else {
-        methods.push({ name: "IZIPAY", amount: 0 });
-      }
+      // Atomic fetch of all existing tx records for this sale
+      const { data: existingTxs } = await supabase
+        .from('transactions')
+        .select('id, payment_method')
+        .eq('sale_id', rowId);
 
-      for (const m of methods) {
-        const { data: existingTx } = await supabase
-          .from('transactions').select('id')
-          .eq('sale_id', rowId).eq('payment_method', m.name).maybeSingle();
+      const txMap = new Map((existingTxs || []).map((t: any) => [t.payment_method, t.id]));
 
-        if (existingTx) {
+      // Execute all transaction operations in parallel
+      const txPromises = methods.map(m => {
+        const existingId = txMap.get(m.name);
+        if (existingId) {
           if (m.amount > 0) {
-            await supabase.from('transactions').update({ amount: m.amount }).eq('id', existingTx.id);
+            return supabase.from('transactions').update({ amount: m.amount }).eq('id', existingId);
           } else {
-            await supabase.from('transactions').delete().eq('id', existingTx.id);
+            return supabase.from('transactions').delete().eq('id', existingId);
           }
         } else if (m.amount > 0) {
-          await supabase.from('transactions').insert({
-            sale_id: rowId, payment_method: m.name, amount: m.amount,
-            surcharge_pct: 0, surcharge_amount: 0, sequence: 99, original_detail: 'Ajuste manual'
+          return supabase.from('transactions').insert({
+            sale_id: rowId,
+            payment_method: m.name,
+            amount: m.amount,
+            surcharge_pct: 0,
+            surcharge_amount: 0,
+            sequence: 99,
+            original_detail: 'Ajuste manual'
           });
         }
+        return Promise.resolve(null);
+      });
+
+      const results = await Promise.all(txPromises);
+      for (const res of results) {
+        if (res && (res as any).error) throw (res as any).error;
       }
 
       // Actualización inmediata del estado local (Opción A)
@@ -410,6 +441,7 @@ export default function ContabilidadPage() {
               </div>
             </div>
           </div>
+          <StoreSwitcher />
         </header>
 
         <div className="p-6 max-w-screen-2xl mx-auto space-y-5">

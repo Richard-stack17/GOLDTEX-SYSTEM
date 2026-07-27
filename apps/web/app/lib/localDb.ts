@@ -52,6 +52,8 @@ export interface LocalSale {
   seller_id?: string | null;
   cashier_id?: string | null;
   created_at?: string;
+  store_id?: string | null;
+  items?: any[] | null;
 }
 
 export interface LocalTransaction {
@@ -111,32 +113,42 @@ export const db = new GoltexPosDB();
  * Función de utilidad para sincronizar el catálogo desde Supabase hacia Dexie.
  * Debe ser llamada cuando la aplicación detecte que hay conexión a internet.
  */
-export async function syncCatalog() {
+export async function syncCatalog(targetStoreId?: string) {
   if (typeof window === 'undefined' || !navigator.onLine) {
     console.warn("No hay conexión a internet, saltando sincronización del catálogo.");
     return;
   }
 
+  const storeId = targetStoreId || localStorage.getItem("goltex_active_store_id");
+
   try {
-    console.log("Iniciando sincronización del catálogo...");
+    console.log(`Iniciando sincronización del catálogo limpio para la tienda: ${storeId || 'todas'}`);
+
+    // Limpieza total preventiva de tablas locales antes de refrescar
+    await db.families.clear();
+    await db.products.clear();
+    await db.services.clear();
+    await db.sales.clear();
+    await db.transactions.clear();
 
     // 1. Sincronizar familias
-    const { data: familiesData, error: famError } = await supabase
-      .from('families')
-      .select('id, name, code')
-      .eq('is_active', true);
+    let famQuery = supabase.from('families').select('id, name, code').eq('is_active', true);
+    if (storeId) {
+      famQuery = famQuery.eq('store_id', storeId);
+    }
+    const { data: familiesData, error: famError } = await famQuery;
 
     if (!famError && familiesData) {
-      await db.families.clear();
       await db.families.bulkPut(familiesData);
       console.log(`✅ ${familiesData.length} familias sincronizadas.`);
     }
 
     // 2. Sincronizar productos
-    const { data: productsData, error: prodError } = await supabase
-      .from('products')
-      .select('id, family_id, name, sku, price, stock')
-      .eq('is_active', true);
+    let prodQuery = supabase.from('products').select('id, family_id, name, sku, price, stock').eq('is_active', true);
+    if (storeId) {
+      prodQuery = prodQuery.eq('store_id', storeId);
+    }
+    const { data: productsData, error: prodError } = await prodQuery;
 
     if (!prodError && productsData) {
       const localProducts: LocalProduct[] = productsData.map(p => ({
@@ -149,7 +161,6 @@ export async function syncCatalog() {
         stock: p.stock || 0,
       }));
 
-      await db.products.clear();
       await db.products.bulkPut(localProducts);
       console.log(`✅ ${localProducts.length} productos sincronizados.`);
     }
@@ -176,10 +187,14 @@ export async function syncCatalog() {
     }
 
     // 5. Sincronizar servicios
-    const { data: servicesData, error: servicesError } = await supabase
+    let servicesQuery = supabase
       .from('services')
       .select('id, name, is_quick_access')
       .eq('is_active', true);
+    if (storeId) {
+      servicesQuery = servicesQuery.eq('store_id', storeId);
+    }
+    const { data: servicesData, error: servicesError } = await servicesQuery;
 
     if (!servicesError && servicesData) {
       await db.services.clear();
@@ -201,10 +216,16 @@ export async function syncCatalog() {
     const twoYearsAgo = new Date();
     twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
     
-    const { data: salesData, error: salesError } = await supabase
+    let salesQuery = supabase
       .from('sales')
-      .select('id, internal_ticket_number, proforma_number, invoice_number, issue_date, created_at, total, status, items, seller_id, cashier_id')
+      .select('id, internal_ticket_number, proforma_number, invoice_number, issue_date, created_at, total, status, items, seller_id, cashier_id, store_id')
       .gte('issue_date', twoYearsAgo.toISOString());
+      
+    if (storeId) {
+      salesQuery = salesQuery.eq('store_id', storeId);
+    }
+    
+    const { data: salesData, error: salesError } = await salesQuery;
 
     if (!salesError && salesData) {
       const formattedSales: LocalSale[] = salesData.map(s => ({

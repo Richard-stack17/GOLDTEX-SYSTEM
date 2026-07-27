@@ -42,6 +42,7 @@ import {
 import { useRole } from "../context/RoleContext";
 import { useTheme } from "../context/ThemeContext";
 import { hasModuleAccess } from "../lib/permissions";
+import { useStore } from "../context/StoreContext";
 
 type CartItem = Product & { quantity: number; editedPrice: number; is_service?: boolean };
 // Tipo para items de servicio (no son telas, no extienden Product completo)
@@ -76,6 +77,7 @@ const getLimaTodayStr = () => {
 
 export default function POSPage() {
   const { role, username, isHydrated, permissions } = useRole();
+  const { activeStore, activeStoreId, isAllStoresMode } = useStore();
   const { theme, toggleTheme } = useTheme();
   const router = useRouter();
   const [showConfigAlert, setShowConfigAlert] = useState(false);
@@ -83,17 +85,13 @@ export default function POSPage() {
   const [hasPosAccess, setHasPosAccess] = useState(false);
 
   useEffect(() => {
-    const checkAccess = async () => {
-      if (!isHydrated) return;
-      const ok = await hasModuleAccess(role, "pos");
-      if (!ok) {
-        router.replace("/hub");
-      } else {
-        setHasPosAccess(true);
-      }
-    };
-    checkAccess();
-  }, [role, isHydrated, router]);
+    if (!isHydrated) return;
+    if (permissions && !permissions.access_pos) {
+      router.replace("/hub");
+    } else if (permissions?.access_pos) {
+      setHasPosAccess(true);
+    }
+  }, [permissions, isHydrated, router]);
 
   // ── Printer state ──
   const [activePrinter, setActivePrinter] = useState<any>(null);
@@ -101,7 +99,9 @@ export default function POSPage() {
 
   useEffect(() => {
     async function loadPrinter() {
-      const { data } = await supabase.from('printers').select('*').order('auto_print', { ascending: false }).limit(1).single();
+      let query = supabase.from('printers').select('*').order('auto_print', { ascending: false }).limit(1);
+      if (activeStoreId) query = query.eq('store_id', activeStoreId);
+      const { data } = await query.maybeSingle();
       if (data) {
         setActivePrinter(data);
         if (data.type === 'bluetooth') {
@@ -184,9 +184,9 @@ export default function POSPage() {
     } catch (e) {}
 
     try {
-      await supabase.from('settings').upsert([
-        { key: 'pos_caja_open', value: 'false', updated_at: new Date().toISOString() }
-      ], { onConflict: 'key' });
+      const closeRow: any = { key: 'pos_caja_open', value: 'false', updated_at: new Date().toISOString() };
+      if (activeStoreId) closeRow.store_id = activeStoreId;
+      await supabase.from('settings').upsert([closeRow]);
     } catch (e) {
       console.warn("Error guardando cierre en Supabase:", e);
     }
@@ -209,8 +209,10 @@ export default function POSPage() {
   useEffect(() => {
     const syncCajaStateFromCloud = async () => {
       try {
-        const { data } = await supabase.from('settings').select('key, value').in('key', ['pos_caja_open', 'pos_caja_open_date']);
-        if (data) {
+        let stQuery = supabase.from('settings').select('key, value, store_id').in('key', ['pos_caja_open', 'pos_caja_open_date']);
+        if (activeStoreId) stQuery = stQuery.eq('store_id', activeStoreId);
+        const { data } = await stQuery;
+        if (data && data.length > 0) {
           const openSetting = data.find(s => s.key === 'pos_caja_open');
           const dateSetting = data.find(s => s.key === 'pos_caja_open_date');
           const today = getLimaTodayStr();
@@ -219,7 +221,7 @@ export default function POSPage() {
             setIsCajaOpen(true);
             localStorage.setItem("isCajaOpen", "true");
             localStorage.setItem("cajaOpenDate", today);
-          } else if (dateSetting?.value !== today || String(openSetting?.value) === "false") {
+          } else if (openSetting || dateSetting) {
             setIsCajaOpen(false);
             localStorage.setItem("isCajaOpen", "false");
           }
@@ -285,10 +287,13 @@ export default function POSPage() {
     } catch (e) {}
 
     try {
-      await supabase.from('settings').upsert([
-        { key: 'pos_caja_open', value: 'true', updated_at: new Date().toISOString() },
-        { key: 'pos_caja_open_date', value: today, updated_at: new Date().toISOString() }
-      ], { onConflict: 'key' });
+      const openRow: any = { key: 'pos_caja_open', value: 'true', updated_at: new Date().toISOString() };
+      const dateRow: any = { key: 'pos_caja_open_date', value: today, updated_at: new Date().toISOString() };
+      if (activeStoreId) {
+        openRow.store_id = activeStoreId;
+        dateRow.store_id = activeStoreId;
+      }
+      await supabase.from('settings').upsert([openRow, dateRow]);
     } catch (e) {
       console.warn("Error guardando apertura en Supabase:", e);
     }
@@ -518,25 +523,24 @@ export default function POSPage() {
     setIsEmitting(true);
     try {
       let customerId = "00000000-0000-0000-0000-000000000000";
-      const { data: customerData } = await supabase
-        .from("customers").select("id").eq("business_name", "CLIENTE VARIOS").limit(1);
+      let custQuery = supabase.from("customers").select("id").eq("business_name", "CLIENTE VARIOS").limit(1);
+      if (activeStoreId) custQuery = custQuery.eq("store_id", activeStoreId);
+      const { data: customerData } = await custQuery;
       if (customerData && customerData.length > 0) {
         customerId = customerData[0]!.id;
       } else {
         const { data: newCustomer } = await supabase
           .from("customers")
-          .insert({ business_name: "CLIENTE VARIOS", ruc: "00000000000", document_type: "SIN_DOC", is_frequent: false })
+          .insert({ business_name: "CLIENTE VARIOS", doc_number: "00000000000", document_type: "SIN_DOC", is_frequent: false, store_id: activeStoreId })
           .select("id").single();
         if (newCustomer) customerId = newCustomer.id;
       }
 
       const todayStr = getLimaTodayStr();
 
-      const { data: todayTickets } = await supabase
-        .from("sales")
-        .select("internal_ticket_number")
-        .eq("record_date", todayStr)
-        .eq("source_type", "POS");
+      let tktQuery = supabase.from("sales").select("internal_ticket_number").eq("record_date", todayStr).eq("source_type", "POS");
+      if (activeStoreId) tktQuery = tktQuery.eq("store_id", activeStoreId);
+      const { data: todayTickets } = await tktQuery;
 
       const nextInternalNum = computeNextDailyTicketNumber(todayTickets ?? []);
       const docNum = `TKT-${todayStr.replace(/-/g, "")}-${String(nextInternalNum).padStart(4, "0")}`;
@@ -575,6 +579,7 @@ export default function POSPage() {
         source_type: "POS",
         is_fractional: false,
         status: "PENDING",
+        store_id: activeStoreId,
       });
       if (saleError) throw saleError;
 
@@ -681,6 +686,29 @@ export default function POSPage() {
 
   if (!isHydrated || !hasPosAccess) return null;
 
+  if (isAllStoresMode) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center bg-background min-h-[100dvh]">
+        <div className="max-w-md w-full p-8 text-center space-y-6 bg-card border border-border rounded-2xl shadow-xl">
+          <div className="w-20 h-20 bg-red-500/10 rounded-full flex items-center justify-center mx-auto">
+            <Lock className="w-10 h-10 text-red-500" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-foreground mb-2">Bloqueo Operativo</h2>
+            <p className="text-muted-foreground text-sm leading-relaxed">
+              El Punto de Venta es un módulo físico. No puedes cobrar en modo consolidado ("Todas las Tiendas").
+              <br/><br/>
+              Por favor, selecciona una tienda específica en el menú superior para poder operar.
+            </p>
+          </div>
+          <Button variant="default" className="w-full font-bold h-12 text-sm bg-primary hover:bg-primary/90 text-primary-foreground" onClick={() => router.push('/hub')}>
+            Volver al Hub
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col lg:flex-row h-[100dvh] bg-background text-foreground overflow-hidden">
 
@@ -696,6 +724,14 @@ export default function POSPage() {
               <Button variant="ghost" size="icon" className="w-12 h-12 rounded-full hover:bg-secondary/50" onClick={handleBackClick}>
                 <ArrowLeft className="w-6 h-6" />
               </Button>
+              {activeStore && (
+                <div className="flex flex-col shrink-0 text-left">
+                  <span className="text-[9px] font-black text-muted-foreground uppercase tracking-widest leading-none">Punto de Venta</span>
+                  <span className="text-[11px] font-black text-amber-600 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded mt-1 uppercase leading-none">
+                    {activeStore.name}
+                  </span>
+                </div>
+              )}
               <div className="relative flex-1 flex items-center">
                 <Search className="absolute left-4 w-6 h-6 text-muted-foreground pointer-events-none" />
                 <Input

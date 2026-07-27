@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Printer, Trash2, Search, CheckCircle2, AlertCircle, Loader2, Save } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { useRole } from '../../context/RoleContext';
 import { requestBluetoothDevice, printTestReceipt } from '../utils/printerEngine';
 import ReceiptPreview from '../../components/ReceiptPreview';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
@@ -11,22 +12,23 @@ import { ConfirmDialog } from '../../../components/ConfirmDialog';
 // Helper de Toast (mismo estilo que Contabilidad)
 function Toast({ message, type }: { message: string; type: 'success' | 'error' }) {
   return (
-    <div className={`fixed bottom-5 right-5 z-50 flex items-center gap-3 px-5 py-3.5 rounded-2xl border shadow-2xl font-bold text-sm animate-in fade-in slide-in-from-bottom-4 ${
+    <div className={`fixed bottom-5 right-5 z-50 inline-flex items-center gap-2 px-4 py-2.5 rounded-full border shadow-lg text-xs font-semibold animate-in fade-in slide-in-from-bottom-4 ${
       type === 'success'
-        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
-        : 'bg-red-500/10 border-red-500/30 text-red-500'
+        ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+        : 'bg-rose-50 border-rose-200 text-rose-900'
     }`}>
       {type === 'success' ? (
-        <CheckCircle2 className="w-4 h-4 shrink-0" />
+        <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-600" />
       ) : (
-        <AlertCircle className="w-4 h-4 shrink-0" />
+        <AlertCircle className="w-5 h-5 shrink-0 text-rose-600" />
       )}
-      <span>{message}</span>
+      <span className={type === 'success' ? 'text-emerald-900' : 'text-rose-900'}>{message}</span>
     </div>
   );
 }
 
 export default function PrinterForm({ printerId }: { printerId?: string }) {
+  const { permissions } = useRole();
   const router = useRouter();
   const isEditing = !!printerId;
 
@@ -385,7 +387,7 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
             RESTAURAR VALORES PREDETERMINADOS
           </button>
 
-          {isEditing && (
+          {isEditing && Boolean(permissions?.settings_printers_delete) && (
             <button 
               onClick={handleDelete}
               disabled={isLoading}

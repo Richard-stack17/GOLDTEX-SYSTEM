@@ -1,9 +1,11 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRole } from "../context/RoleContext";
+import { AccessDeniedView } from "../components/AccessDeniedView";
+import { useStore } from "../context/StoreContext";
 import {
   Button,
   Input,
@@ -28,6 +30,8 @@ import { useTableSort } from "../hooks/useTableSort";
 import { ArrowLeft, Search, Download, Filter, Plus, Edit2, Trash2, Save, FolderPlus, PackageSearch, AlertTriangle, Scissors, RefreshCcw } from "lucide-react";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { supabase } from "../lib/supabase";
+import StoreSwitcher from "../components/StoreSwitcher";
+import StoreSelector from "../components/StoreSelector";
 
 type Product = {
   id: string;
@@ -38,6 +42,7 @@ type Product = {
   stock: number;
   unit?: string;
   is_active?: boolean;
+  store_id?: string;
 };
 
 type Family = {
@@ -47,6 +52,7 @@ type Family = {
   code?: string;
   created_at?: string;
   is_active?: boolean;
+  store_id?: string;
 };
 
 type Service = {
@@ -55,22 +61,26 @@ type Service = {
   is_quick_access: boolean;
   created_at?: string;
   is_active?: boolean;
+  store_id?: string;
 };
 
 export default function InventarioPage() {
   const router = useRouter();
-  const { isHydrated, permissions } = useRole();
+  const { role, isHydrated, permissions } = useRole();
+  const { activeStoreId, isAllStoresMode, availableStoreIds, availableStores } = useStore();
+
+  const getStoreName = (id?: string) => {
+    if (!id) return "—";
+    return availableStores.find(s => s.id === id)?.name || "—";
+  };
 
   const [activeTab, setActiveTab] = useState<"catalogo" | "inventario" | "familias" | "servicios">("catalogo");
   const [statusFilter, setStatusFilter] = useState<"ALL" | "ACTIVE" | "INACTIVE">("ACTIVE");
 
-  useEffect(() => {
-    if (isHydrated && !permissions?.access_inventory) {
-      router.push('/hub');
-    }
-  }, [isHydrated, permissions, router]);
-
-  if (!isHydrated || !permissions?.access_inventory) return null;
+  if (!isHydrated) return null;
+  if (!permissions?.access_inventory) {
+    return <AccessDeniedView moduleName="Catálogo / Inventario" />;
+  }
 
   // Products states
   const [products, setProducts] = useState<Product[]>([]);
@@ -87,6 +97,8 @@ export default function InventarioPage() {
     family_id: "",
     price: "",
     stock: "",
+    unit: "MTS",
+    store_id: ""
   });
   const [familyModalError, setFamilyModalError] = useState("");
   const [serviceModalError, setServiceModalError] = useState("");
@@ -104,7 +116,8 @@ export default function InventarioPage() {
   const [familyFormData, setFamilyFormData] = useState({
     name: "",
     description: "",
-    code: ""
+    code: "",
+    store_id: ""
   });
 
   // Services states
@@ -114,21 +127,42 @@ export default function InventarioPage() {
   const [isServiceModalOpen, setIsServiceModalOpen] = useState(false);
   const [editingService, setEditingService] = useState<Service | null>(null);
   const [isSavingService, setIsSavingService] = useState(false);
-  const [serviceFormData, setServiceFormData] = useState({ name: "", is_quick_access: false });
+  const [serviceFormData, setServiceFormData] = useState({ name: "", is_quick_access: false, store_id: "" });
   const [serviceToDelete, setServiceToDelete] = useState<Service | null>(null);
 
+  // Available unique families filtered by the selected store_id
+  const availableFamiliesForForm = useMemo(() => {
+    if (!formData.store_id) return [];
+    const storeFamilies = families.filter(
+      f => (!f.store_id || f.store_id === formData.store_id || (editingProduct && f.id === formData.family_id)) && f.is_active !== false
+    );
+    const seenNames = new Set<string>();
+    const uniqueFamilies: Family[] = [];
+    for (const fam of storeFamilies) {
+      const normalized = fam.name.trim().toUpperCase();
+      if (!seenNames.has(normalized)) {
+        seenNames.add(normalized);
+        uniqueFamilies.push(fam);
+      }
+    }
+    return uniqueFamilies;
+  }, [families, formData.store_id, editingProduct, formData.family_id]);
+
   useEffect(() => {
-    fetchProducts();
-    fetchFamilies();
-    fetchServices();
-  }, []);
+    if (isAllStoresMode || activeStoreId) {
+      fetchProducts();
+      fetchFamilies();
+      fetchServices();
+    }
+  }, [activeStoreId, isAllStoresMode, availableStoreIds]);
 
   const fetchProducts = async () => {
     setLoadingProducts(true);
-    const { data, error } = await supabase
-      .from("products")
-      .select("*")
-      .order("created_at", { ascending: false });
+    let query = supabase.from("products").select("*").order("created_at", { ascending: false });
+    if (isAllStoresMode) query = query.in("store_id", availableStoreIds);
+    else if (activeStoreId) query = query.eq("store_id", activeStoreId);
+    
+    const { data, error } = await query;
 
     if (!error && data) {
       setProducts(data as Product[]);
@@ -138,10 +172,11 @@ export default function InventarioPage() {
 
   const fetchFamilies = async () => {
     setLoadingFamilies(true);
-    const { data, error } = await supabase
-      .from("families")
-      .select("*")
-      .order("name", { ascending: true });
+    let query = supabase.from("families").select("*").order("name", { ascending: true });
+    if (isAllStoresMode) query = query.in("store_id", availableStoreIds);
+    else if (activeStoreId) query = query.eq("store_id", activeStoreId);
+    
+    const { data, error } = await query;
 
     if (!error && data) {
       setFamilies(data as Family[]);
@@ -151,7 +186,11 @@ export default function InventarioPage() {
 
   const fetchServices = async () => {
     setLoadingServices(true);
-    const { data, error } = await supabase.from("services").select("*").order("name", { ascending: true });
+    let query = supabase.from("services").select("*").order("name", { ascending: true });
+    if (isAllStoresMode) query = query.in("store_id", availableStoreIds);
+    else if (activeStoreId) query = query.eq("store_id", activeStoreId);
+    
+    const { data, error } = await query;
     if (!error && data) setServices(data as Service[]);
     setLoadingServices(false);
   };
@@ -185,6 +224,8 @@ export default function InventarioPage() {
         family_id: product.family_id || "",
         price: product.price?.toString() || "",
         stock: product.stock?.toString() || "",
+        unit: product.unit || "MTS",
+        store_id: product.store_id || activeStoreId || ""
       });
     } else {
       setEditingProduct(null);
@@ -194,6 +235,8 @@ export default function InventarioPage() {
         family_id: families[0]?.id || "",
         price: "",
         stock: "0",
+        unit: "MTS",
+        store_id: activeStoreId || ""
       });
     }
     setIsModalOpen(true);
@@ -216,11 +259,13 @@ export default function InventarioPage() {
     const payload = editMode === "inventario"
       ? { stock: parseFloat(formData.stock) || 0 }
       : {
-        sku: formData.sku.trim(),
-        name: formData.name.trim().toUpperCase(),
-        family_id: formData.family_id || null,
-        price: parseFloat(formData.price) || 0,
-        ...(!editingProduct ? { stock: parseFloat(formData.stock) || 0 } : {})
+        name: formData.name,
+        sku: formData.sku,
+        family_id: formData.family_id,
+        price: Number(formData.price),
+        stock: Number(formData.stock),
+        unit: formData.unit || "MTS",
+        store_id: formData.store_id,
       };
 
     try {
@@ -240,7 +285,7 @@ export default function InventarioPage() {
       fetchProducts();
     } catch (err: any) {
       if (err.message?.includes('duplicate key value violates unique constraint') || err.message?.includes('products_sku_key')) {
-        setModalError(`El código SKU "${payload.sku}" ya está en uso por otro producto. Elige un SKU diferente.`);
+        setModalError(`El código SKU "${formData.sku}" ya está en uso por otro producto. Elige un SKU diferente.`);
       } else {
         setModalError("Error al guardar producto: " + err.message);
       }
@@ -311,11 +356,12 @@ export default function InventarioPage() {
       setEditingService(service);
       setServiceFormData({
         name: service.name || "",
-        is_quick_access: service.is_quick_access || false
+        is_quick_access: service.is_quick_access || false,
+        store_id: service.store_id || activeStoreId || ""
       });
     } else {
       setEditingService(null);
-      setServiceFormData({ name: "", is_quick_access: false });
+      setServiceFormData({ name: "", is_quick_access: false, store_id: activeStoreId || "" });
     }
     setIsServiceModalOpen(true);
   };
@@ -339,16 +385,16 @@ export default function InventarioPage() {
       return;
     }
     setIsSavingService(true);
-    const payload = {
-      name: serviceFormData.name.trim().toUpperCase(),
-      is_quick_access: serviceFormData.is_quick_access
-    };
+    const payload = { ...serviceFormData };
     try {
       if (editingService) {
-        const { error } = await supabase.from("services").update(payload).eq("id", editingService.id);
+        const { data, error } = await supabase.from("services").update(payload).eq("id", editingService.id).select();
         if (error) throw error;
+        if (!data || data.length === 0) {
+          throw new Error("No se pudo actualizar el servicio en la base de datos (Permisos RLS bloqueados en Supabase para UPDATE en la tabla 'services').");
+        }
       } else {
-        const { error } = await supabase.from("services").insert(payload);
+        const { data, error } = await supabase.from("services").insert(payload).select();
         if (error) throw error;
       }
       setIsServiceModalOpen(false);
@@ -385,11 +431,12 @@ export default function InventarioPage() {
       setFamilyFormData({
         name: family.name || "",
         description: family.description || "",
-        code: family.code || ""
+        code: family.code || "",
+        store_id: family.store_id || activeStoreId || ""
       });
     } else {
       setEditingFamily(null);
-      setFamilyFormData({ name: "", description: "", code: "" });
+      setFamilyFormData({ name: "", description: "", code: "", store_id: activeStoreId || "" });
     }
     setIsFamilyModalOpen(true);
   };
@@ -402,9 +449,10 @@ export default function InventarioPage() {
 
     setIsSavingFamily(true);
     const payload = {
-      name: familyFormData.name.trim().toUpperCase(),
-      description: familyFormData.description.trim(),
-      code: familyFormData.code.trim() || null
+      name: familyFormData.name,
+      description: familyFormData.description,
+      code: familyFormData.code,
+      store_id: familyFormData.store_id,
     };
 
     try {
@@ -513,17 +561,18 @@ export default function InventarioPage() {
         </div>
 
         <div className="flex items-center gap-4">
-          {activeTab === "catalogo" && permissions?.inventory_create !== false && (
+          <StoreSwitcher />
+          {activeTab === "catalogo" && Boolean(permissions?.inventory_create) && (
             <button onClick={() => openModal(undefined, "catalogo")} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold transition-colors shadow-sm hover:bg-primary/90">
               <Plus className="w-3.5 h-3.5" /> Nuevo Producto
             </button>
           )}
-          {activeTab === "familias" && permissions?.inventory_create !== false && (
+          {activeTab === "familias" && Boolean(permissions?.inventory_create) && (
             <button onClick={() => openFamilyModal()} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold transition-colors shadow-sm hover:bg-primary/90">
               <FolderPlus className="w-3.5 h-3.5" /> Nueva Familia
             </button>
           )}
-          {activeTab === "servicios" && permissions?.inventory_create !== false && (
+          {activeTab === "servicios" && Boolean(permissions?.inventory_create) && (
             <button onClick={() => openServiceModal()} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold transition-colors shadow-sm hover:bg-primary/90">
               <Plus className="w-3.5 h-3.5" /> Nuevo Servicio
             </button>
@@ -593,23 +642,24 @@ export default function InventarioPage() {
               <Table>
                 <TableHeader className="bg-secondary/30">
                   <TableRow>
-                    <SortableTableHead className="w-[100px]" field="sku" currentSort={productSortConfig} onSort={requestProductSort}>SKU</SortableTableHead>
-                    <SortableTableHead field="name" currentSort={productSortConfig} onSort={requestProductSort}>Producto</SortableTableHead>
-                    <SortableTableHead field="family_id" currentSort={productSortConfig} onSort={requestProductSort}>Familia</SortableTableHead>
-                    <SortableTableHead className="text-right" field="price" currentSort={productSortConfig} onSort={requestProductSort}>Precio/m</SortableTableHead>
+                    <SortableTableHead className="w-[100px]" field="sku" currentSort={productSortConfig} onSort={(k) => requestProductSort(k as any)}>SKU</SortableTableHead>
+                    <SortableTableHead field="name" currentSort={productSortConfig} onSort={(k) => requestProductSort(k as any)}>Producto</SortableTableHead>
+                    <SortableTableHead field="family_id" currentSort={productSortConfig} onSort={(k) => requestProductSort(k as any)}>Familia</SortableTableHead>
+                    <TableHead>Tienda</TableHead>
+                    <SortableTableHead className="text-right" field="price" currentSort={productSortConfig} onSort={(k) => requestProductSort(k as any)}>Precio/m</SortableTableHead>
                     <TableHead className="text-right">Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {loadingProducts ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center py-12 text-muted-foreground">
+                      <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
                         Cargando catálogo...
                       </TableCell>
                     </TableRow>
                   ) : filteredProducts.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center py-12 text-muted-foreground">
+                      <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
                         No se encontraron productos registrados en la base de datos.
                       </TableCell>
                     </TableRow>
@@ -628,6 +678,9 @@ export default function InventarioPage() {
                         <TableCell className="text-muted-foreground text-sm">
                           {getFamilyName(product.family_id)}
                         </TableCell>
+                        <TableCell className="text-muted-foreground text-sm font-medium">
+                          {getStoreName(product.store_id)}
+                        </TableCell>
                         <TableCell className="text-right font-medium">S/ {product.price?.toFixed(2) || "0.00"}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-2">
@@ -637,13 +690,13 @@ export default function InventarioPage() {
                               </button>
                             ) : (
                               <div className="flex items-center justify-end gap-1">
-                                {permissions?.inventory_edit !== false && (
+                                {Boolean(permissions?.inventory_edit) && (
                                   <button onClick={() => openModal(product, "catalogo")} className="p-2 text-muted-foreground hover:text-indigo-600 transition-colors" title="Editar Producto">
                                     <Edit2 className="w-4 h-4" />
                                   </button>
                                 )}
-                                {permissions?.inventory_delete !== false && (
-                                  <button onClick={() => openDeleteConfirm(product)} className="p-2 text-muted-foreground hover:text-rose-600 transition-colors" title="Eliminar Producto">
+                                {Boolean(permissions?.inventory_delete) && (
+                                  <button onClick={() => handleDelete(product)} className="p-2 text-muted-foreground hover:text-rose-600 transition-colors" title="Eliminar Producto">
                                     <Trash2 className="w-4 h-4" />
                                   </button>
                                 )}
@@ -684,10 +737,11 @@ export default function InventarioPage() {
               <Table>
                 <TableHeader className="bg-secondary/30">
                   <TableRow>
-                    <SortableTableHead className="w-[100px]" field="sku" currentSort={productSortConfig} onSort={requestProductSort}>SKU</SortableTableHead>
-                    <SortableTableHead field="name" currentSort={productSortConfig} onSort={requestProductSort}>Producto</SortableTableHead>
-                    <SortableTableHead field="family_id" currentSort={productSortConfig} onSort={requestProductSort}>Familia</SortableTableHead>
-                    <SortableTableHead className="text-right" field="stock" currentSort={productSortConfig} onSort={requestProductSort}>Stock (m)</SortableTableHead>
+                    <SortableTableHead className="w-[100px]" field="sku" currentSort={productSortConfig} onSort={(k) => requestProductSort(k as any)}>SKU</SortableTableHead>
+                    <SortableTableHead field="name" currentSort={productSortConfig} onSort={(k) => requestProductSort(k as any)}>Producto</SortableTableHead>
+                    <SortableTableHead field="family_id" currentSort={productSortConfig} onSort={(k) => requestProductSort(k as any)}>Familia</SortableTableHead>
+                    <TableHead>Tienda</TableHead>
+                    <SortableTableHead className="text-right" field="stock" currentSort={productSortConfig} onSort={(k) => requestProductSort(k as any)}>Stock (m)</SortableTableHead>
                     <TableHead className="text-center">Estado</TableHead>
                     <TableHead className="text-right">Acciones</TableHead>
                   </TableRow>
@@ -695,13 +749,13 @@ export default function InventarioPage() {
                 <TableBody>
                   {loadingProducts ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
+                      <TableCell colSpan={7} className="text-center py-12 text-muted-foreground">
                         Cargando inventario...
                       </TableCell>
                     </TableRow>
                   ) : filteredProducts.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
+                      <TableCell colSpan={7} className="text-center py-12 text-muted-foreground">
                         No se encontraron productos registrados para el inventario.
                       </TableCell>
                     </TableRow>
@@ -716,6 +770,9 @@ export default function InventarioPage() {
                         </TableCell>
                         <TableCell className="text-muted-foreground text-sm">
                           {getFamilyName(product.family_id)}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground text-sm font-medium">
+                          {getStoreName(product.store_id)}
                         </TableCell>
                         <TableCell className="text-right">
                           <div className={`inline-flex items-center gap-1.5 ${product.stock <= 10 ? 'text-amber-500 font-bold' : ''}`}>
@@ -733,7 +790,7 @@ export default function InventarioPage() {
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-2">
-                            {permissions?.inventory_edit !== false && (
+                            {Boolean(permissions?.inventory_edit) && (
                               <button onClick={() => openModal(product, "inventario")} className="p-2 text-muted-foreground hover:text-indigo-600 transition-colors" title="Ajustar Stock">
                                 <Edit2 className="w-4 h-4" />
                               </button>
@@ -773,22 +830,23 @@ export default function InventarioPage() {
               <Table>
                 <TableHeader className="bg-secondary/30">
                   <TableRow>
-                    <SortableTableHead className="w-[100px]" field="code" currentSort={familySortConfig} onSort={requestFamilySort}>Código</SortableTableHead>
-                    <SortableTableHead className="w-[300px]" field="name" currentSort={familySortConfig} onSort={requestFamilySort}>Nombre de Familia</SortableTableHead>
-                    <SortableTableHead field="description" currentSort={familySortConfig} onSort={requestFamilySort}>Descripción</SortableTableHead>
+                    <SortableTableHead className="w-[100px]" field="code" currentSort={familySortConfig} onSort={(k) => requestFamilySort(k as any)}>Código</SortableTableHead>
+                    <SortableTableHead className="w-[300px]" field="name" currentSort={familySortConfig} onSort={(k) => requestFamilySort(k as any)}>Nombre de Familia</SortableTableHead>
+                    <TableHead>Tienda</TableHead>
+                    <SortableTableHead field="description" currentSort={familySortConfig} onSort={(k) => requestFamilySort(k as any)}>Descripción</SortableTableHead>
                     <TableHead className="text-right w-[150px]">Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {loadingFamilies ? (
                     <TableRow>
-                      <TableCell colSpan={3} className="text-center py-12 text-muted-foreground">
+                      <TableCell colSpan={5} className="text-center py-12 text-muted-foreground">
                         Cargando familias...
                       </TableCell>
                     </TableRow>
                   ) : filteredFamilies.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center py-12 text-muted-foreground">
+                      <TableCell colSpan={5} className="text-center py-12 text-muted-foreground">
                         No se encontraron familias registradas. Agrega una nueva familia para organizar tus productos.
                       </TableCell>
                     </TableRow>
@@ -802,6 +860,9 @@ export default function InventarioPage() {
                           {family.name}
                           {family.is_active === false && <span className="ml-2 text-xs bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded font-bold">INACTIVO</span>}
                         </TableCell>
+                        <TableCell className="text-muted-foreground text-sm font-medium">
+                          {getStoreName(family.store_id)}
+                        </TableCell>
                         <TableCell className="text-muted-foreground">
                           {family.description || "Sin descripción"}
                         </TableCell>
@@ -813,12 +874,12 @@ export default function InventarioPage() {
                               </button>
                             ) : (
                               <div className="flex items-center justify-end gap-1">
-                                {permissions?.inventory_edit !== false && (
+                                {Boolean(permissions?.inventory_edit) && (
                                   <button onClick={() => openFamilyModal(family)} className="p-2 text-muted-foreground hover:text-indigo-600 transition-colors" title="Editar Familia">
                                     <Edit2 className="w-4 h-4" />
                                   </button>
                                 )}
-                                {permissions?.inventory_delete !== false && (
+                                {Boolean(permissions?.inventory_delete) && (
                                   <button onClick={() => handleDeleteFamily(family)} className="p-2 text-muted-foreground hover:text-rose-600 transition-colors" title="Eliminar Familia">
                                     <Trash2 className="w-4 h-4" />
                                   </button>
@@ -861,6 +922,7 @@ export default function InventarioPage() {
                 <TableHeader className="bg-secondary/30">
                   <TableRow>
                     <TableHead className="w-[300px]">Nombre del Servicio</TableHead>
+                    <TableHead>Tienda</TableHead>
                     <TableHead>Acceso Rápido en Punto 1 (POS)</TableHead>
                     <TableHead className="text-right w-[150px]">Acciones</TableHead>
                   </TableRow>
@@ -868,13 +930,13 @@ export default function InventarioPage() {
                 <TableBody>
                   {loadingServices ? (
                     <TableRow>
-                      <TableCell colSpan={3} className="text-center py-12 text-muted-foreground">
+                      <TableCell colSpan={4} className="text-center py-12 text-muted-foreground">
                         Cargando servicios...
                       </TableCell>
                     </TableRow>
                   ) : filteredServices.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={3} className="text-center py-12 text-muted-foreground">
+                      <TableCell colSpan={4} className="text-center py-12 text-muted-foreground">
                         No se encontraron servicios registrados. Agrega uno nuevo para usar en el POS.
                       </TableCell>
                     </TableRow>
@@ -884,6 +946,9 @@ export default function InventarioPage() {
                         <TableCell className="font-bold text-foreground">
                           {service.name}
                           {service.is_active === false && <span className="ml-2 text-xs bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded font-bold">INACTIVO</span>}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground text-sm font-medium">
+                          {getStoreName(service.store_id)}
                         </TableCell>
                         <TableCell>
                           <Badge variant={service.is_quick_access ? 'success' : 'outline'}>
@@ -898,12 +963,12 @@ export default function InventarioPage() {
                               </button>
                             ) : (
                               <div className="flex items-center justify-end gap-1">
-                                {permissions?.inventory_edit !== false && (
+                                {Boolean(permissions?.inventory_edit) && (
                                   <button onClick={() => openServiceModal(service)} className="p-2 text-muted-foreground hover:text-indigo-600 transition-colors" title="Editar Servicio">
                                     <Edit2 className="w-4 h-4" />
                                   </button>
                                 )}
-                                {permissions?.inventory_delete !== false && (
+                                {Boolean(permissions?.inventory_delete) && (
                                   <button onClick={() => handleDeleteService(service)} className="p-2 text-muted-foreground hover:text-rose-600 transition-colors" title="Eliminar Servicio">
                                     <Trash2 className="w-4 h-4" />
                                   </button>
@@ -934,16 +999,34 @@ export default function InventarioPage() {
             <div className="space-y-4 py-4">
               {editMode === "catalogo" ? (
                 <>
-                  {/* SKU */}
+                  {/* 1. Asignar a Tienda */}
+                  <StoreSelector
+                    value={formData.store_id}
+                    onChange={(val) => setFormData(prev => ({ ...prev, store_id: val, family_id: "" }))}
+                    disabled={!!editingProduct}
+                  />
+
+                  {/* 2. Familia / Categoría */}
                   <div className="space-y-2">
-                    <label className="text-xs font-bold text-muted-foreground uppercase">SKU *</label>
-                    <Input
-                      value={formData.sku}
-                      onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
-                      placeholder="Ej: 2.2"
-                    />
+                    <label className="text-xs font-bold text-muted-foreground uppercase">Familia *</label>
+                    <select
+                      value={formData.family_id}
+                      onChange={(e) => setFormData({ ...formData, family_id: e.target.value })}
+                      disabled={!formData.store_id}
+                      className="w-full h-10 px-3 rounded-md border border-input bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <option value="">
+                        {formData.store_id ? "— Selecciona una familia —" : "— Selecciona primero una tienda —"}
+                      </option>
+                      {availableFamiliesForForm.map((fam: Family) => (
+                        <option key={fam.id} value={fam.id}>
+                          {fam.name}
+                        </option>
+                      ))}
+                    </select>
                   </div>
-                  {/* Nombre */}
+
+                  {/* 3. Producto (Nombre) */}
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-muted-foreground uppercase">Producto (Nombre) *</label>
                     <Input
@@ -953,23 +1036,18 @@ export default function InventarioPage() {
                       className="uppercase"
                     />
                   </div>
-                  {/* Familia */}
+
+                  {/* 4. SKU */}
                   <div className="space-y-2">
-                    <label className="text-xs font-bold text-muted-foreground uppercase">Familia *</label>
-                    <select
-                      value={formData.family_id}
-                      onChange={(e) => setFormData({ ...formData, family_id: e.target.value })}
-                      className="w-full h-10 px-3 rounded-md border border-input bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                    >
-                      <option value="">— Selecciona una familia —</option>
-                      {families.map((fam) => (
-                        <option key={fam.id} value={fam.id}>
-                          {fam.name}
-                        </option>
-                      ))}
-                    </select>
+                    <label className="text-xs font-bold text-muted-foreground uppercase">SKU *</label>
+                    <Input
+                      value={formData.sku}
+                      onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
+                      placeholder="Ej: 2.2"
+                    />
                   </div>
-                  {/* Precio y Stock Inicial */}
+
+                  {/* 5. Precio y Stock Inicial */}
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <label className="text-xs font-bold text-muted-foreground uppercase">Precio por metro (S/) *</label>
@@ -1039,6 +1117,11 @@ export default function InventarioPage() {
               <DialogTitle>{editingFamily ? 'Editar Familia' : 'Nueva Familia'}</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 py-4">
+              <StoreSelector
+                value={familyFormData.store_id}
+                onChange={(val) => setFamilyFormData({ ...familyFormData, store_id: val })}
+                disabled={!!editingFamily}
+              />
               <div className="grid grid-cols-4 gap-4">
                 <div className="space-y-2 col-span-1">
                   <label className="text-xs font-bold text-muted-foreground uppercase">Código</label>
@@ -1096,6 +1179,11 @@ export default function InventarioPage() {
               </div>
             </DialogHeader>
             <div className="grid gap-4 py-4">
+              <StoreSelector
+                value={serviceFormData.store_id}
+                onChange={(val) => setServiceFormData({ ...serviceFormData, store_id: val })}
+                disabled={!!editingService}
+              />
               <div className="space-y-2">
                 <label className="text-sm font-medium">Nombre del Servicio</label>
                 <Input

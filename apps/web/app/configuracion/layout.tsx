@@ -3,17 +3,14 @@
 import React, { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useRole } from '../context/RoleContext';
+import { AccessDeniedView } from '../components/AccessDeniedView';
 import { Loader2 } from 'lucide-react';
 
 export default function ConfiguracionLayout({ children }: { children: React.ReactNode }) {
   const { role, isHydrated, permissions } = useRole();
   const router = useRouter();
 
-  useEffect(() => {
-    if (isHydrated && !permissions?.access_settings) {
-      router.push('/hub');
-    }
-  }, [permissions, isHydrated, router]);
+
 
   if (!isHydrated) {
     return (
@@ -24,7 +21,7 @@ export default function ConfiguracionLayout({ children }: { children: React.Reac
   }
 
   if (!permissions?.access_settings) {
-    return null;
+    return <AccessDeniedView moduleName="Configuración del Sistema" />;
   }
 
   return (

@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 export function useNetworkStatus() {
   const [isOnline, setIsOnline] = useState<boolean>(true);
   const [isDesktopWeb, setIsDesktopWeb] = useState<boolean>(false);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const timeoutRef = useRef<any>(null);
   const retryCount = useRef(0);
 
   useEffect(() => {

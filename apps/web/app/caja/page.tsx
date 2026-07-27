@@ -10,7 +10,7 @@ import {
 import {
   CreditCard, Banknote, Smartphone, RefreshCw,
   CheckCircle2, AlertCircle, ArrowLeft, Clock, Receipt, XCircle,
-  LayoutGrid, List, Trash2, Delete, Sun, Moon, FileText, User, Printer
+  LayoutGrid, List, Trash2, Delete, Sun, Moon, FileText, User, Printer, Lock
 } from "lucide-react";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { supabase } from "../lib/supabase";
@@ -20,7 +20,9 @@ import {
   starsoftDocNumFromTicket,
 } from "../lib/ticket-sequence";
 import { useRole } from "../context/RoleContext";
+import { AccessDeniedView } from "../components/AccessDeniedView";
 import { useTheme } from "../context/ThemeContext";
+import { useStore } from "../context/StoreContext";
 import { requestBluetoothDevice, printSaleReceipt, silentPrintSaleReceipt } from '../configuracion/utils/printerEngine';
 
 // ─────────────── Types ───────────────
@@ -61,25 +63,25 @@ const STATUS_FILTERS: { id: StatusFilter; label: string }[] = [
   { id: "ALL", label: "Todos" },
 ];
 
-const VOUCHER_TYPES: { id: VoucherType; label: string; icon: string }[] = [
-  { id: "TICKET", label: "Ticket / Simple", icon: "🎫" },
-  { id: "BOLETA", label: "Boleta (DNI)", icon: "📄" },
-  { id: "FACTURA", label: "Factura (RUC)", icon: "🏢" },
+const VOUCHER_TYPES: { id: VoucherType; label: string }[] = [
+  { id: "TICKET", label: "Ticket / Simple" },
+  { id: "BOLETA", label: "Boleta (DNI)" },
+  { id: "FACTURA", label: "Factura (RUC)" },
 ];
 
 // ─── Toast helper ─────────────────────────────────────────────────────────────
 function Toast({ message, type }: { message: string; type: 'success' | 'error' }) {
   return (
-    <div className={`fixed bottom-5 right-5 z-50 flex items-center gap-3 px-5 py-3.5 rounded-2xl border shadow-2xl font-bold text-sm animate-in fade-in slide-in-from-bottom-4 ${type === 'success'
-        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
-        : 'bg-red-500/10 border-red-500/30 text-red-500'
+    <div className={`fixed bottom-5 right-5 z-50 inline-flex items-center gap-2 px-4 py-2.5 rounded-full border shadow-lg text-xs font-semibold animate-in fade-in slide-in-from-bottom-4 ${type === 'success'
+        ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+        : 'bg-rose-50 border-rose-200 text-rose-900'
       }`}>
       {type === 'success' ? (
-        <CheckCircle2 className="w-4 h-4 shrink-0" />
+        <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-600" />
       ) : (
-        <AlertCircle className="w-4 h-4 shrink-0" />
+        <AlertCircle className="w-5 h-5 shrink-0 text-rose-600" />
       )}
-      <span>{message}</span>
+      <span className={type === 'success' ? 'text-emerald-900' : 'text-rose-900'}>{message}</span>
     </div>
   );
 }
@@ -253,11 +255,13 @@ function TicketTableRow({
           <span className="px-4 font-mono font-bold text-gray-400 text-right block w-full">—</span>
         ) : (
           <input type="number" step="0.01" placeholder="0.00"
+            readOnly={true}
+            disabled={true}
             value={rowBuffer.izipay}
             onChange={(e) => handleChange('izipay', e.target.value)}
             onKeyDown={handleKeyDown}
             onWheel={(e) => e.currentTarget.blur()}
-            className={`${inlineCellCls} text-right text-gray-700 dark:text-gray-200 ${spinnerOff}`}
+            className={`${inlineCellCls} text-right bg-slate-100 text-slate-500 cursor-not-allowed border-slate-200 opacity-75 font-semibold ${spinnerOff}`}
           />
         )}
       </td>
@@ -328,7 +332,9 @@ function TicketTableRow({
 
 export default function CajaPage() {
   const { role, username, isHydrated, permissions } = useRole();
+  const { activeStore, activeStoreId, isAllStoresMode } = useStore();
   const { theme, toggleTheme } = useTheme();
+  const router = useRouter();
   
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
@@ -336,7 +342,6 @@ export default function CajaPage() {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3500);
   };
-  const router = useRouter();
 
   const [tickets, setTickets] = useState<PendingTicket[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -359,7 +364,9 @@ export default function CajaPage() {
 
   useEffect(() => {
     async function loadPrinter() {
-      const { data } = await supabase.from('printers').select('*').order('auto_print', { ascending: false }).limit(1).single();
+      let query = supabase.from('printers').select('*').order('auto_print', { ascending: false }).limit(1);
+      if (activeStoreId) query = query.eq('store_id', activeStoreId);
+      const { data } = await query.maybeSingle();
       if (data) {
         setActivePrinter(data);
         if (data.type === 'bluetooth') {
@@ -414,7 +421,8 @@ export default function CajaPage() {
 
   // ── Customer Autocomplete ──
   const [customerQuery, setCustomerQuery] = useState("");
-  const [customerResults, setCustomerResults] = useState<{ id: string, ruc: string, business_name: string }[]>([]);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
+  const [customerResults, setCustomerResults] = useState<{ id: string, doc_number: string, business_name: string, document_type?: string }[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
 
   useEffect(() => {
@@ -426,33 +434,51 @@ export default function CajaPage() {
     const timer = setTimeout(async () => {
       const { data } = await supabase
         .from("customers")
-        .select("id, ruc, business_name")
-        .or(`ruc.ilike.%${customerQuery}%,business_name.ilike.%${customerQuery}%`)
-        .limit(5);
+        .select("id, doc_number, business_name, document_type")
+        .or(`doc_number.ilike.%${customerQuery}%,business_name.ilike.%${customerQuery}%`)
+        .limit(15);
 
       if (data && data.length > 0) {
-        setCustomerResults(data);
-        setShowDropdown(true);
+        let filtered = data;
+        if (voucherType === "BOLETA") {
+          // Exclude RUC 20 and 11-digit RUCs strictly! Only DNI / CE (8-9 digits)
+          filtered = data.filter(c => {
+            const doc = (c.doc_number || "").trim();
+            const type = (c.document_type || "").toUpperCase();
+            if (type === "RUC" || doc.length === 11 || doc.startsWith("20")) return false;
+            return true;
+          });
+        } else if (voucherType === "FACTURA") {
+          // Include ONLY RUCs (11-digit documents)
+          filtered = data.filter(c => {
+            const doc = (c.doc_number || "").trim();
+            const type = (c.document_type || "").toUpperCase();
+            return type === "RUC" || doc.length === 11;
+          });
+        }
+        setCustomerResults(filtered.slice(0, 5));
+        setShowDropdown(filtered.length > 0);
       } else {
         setShowDropdown(false);
       }
     }, 300);
     return () => clearTimeout(timer);
-  }, [customerQuery]);
+  }, [customerQuery, voucherType]);
 
-  const selectCustomer = (c: { ruc: string, business_name: string }) => {
-    setDocNumber(c.ruc || "");
+  const selectCustomer = (c: { id: string, doc_number: string, business_name: string, document_type?: string }) => {
+    setSelectedCustomerId(c.id);
+    const cleanDoc = (c.doc_number || "").replace(/\D/g, "");
+    if (voucherType === "BOLETA" && cleanDoc.length > 8) {
+      setDocNumber(cleanDoc.slice(0, 8));
+    } else if (voucherType === "FACTURA" && cleanDoc.length > 11) {
+      setDocNumber(cleanDoc.slice(0, 11));
+    } else {
+      setDocNumber(cleanDoc);
+    }
     setDocName(c.business_name || "");
     setShowDropdown(false);
     setCustomerQuery("");
   };
-
-  // ── Redirect if no access ──
-  useEffect(() => {
-    if (isHydrated && !permissions?.access_caja) {
-      router.push('/hub');
-    }
-  }, [isHydrated, permissions, router]);
 
   // ── Derived payment values ──
   const ticketTotal = selectedTicket?.total ?? 0;
@@ -466,9 +492,6 @@ export default function CajaPage() {
   }
   const finalTotal = ticketTotal + izipayFee;
   const totalPaid = Object.values(paymentAmounts).reduce((acc, val) => acc + (parseFloat(val) || 0), 0);
-  const vuelto = Math.round(totalPaid * 100) >= Math.round(finalTotal * 100)
-    ? Math.round((totalPaid - finalTotal) * 100) / 100
-    : 0;
 
   const totalServices = useMemo(() => {
     if (!selectedTicket) return 0;
@@ -497,7 +520,7 @@ export default function CajaPage() {
       voucherType === "FACTURA" ? /^\d{11}$/.test(docNumber) : true
   );
   const docNameValid = !needsDocInfo || docName.trim().length >= 3;
-  const canConfirm = Math.round(totalPaid * 100) >= Math.round(finalTotal * 100) && finalTotal > 0 && docNumberValid && docNameValid;
+  const canConfirm = Math.round(totalPaid * 100) === Math.round(finalTotal * 100) && finalTotal > 0 && docNumberValid && docNameValid;
 
   // ─────────────── Data Fetching ───────────────
   const fetchTickets = useCallback(async () => {
@@ -506,11 +529,15 @@ export default function CajaPage() {
     const formatter = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima", year: "numeric", month: "2-digit", day: "2-digit" });
     const todayStr = formatter.format(now);
 
-    const query = supabase
+    let query = supabase
       .from("sales")
       .select("id, proforma_number, invoice_number, internal_ticket_number, total, detail, items, status, created_at, voucher_type, voucher_doc_number, seller_id, cashier_id, seller:profiles!seller_id(username), transactions(payment_method, amount, surcharge_pct, surcharge_amount)")
       .eq("record_date", todayStr)
       .order("created_at", { ascending: true });
+
+    if (activeStoreId) {
+      query = query.eq("store_id", activeStoreId);
+    }
 
     const { data, error } = await query;
 
@@ -523,7 +550,9 @@ export default function CajaPage() {
 
   useEffect(() => {
     async function loadSettings() {
-      const { data } = await supabase.from('settings').select('*');
+      let stQuery = supabase.from('settings').select('*');
+      if (activeStoreId) stQuery = stQuery.eq('store_id', activeStoreId);
+      const { data } = await stQuery;
       if (data) {
         const debit = data.find(s => s.key === 'izipay_debit_fee')?.value;
         const credit = data.find(s => s.key === 'izipay_credit_fee')?.value;
@@ -653,7 +682,6 @@ export default function CajaPage() {
     setIsSubmitting(true);
 
     try {
-      const starsoftDoc = `B002-${String(Math.floor(Math.random() * 10000000)).padStart(7, '0')}`;
       const internalTicketNum = selectedTicket.internal_ticket_number;
       if (internalTicketNum == null || internalTicketNum <= 0) {
         throw new Error("No se pudo determinar el número interno del ticket.");
@@ -670,13 +698,16 @@ export default function CajaPage() {
       const updatePayload: Record<string, unknown> = {
         status: "COMPLETED",
         total: finalTotal,
-        invoice_number: starsoftDoc,
+        invoice_number: null,
         voucher_type: voucherType,
         voucher_doc_number: needsDocInfo ? docNumber : String(internalTicketNum),
         voucher_doc_name: needsDocInfo ? docName.trim() : null,
         cashier_id: cashierId,
         updated_at: new Date().toISOString(),
       };
+      if (selectedCustomerId) {
+        updatePayload.customer_id = selectedCustomerId;
+      }
 
       const { error: updateErr } = await supabase
         .from("sales")
@@ -694,11 +725,6 @@ export default function CajaPage() {
         const isIzipay = method === "IZIPAY";
         const surchargePct = isIzipay ? izipayRate : 0.0;
         const surchargeAmt = isIzipay ? izipayFee : 0.0;
-
-        if (method === "EFECTIVO" && vuelto > 0) {
-          amount -= vuelto;
-          if (amount <= 0) continue;
-        }
 
         txsToInsert.push({
           sale_id: selectedTicket.id,
@@ -877,7 +903,33 @@ export default function CajaPage() {
     return { label: "Anulado", classes: "bg-red-500/20 text-red-500 border border-red-500/30" };
   };
 
-  if (!isHydrated || !permissions?.access_caja) return null;
+  if (!isHydrated) return null;
+  if (!permissions?.access_caja) {
+    return <AccessDeniedView moduleName="Caja" />;
+  }
+
+  if (isAllStoresMode) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center bg-background min-h-screen">
+        <div className="max-w-md w-full p-8 text-center space-y-6 bg-card border border-border rounded-2xl shadow-xl">
+          <div className="w-20 h-20 bg-red-500/10 rounded-full flex items-center justify-center mx-auto">
+            <Lock className="w-10 h-10 text-red-500" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-foreground mb-2">Bloqueo Operativo</h2>
+            <p className="text-muted-foreground text-sm leading-relaxed">
+              La Caja es un módulo físico. No puedes procesar cobros en modo consolidado ("Todas las Tiendas").
+              <br/><br/>
+              Por favor, selecciona una tienda específica en el menú superior para poder operar.
+            </p>
+          </div>
+          <button className="w-full font-bold h-12 text-sm bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg" onClick={() => router.push('/hub')}>
+            Volver al Hub
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
@@ -893,7 +945,14 @@ export default function CajaPage() {
               <Receipt className="w-4 h-4 text-white" />
             </div>
             <div>
-              <h1 className="text-base font-bold leading-none">Módulo de Caja</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-base font-bold leading-none">Módulo de Caja</h1>
+                {activeStore && (
+                  <span className="text-[10px] font-bold text-amber-700 bg-amber-100 border border-amber-200 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                    {activeStore.name}
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-muted-foreground mt-0.5">Cobro de Tickets Pendientes</p>
             </div>
           </div>
@@ -1288,15 +1347,6 @@ export default function CajaPage() {
                     </div>
                   )}
                 </div>
-                
-                {/* Vuelto Badge */}
-                {vuelto > 0 && (
-                  <div className="flex justify-end -mt-2">
-                    <div className="bg-rose-50 border border-rose-200 text-rose-700 font-bold px-4 py-1.5 rounded-full shadow-sm text-sm">
-                      Vuelto: S/ {vuelto.toFixed(2)}
-                    </div>
-                  </div>
-                )}
 
                 {/* Tipo de comprobante + inputs cliente */}
                 <div className="space-y-4">
@@ -1306,7 +1356,17 @@ export default function CajaPage() {
                       <button
                         key={id}
                         type="button"
-                        onClick={() => { setVoucherType(id); setDocNumber(""); setDocName(""); }}
+                        onClick={() => {
+                          setVoucherType(id);
+                          setSelectedCustomerId(null);
+                          if (id === "TICKET") {
+                            setDocNumber("");
+                            setDocName("CLIENTE VARIOS");
+                          } else {
+                            if (docName === "CLIENTE VARIOS") setDocName("");
+                            setDocNumber("");
+                          }
+                        }}
                         className={`flex-1 py-2 px-3 rounded-lg border text-xs font-bold transition-all ${voucherType === id
                           ? "border-indigo-500 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
                           : "border-border bg-background/30 text-muted-foreground hover:border-muted-foreground/40"
@@ -1325,8 +1385,11 @@ export default function CajaPage() {
                           type="text"
                           placeholder={voucherType === "BOLETA" ? "DNI (8 dígitos)" : "RUC (11 dígitos)"}
                           value={docNumber}
+                          maxLength={voucherType === "BOLETA" ? 8 : 11}
                           onChange={(e) => {
-                            const val = e.target.value.replace(/\D/g, "");
+                            let val = e.target.value.replace(/\D/g, "");
+                            if (voucherType === "BOLETA" && val.length > 8) val = val.slice(0, 8);
+                            if (voucherType === "FACTURA" && val.length > 11) val = val.slice(0, 11);
                             setDocNumber(val);
                             setCustomerQuery(val);
                           }}
@@ -1368,7 +1431,7 @@ export default function CajaPage() {
                               className="w-full text-left px-3 py-2.5 hover:bg-secondary transition-colors border-b border-border/50 last:border-0 flex flex-col"
                             >
                               <span className="font-bold text-foreground text-xs truncate">{c.business_name}</span>
-                              <span className="font-mono text-[10px] text-muted-foreground">{c.ruc || "Sin doc."}</span>
+                              <span className="font-mono text-[10px] text-muted-foreground">{c.doc_number || "Sin doc."}</span>
                             </button>
                           ))}
                         </div>
@@ -1407,7 +1470,7 @@ export default function CajaPage() {
           REVIEW MODAL — confirm before DB write
           ════════════════════════════════════════ */}
       {isReviewing && selectedTicket && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="w-full max-w-md bg-card border-2 border-border rounded-2xl shadow-2xl p-0 overflow-hidden animate-in zoom-in-95 duration-150">
             {/* Header */}
             <div className="px-6 py-4 border-b border-border bg-background/50">
@@ -1415,44 +1478,61 @@ export default function CajaPage() {
               <div className="text-xs text-muted-foreground mt-0.5">Verifica los datos antes de guardar</div>
             </div>
 
-            {/* Summary */}
+            {/* Summary Content */}
             <div className="px-6 py-5 space-y-4">
-              {/* Comprobante */}
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-muted-foreground uppercase">Comprobante</span>
-                <span className="font-bold text-foreground">
-                  {voucherType === "TICKET" ? "🎫 Ticket / Simple" : voucherType === "BOLETA" ? `📄 Boleta — ${docNumber} ${docName}` : `🏢 Factura — ${docNumber} ${docName}`}
+              {/* Bloque 1: Comprobante y Cliente */}
+              <div className="bg-slate-50 dark:bg-slate-900/60 rounded-xl p-4 border border-slate-200/80 dark:border-slate-800 flex flex-col gap-1">
+                <span className="text-[11px] font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">
+                  COMPROBANTE
                 </span>
-              </div>
-
-              {/* Payment breakdown */}
-              <div className="space-y-2">
-                <div className="text-xs font-bold text-muted-foreground uppercase">Desglose de Pago</div>
-                {PAYMENT_METHODS.filter(m => parseFloat(paymentAmounts[m.id]) > 0).map(m => (
-                  <div key={m.id} className="flex justify-between items-center text-sm">
-                    <span className="font-bold text-foreground flex items-center gap-2">
-                      {m.label}
-                      {m.id === "IZIPAY" && izipayFee > 0 && (
-                        <span className="text-[10px] text-orange-600 bg-orange-100 px-1.5 py-0.5 rounded font-black border border-orange-200">
-                          +S/ {izipayFee.toFixed(2)} ({izipayRate}%)
-                        </span>
-                      )}
-                    </span>
-                    <span className="font-mono font-bold text-foreground">S/ {parseFloat(paymentAmounts[m.id]).toFixed(2)}</span>
-                  </div>
-                ))}
-                {vuelto > 0 && (
-                  <div className="flex justify-between items-center text-sm text-rose-600 border-t border-border pt-2 mt-1">
-                    <span className="font-bold">Vuelto a entregar</span>
-                    <span className="font-mono font-black">S/ {vuelto.toFixed(2)}</span>
+                <div className="text-sm font-extrabold text-slate-800 dark:text-slate-100">
+                  {voucherType === "TICKET" ? (
+                    "Ticket / Simple"
+                  ) : voucherType === "BOLETA" ? (
+                    `Boleta ${docNumber ? `— ${docNumber}` : ""}`
+                  ) : (
+                    `Factura ${docNumber ? `— ${docNumber}` : ""}`
+                  )}
+                </div>
+                {docName && (
+                  <div className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wide">
+                    {docName}
                   </div>
                 )}
               </div>
 
-              {/* Total */}
-              <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4 mt-2">
-                <span className="text-sm font-bold text-emerald-700 uppercase">Total Cobrado</span>
-                <span className="text-3xl font-black text-emerald-600 font-mono">S/ {finalTotal.toFixed(2)}</span>
+              {/* Bloque 2: Desglose de Pago */}
+              <div className="space-y-2">
+                <span className="text-[11px] font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">
+                  Desglose de Pago
+                </span>
+                <div className="bg-slate-50 dark:bg-slate-900/60 rounded-xl p-3.5 border border-slate-200/80 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800">
+                  {PAYMENT_METHODS.filter(m => parseFloat(paymentAmounts[m.id]) > 0).map(m => (
+                    <div key={m.id} className="flex justify-between items-center py-1.5 text-sm">
+                      <span className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-2">
+                        {m.label}
+                        {m.id === "IZIPAY" && izipayFee > 0 && (
+                          <span className="text-[10px] text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full font-extrabold border border-amber-200">
+                            +S/ {izipayFee.toFixed(2)} ({izipayRate}%)
+                          </span>
+                        )}
+                      </span>
+                      <span className="font-mono font-bold text-slate-900 dark:text-white">
+                        S/ {parseFloat(paymentAmounts[m.id]).toFixed(2)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Bloque 3: Total Cobrado */}
+              <div className="flex items-center justify-between bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-xl p-4">
+                <span className="text-xs font-bold text-emerald-800 dark:text-emerald-300 uppercase tracking-wider">
+                  Total Cobrado
+                </span>
+                <span className="text-2xl font-black text-emerald-700 dark:text-emerald-400 font-mono">
+                  S/ {finalTotal.toFixed(2)}
+                </span>
               </div>
             </div>
 

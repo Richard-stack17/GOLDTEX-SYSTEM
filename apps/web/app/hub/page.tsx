@@ -2,11 +2,12 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from "next/link";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@goltex/ui";
+import { Card, CardDescription, CardHeader, CardTitle } from "@goltex/ui";
 import { ShoppingCart, PackageSearch, BarChart3, Clock, FileSpreadsheet, Banknote, UserCircle, Sun, Moon, Contact, Users, ScrollText, Settings } from "lucide-react";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { useRole } from "../context/RoleContext";
 import { useTheme } from "../context/ThemeContext";
+import StoreSwitcher from "../components/StoreSwitcher";
 import { useRouter } from "next/navigation";
 
 
@@ -38,11 +39,23 @@ export default function HubPage() {
 
   if (!isHydrated || !role || !username) return null;
 
+  const hasAnyModuleAccess = Boolean(
+    permissions?.access_pos ||
+    permissions?.access_inventory ||
+    permissions?.access_dashboard ||
+    permissions?.access_caja ||
+    permissions?.access_contabilidad ||
+    permissions?.access_clientes ||
+    permissions?.access_personal ||
+    permissions?.access_proformas ||
+    permissions?.access_settings
+  );
+
   return (
     <div className="min-h-screen p-8 max-w-[1400px] mx-auto space-y-12">
       <header className="flex justify-between items-end border-b border-white/10 pb-6">
         <div>
-          <h1 className="text-4xl font-bold tracking-tight mb-2">Hola, {username || role} 👋</h1>
+          <h1 className="text-4xl font-bold tracking-tight mb-2">Hola, {username || role}</h1>
           <p className="text-muted-foreground text-lg">¿Qué deseas hacer hoy?</p>
         </div>
         <div className="flex flex-col items-end gap-3">
@@ -51,6 +64,8 @@ export default function HubPage() {
               <Clock className="w-4 h-4" />
               <span suppressHydrationWarning>{isMounted ? currentDateTime : ''}</span>
             </div>
+            {/* Store Switcher */}
+            <StoreSwitcher />
             {/* Theme Toggle */}
             <button
               onClick={toggleTheme}
@@ -70,256 +85,167 @@ export default function HubPage() {
         </div>
       </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-6 gap-6">
-        {/* POS - Acceso: access_pos */}
-        {permissions?.access_pos ? (
-          <Link href="/pos" className="block group">
-            <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-blue-500/50 hover:shadow-[0_0_30px_rgba(59,130,246,0.2)]">
-              <CardHeader>
-                <div className="w-14 h-14 rounded-xl bg-blue-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                  <ShoppingCart className="w-7 h-7 text-blue-400" />
-                </div>
-              <CardTitle className="text-2xl">Punto 1</CardTitle>
-                <CardDescription className="text-base mt-2">
-                  Catálogo de telas, proformas, carrito de compras y facturación rápida.
-                </CardDescription>
-              </CardHeader>
-            </Card>
-          </Link>
-        ) : (
-          <Card className="h-full bg-glass/50 border-white/5 opacity-50 cursor-not-allowed">
-            <CardHeader>
-              <div className="w-14 h-14 rounded-xl bg-gray-500/20 flex items-center justify-center mb-4">
-                <ShoppingCart className="w-7 h-7 text-gray-500" />
-              </div>
-              <CardTitle className="text-2xl text-gray-400">Punto 1</CardTitle>
-              <CardDescription className="text-base mt-2 text-gray-500">
-                Acceso denegado (Requiere permiso de Punto de Venta).
-              </CardDescription>
-            </CardHeader>
-          </Card>
-        )}
+      {!hasAnyModuleAccess ? (
+        <div className="text-center py-16 bg-glass/30 rounded-2xl border border-white/10 p-8 space-y-3">
+          <p className="text-lg font-bold text-muted-foreground">No cuentas con módulos asignados actualmente.</p>
+          <p className="text-sm text-muted-foreground/70">Comunícate con un Administrador para habilitar los permisos de tu cuenta.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {/* POS - Acceso: access_pos */}
+          {Boolean(permissions?.access_pos) && (
+            <Link href="/pos" className="block group">
+              <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-blue-500/50 hover:shadow-[0_0_30px_rgba(59,130,246,0.2)]">
+                <CardHeader>
+                  <div className="w-14 h-14 rounded-xl bg-blue-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                    <ShoppingCart className="w-7 h-7 text-blue-400" />
+                  </div>
+                  <CardTitle className="text-2xl">Punto 1</CardTitle>
+                  <CardDescription className="text-base mt-2">
+                    Catálogo de telas, proformas, carrito de compras y facturación rápida.
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+            </Link>
+          )}
 
-        {/* Inventario - Acceso: access_inventory */}
-        {permissions?.access_inventory ? (
-          <Link href="/inventario" className="block group">
-            <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-purple-500/50 hover:shadow-[0_0_30px_rgba(168,85,186,0.2)]">
-              <CardHeader>
-                <div className="w-14 h-14 rounded-xl bg-purple-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                  <PackageSearch className="w-7 h-7 text-purple-400" />
-                </div>
-                <CardTitle className="text-2xl">Catálogo & Servicios</CardTitle>
-                <CardDescription className="text-base mt-2">
-                  Gestión de stock, control de productos, y alertas de desabastecimiento.
-                </CardDescription>
-              </CardHeader>
-            </Card>
-          </Link>
-        ) : (
-          <Card className="h-full bg-glass/50 border-white/5 opacity-50 cursor-not-allowed">
-            <CardHeader>
-              <div className="w-14 h-14 rounded-xl bg-gray-500/20 flex items-center justify-center mb-4">
-                <PackageSearch className="w-7 h-7 text-gray-500" />
-              </div>
-              <CardTitle className="text-2xl text-gray-400">Catálogo & Servicios</CardTitle>
-              <CardDescription className="text-base mt-2 text-gray-500">
-                Acceso denegado (Requiere permiso de Inventario).
-              </CardDescription>
-            </CardHeader>
-          </Card>
-        )}
+          {/* Inventario - Acceso: access_inventory */}
+          {Boolean(permissions?.access_inventory) && (
+            <Link href="/inventario" className="block group">
+              <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-purple-500/50 hover:shadow-[0_0_30px_rgba(168,85,186,0.2)]">
+                <CardHeader>
+                  <div className="w-14 h-14 rounded-xl bg-purple-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                    <PackageSearch className="w-7 h-7 text-purple-400" />
+                  </div>
+                  <CardTitle className="text-2xl">Catálogo & Servicios</CardTitle>
+                  <CardDescription className="text-base mt-2">
+                    Gestión de stock, control de productos, y alertas de desabastecimiento.
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+            </Link>
+          )}
 
-        {/* Dashboard - Acceso: access_dashboard */}
-        {permissions?.access_dashboard ? (
-          <Link href="/dashboard" className="block group">
-            <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-emerald-500/50 hover:shadow-[0_0_30px_rgba(16,185,129,0.2)]">
-              <CardHeader>
-                <div className="w-14 h-14 rounded-xl bg-emerald-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                  <BarChart3 className="w-7 h-7 text-emerald-400" />
-                </div>
-                <CardTitle className="text-2xl">Dashboard</CardTitle>
-                <CardDescription className="text-base mt-2">
-                  Métricas del negocio, resumen de ventas diarias y proyecciones.
-                </CardDescription>
-              </CardHeader>
-            </Card>
-          </Link>
-        ) : (
-          <Card className="h-full bg-glass/50 border-white/5 opacity-50 cursor-not-allowed">
-            <CardHeader>
-              <div className="w-14 h-14 rounded-xl bg-gray-500/20 flex items-center justify-center mb-4">
-                <BarChart3 className="w-7 h-7 text-gray-500" />
-              </div>
-              <CardTitle className="text-2xl text-gray-400">Dashboard</CardTitle>
-              <CardDescription className="text-base mt-2 text-gray-500">
-                Acceso denegado (Requiere permiso de Dashboard).
-              </CardDescription>
-            </CardHeader>
-          </Card>
-        )}
+          {/* Dashboard - Acceso: access_dashboard */}
+          {Boolean(permissions?.access_dashboard) && (
+            <Link href="/dashboard" className="block group">
+              <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-emerald-500/50 hover:shadow-[0_0_30px_rgba(16,185,129,0.2)]">
+                <CardHeader>
+                  <div className="w-14 h-14 rounded-xl bg-emerald-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                    <BarChart3 className="w-7 h-7 text-emerald-400" />
+                  </div>
+                  <CardTitle className="text-2xl">Dashboard</CardTitle>
+                  <CardDescription className="text-base mt-2">
+                    Métricas del negocio, resumen de ventas diarias y proyecciones.
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+            </Link>
+          )}
 
-        {/* Caja - Acceso: access_caja */}
-        {permissions?.access_caja ? (
-          <Link href="/caja" className="block group">
-            <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-cyan-500/50 hover:shadow-[0_0_30px_rgba(6,182,212,0.2)]">
-              <CardHeader>
-                <div className="w-14 h-14 rounded-xl bg-cyan-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                  <Banknote className="w-7 h-7 text-cyan-400" />
-                </div>
-                <CardTitle className="text-2xl">Caja</CardTitle>
-                <CardDescription className="text-base mt-2">
-                  Liquidación de tickets pendientes del día, control de pasarela de pagos y cierre rápido.
-                </CardDescription>
-              </CardHeader>
-            </Card>
-          </Link>
-        ) : (
-          <Card className="h-full bg-glass/50 border-white/5 opacity-50 cursor-not-allowed">
-            <CardHeader>
-              <div className="w-14 h-14 rounded-xl bg-gray-500/20 flex items-center justify-center mb-4">
-                <Banknote className="w-7 h-7 text-gray-500" />
-              </div>
-              <CardTitle className="text-2xl text-gray-400">Caja</CardTitle>
-              <CardDescription className="text-base mt-2 text-gray-500">
-                Acceso denegado.
-              </CardDescription>
-            </CardHeader>
-          </Card>
-        )}
+          {/* Caja - Acceso: access_caja */}
+          {Boolean(permissions?.access_caja) && (
+            <Link href="/caja" className="block group">
+              <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-cyan-500/50 hover:shadow-[0_0_30px_rgba(6,182,212,0.2)]">
+                <CardHeader>
+                  <div className="w-14 h-14 rounded-xl bg-cyan-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                    <Banknote className="w-7 h-7 text-cyan-400" />
+                  </div>
+                  <CardTitle className="text-2xl">Caja</CardTitle>
+                  <CardDescription className="text-base mt-2">
+                    Liquidación de tickets pendientes del día, control de pasarela de pagos y cierre rápido.
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+            </Link>
+          )}
 
-        {/* Contabilidad - Acceso: access_contabilidad */}
-        {permissions?.access_contabilidad ? (
-          <Link href="/contabilidad" className="block group w-full">
-            <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-amber-500/50 hover:shadow-[0_0_30px_rgba(245,158,11,0.2)] cursor-pointer">
-              <CardHeader>
-                <div className="w-14 h-14 rounded-xl bg-amber-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                  <FileSpreadsheet className="w-7 h-7 text-amber-400" />
-                </div>
-                <CardTitle className="text-2xl">Contabilidad</CardTitle>
-                <CardDescription className="text-base mt-2">
-                  Migración de historial, importación y exportación de archivos contables.
-                </CardDescription>
-              </CardHeader>
-            </Card>
-          </Link>
-        ) : (
-          <Card className="h-full bg-glass/50 border-white/5 opacity-50 cursor-not-allowed">
-            <CardHeader>
-              <div className="w-14 h-14 rounded-xl bg-gray-500/20 flex items-center justify-center mb-4">
-                <FileSpreadsheet className="w-7 h-7 text-gray-500" />
-              </div>
-              <CardTitle className="text-2xl text-gray-400">Contabilidad</CardTitle>
-              <CardDescription className="text-base mt-2 text-gray-500">
-                Acceso denegado.
-              </CardDescription>
-            </CardHeader>
-          </Card>
-        )}
+          {/* Contabilidad - Acceso: access_contabilidad */}
+          {Boolean(permissions?.access_contabilidad) && (
+            <Link href="/contabilidad" className="block group w-full">
+              <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-amber-500/50 hover:shadow-[0_0_30px_rgba(245,158,11,0.2)] cursor-pointer">
+                <CardHeader>
+                  <div className="w-14 h-14 rounded-xl bg-amber-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                    <FileSpreadsheet className="w-7 h-7 text-amber-400" />
+                  </div>
+                  <CardTitle className="text-2xl">Contabilidad</CardTitle>
+                  <CardDescription className="text-base mt-2">
+                    Migración de historial, importación y exportación de archivos contables.
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+            </Link>
+          )}
 
-        {/* Clientes Frecuentes - Acceso: access_clientes */}
-        {permissions?.access_clientes ? (
-          <Link href="/clientes" className="block group w-full">
-            <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-pink-500/50 hover:shadow-[0_0_30px_rgba(236,72,153,0.2)] cursor-pointer">
-              <CardHeader>
-                <div className="w-14 h-14 rounded-xl bg-pink-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                  <Contact className="w-7 h-7 text-pink-400" />
-                </div>
-                <CardTitle className="text-2xl">Clientes Frecuentes</CardTitle>
-                <CardDescription className="text-base mt-2">
-                  Gestión de clientes caseros, registro de RUC/DNI y mantenimiento de historial VIP.
-                </CardDescription>
-              </CardHeader>
-            </Card>
-          </Link>
-        ) : (
-          <Card className="h-full bg-glass/50 border-white/5 opacity-50 cursor-not-allowed">
-            <CardHeader>
-              <div className="w-14 h-14 rounded-xl bg-gray-500/20 flex items-center justify-center mb-4">
-                <Contact className="w-7 h-7 text-gray-500" />
-              </div>
-              <CardTitle className="text-2xl text-gray-400">Clientes Frecuentes</CardTitle>
-              <CardDescription className="text-base mt-2 text-gray-500">
-                Acceso denegado.
-              </CardDescription>
-            </CardHeader>
-          </Card>
-        )}
+          {/* Clientes Frecuentes - Acceso: access_clientes */}
+          {Boolean(permissions?.access_clientes) && (
+            <Link href="/clientes" className="block group w-full">
+              <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-pink-500/50 hover:shadow-[0_0_30px_rgba(236,72,153,0.2)] cursor-pointer">
+                <CardHeader>
+                  <div className="w-14 h-14 rounded-xl bg-pink-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                    <Contact className="w-7 h-7 text-pink-400" />
+                  </div>
+                  <CardTitle className="text-2xl">Clientes Frecuentes</CardTitle>
+                  <CardDescription className="text-base mt-2">
+                    Gestión de clientes caseros, registro de RUC/DNI y mantenimiento de historial VIP.
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+            </Link>
+          )}
 
-        {/* Personal - Acceso: access_personal */}
-        {permissions?.access_personal ? (
-          <Link href="/admin/personal" className="block group">
-            <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-indigo-500/50 hover:shadow-[0_0_30px_rgba(99,102,241,0.2)]">
-              <CardHeader>
-                <div className="w-14 h-14 rounded-xl bg-indigo-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                  <Users className="w-7 h-7 text-indigo-400" />
-                </div>
-                <CardTitle className="text-2xl">Personal</CardTitle>
-                <CardDescription className="text-base mt-2">
-                  Gestión de empleados, control de accesos y roles del sistema.
-                </CardDescription>
-              </CardHeader>
-            </Card>
-          </Link>
-        ) : (
-          <Card className="h-full bg-glass/50 border-white/5 opacity-50 cursor-not-allowed">
-            <CardHeader>
-              <div className="w-14 h-14 rounded-xl bg-gray-500/20 flex items-center justify-center mb-4">
-                <Users className="w-7 h-7 text-gray-500" />
-              </div>
-              <CardTitle className="text-2xl text-gray-400">Personal</CardTitle>
-              <CardDescription className="text-base mt-2 text-gray-500">
-                Acceso denegado (Requiere permiso de Gestión de Personal).
-              </CardDescription>
-            </CardHeader>
-          </Card>
-        )}
+          {/* Personal - Acceso: access_personal */}
+          {Boolean(permissions?.access_personal) && (
+            <Link href="/admin/personal" className="block group">
+              <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-indigo-500/50 hover:shadow-[0_0_30px_rgba(99,102,241,0.2)]">
+                <CardHeader>
+                  <div className="w-14 h-14 rounded-xl bg-indigo-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                    <Users className="w-7 h-7 text-indigo-400" />
+                  </div>
+                  <CardTitle className="text-2xl">Personal</CardTitle>
+                  <CardDescription className="text-base mt-2">
+                    Gestión de empleados, control de accesos y roles del sistema.
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+            </Link>
+          )}
 
-        {/* Historial de Proformas - Acceso: access_proformas */}
-        {permissions?.access_proformas ? (
-          <Link href="/historial-proformas" className="block group">
-            <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-teal-500/50 hover:shadow-[0_0_30px_rgba(20,184,166,0.2)]">
-              <CardHeader>
-                <div className="w-14 h-14 rounded-xl bg-teal-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                  <ScrollText className="w-7 h-7 text-teal-400" />
-                </div>
-                <CardTitle className="text-2xl">Historial</CardTitle>
-                <CardDescription className="text-base mt-2">
-                  Historial completo de proformas, detalles de ítems y anulación.
-                </CardDescription>
-              </CardHeader>
-            </Card>
-          </Link>
-        ) : (
-          <Card className="h-full bg-glass/50 border-white/5 opacity-50 cursor-not-allowed">
-            <CardHeader>
-              <div className="w-14 h-14 rounded-xl bg-gray-500/20 flex items-center justify-center mb-4">
-                <ScrollText className="w-7 h-7 text-gray-500" />
-              </div>
-              <CardTitle className="text-2xl text-gray-400">Historial</CardTitle>
-              <CardDescription className="text-base mt-2 text-gray-500">
-                Acceso denegado (Requiere permiso de Historial).
-              </CardDescription>
-            </CardHeader>
-          </Card>
-        )}
+          {/* Historial de Proformas - Acceso: access_proformas */}
+          {Boolean(permissions?.access_proformas) && (
+            <Link href="/historial-proformas" className="block group">
+              <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-teal-500/50 hover:shadow-[0_0_30px_rgba(20,184,166,0.2)]">
+                <CardHeader>
+                  <div className="w-14 h-14 rounded-xl bg-teal-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                    <ScrollText className="w-7 h-7 text-teal-400" />
+                  </div>
+                  <CardTitle className="text-2xl">Historial</CardTitle>
+                  <CardDescription className="text-base mt-2">
+                    Historial completo de proformas, detalles de ítems y anulación.
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+            </Link>
+          )}
 
-        {/* Configuración - Acceso: access_settings */}
-        {permissions?.access_settings && (
-          <Link href="/configuracion" className="block group">
-            <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-emerald-500/50 hover:shadow-[0_0_30px_rgba(16,185,129,0.2)]">
-              <CardHeader>
-                <div className="w-14 h-14 rounded-xl bg-emerald-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                  <Settings className="w-7 h-7 text-emerald-400" />
-                </div>
-                <CardTitle className="text-2xl">Configuración</CardTitle>
-                <CardDescription className="text-base mt-2">
-                  Gestión de impresoras, hardware y ajustes generales del sistema.
-                </CardDescription>
-              </CardHeader>
-            </Card>
-          </Link>
-        )}
-      </div>
+          {/* Configuración - Acceso: access_settings */}
+          {Boolean(permissions?.access_settings) && (
+            <Link href="/configuracion" className="block group">
+              <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-emerald-500/50 hover:shadow-[0_0_30px_rgba(16,185,129,0.2)]">
+                <CardHeader>
+                  <div className="w-14 h-14 rounded-xl bg-emerald-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                    <Settings className="w-7 h-7 text-emerald-400" />
+                  </div>
+                  <CardTitle className="text-2xl">Configuración</CardTitle>
+                  <CardDescription className="text-base mt-2">
+                    Gestión de impresoras, hardware y ajustes generales del sistema.
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+            </Link>
+          )}
+        </div>
+      )}
 
       <ConfirmDialog
         isOpen={showLogoutConfirm}

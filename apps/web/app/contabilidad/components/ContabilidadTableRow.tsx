@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { Loader2 } from 'lucide-react';
 
 export default function ContabilidadTableRow({
   row,
@@ -17,11 +18,12 @@ export default function ContabilidadTableRow({
     comentario: row.COMENTARIO || ''
   };
 
-  const [rowBuffer, setRowBuffer] = React.useState(initialBuffer);
-  const [isFocusedRow, setIsFocusedRow] = React.useState(false);
+  const [rowBuffer, setRowBuffer] = useState(initialBuffer);
+  const [isFocusedRow, setIsFocusedRow] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const isIzipay = row.DETALLE?.includes('IZIPAY');
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!isFocusedRow) {
       setRowBuffer(initialBuffer);
     }
@@ -41,27 +43,34 @@ export default function ContabilidadTableRow({
     }, 0);
   };
 
+  // Instant real-time sum checking
+  const bcpVal = Number(rowBuffer.bcp) || 0;
+  const bbvaVal = Number(rowBuffer.bbva) || 0;
+  const efecVal = Number(rowBuffer.efectivo) || 0;
+  const currentSum = Math.round((bcpVal + bbvaVal + efecVal) * 100) / 100;
+  const totalVal = Math.round((Number(row.TOTAL) || 0) * 100) / 100;
+  const isMismatch = isFocusedRow && (Math.abs(currentSum - totalVal) >= 0.01);
+
   const handleKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     const targetInput = e.currentTarget;
     if (e.key === 'Enter') {
       e.preventDefault();
       
-      const bcp = Number(rowBuffer.bcp) || 0;
-      const bbva = Number(rowBuffer.bbva) || 0;
-      const efectivo = Number(rowBuffer.efectivo) || 0;
-      
-      const sumaPagos = bcp + bbva + efectivo;
-      
-      if (sumaPagos.toFixed(2) !== Number(row.TOTAL).toFixed(2)) {
+      if (isMismatch) {
         showToast("La suma de los pagos debe ser exactamente igual al total del ticket", "error");
         setRowBuffer(initialBuffer);
         targetInput?.blur();
         return;
       }
 
-      const success = await onSaveRow(row.id, rowBuffer, isIzipay);
-      if (!success) {
-        setRowBuffer(initialBuffer);
+      setIsSaving(true);
+      try {
+        const success = await onSaveRow(row.id, rowBuffer, isIzipay);
+        if (!success) {
+          setRowBuffer(initialBuffer);
+        }
+      } finally {
+        setIsSaving(false);
       }
       targetInput?.blur();
     }
@@ -76,14 +85,21 @@ export default function ContabilidadTableRow({
     setRowBuffer(prev => ({ ...prev, [field]: val }));
   };
 
+  const mismatchInputCls = isMismatch
+    ? 'border-rose-400 focus:border-rose-500 bg-rose-50/60 text-rose-900'
+    : '';
+
   return (
-    <tr id={`contabilidad-row-${row.id}`} className="hover:bg-indigo-50/30 transition-colors font-bold text-gray-800" onFocus={handleFocus} onBlur={handleBlur}>
-      <td className="px-4 py-1.5 whitespace-nowrap font-mono text-gray-600">{displayDate(row.FECHA)}</td>
+    <tr id={`contabilidad-row-${row.id}`} className={`transition-colors font-bold text-gray-800 ${isSaving ? 'bg-amber-50/50 opacity-70' : 'hover:bg-indigo-50/30'}`} onFocus={handleFocus} onBlur={handleBlur}>
+      <td className="px-4 py-1.5 whitespace-nowrap font-mono text-gray-600 flex items-center gap-1.5">
+        {isSaving && <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600" />}
+        <span>{displayDate(row.FECHA)}</span>
+      </td>
       <td className="px-2 py-1 whitespace-nowrap min-w-[140px]">
-        <input type="text" value={rowBuffer.documento} onChange={e => handleChange('documento', e.target.value)} onKeyDown={handleKeyDown} className={`${inlineCellCls} font-mono`} />
+        <input disabled={isSaving} type="text" placeholder="Asignar doc..." value={rowBuffer.documento} onChange={e => handleChange('documento', e.target.value)} onKeyDown={handleKeyDown} className={`${inlineCellCls} font-mono`} />
       </td>
       <td className="px-2 py-1 whitespace-nowrap min-w-[180px]">
-        <input type="text" list="clientes-list" value={rowBuffer.nombre} onChange={e => handleChange('nombre', e.target.value)} onKeyDown={handleKeyDown} className={inlineCellCls} />
+        <input disabled={isSaving} type="text" list="clientes-list" value={rowBuffer.nombre} onChange={e => handleChange('nombre', e.target.value)} onKeyDown={handleKeyDown} className={inlineCellCls} />
       </td>
       <td className="px-4 py-1.5 whitespace-nowrap">
         <span className={`text-xs font-extrabold px-2 py-0.5 rounded-md ${
@@ -96,28 +112,40 @@ export default function ContabilidadTableRow({
       </td>
       <td className="px-2 py-1 whitespace-nowrap min-w-[100px]">
         <input 
+          disabled={isSaving}
           type="number" step="0.01" placeholder="0.00" 
           value={rowBuffer.bbva} 
-          onChange={e => {
-            if (isIzipay) return;
-            handleChange('bbva', e.target.value);
-          }} 
+          onChange={e => handleChange('bbva', e.target.value)} 
           onKeyDown={handleKeyDown} 
-          disabled={isIzipay}
-          className={`${inlineCellCls} text-right text-blue-700 [&::-webkit-inner-spin-button]:appearance-none ${isIzipay ? 'bg-gray-100 cursor-not-allowed opacity-50' : ''}`}
+          className={`${inlineCellCls} text-right text-blue-700 [&::-webkit-inner-spin-button]:appearance-none ${mismatchInputCls}`}
         />
       </td>
       <td className="px-2 py-1 whitespace-nowrap min-w-[100px]">
-        <input type="number" step="0.01" placeholder="0.00" value={rowBuffer.bcp} onChange={e => handleChange('bcp', e.target.value)} onKeyDown={handleKeyDown} className={`${inlineCellCls} text-right text-orange-700 [&::-webkit-inner-spin-button]:appearance-none`}/>
+        <input 
+          disabled={isSaving || isIzipay} 
+          readOnly={isIzipay}
+          type="number" step="0.01" placeholder="0.00" 
+          value={rowBuffer.bcp} 
+          onChange={e => {
+            if (isIzipay) return;
+            handleChange('bcp', e.target.value);
+          }} 
+          onKeyDown={handleKeyDown} 
+          className={`${inlineCellCls} text-right text-orange-700 [&::-webkit-inner-spin-button]:appearance-none ${isIzipay ? 'bg-slate-100 text-slate-500 cursor-not-allowed border-slate-200 opacity-75 font-semibold' : ''} ${mismatchInputCls}`}
+        />
       </td>
       <td className="px-2 py-1 whitespace-nowrap min-w-[100px]">
-        <input type="number" step="0.01" placeholder="0.00" value={rowBuffer.efectivo} onChange={e => handleChange('efectivo', e.target.value)} onKeyDown={handleKeyDown} className={`${inlineCellCls} text-right text-green-700 [&::-webkit-inner-spin-button]:appearance-none`}/>
+        <input disabled={isSaving} type="number" step="0.01" placeholder="0.00" value={rowBuffer.efectivo} onChange={e => handleChange('efectivo', e.target.value)} onKeyDown={handleKeyDown} className={`${inlineCellCls} text-right text-green-700 [&::-webkit-inner-spin-button]:appearance-none ${mismatchInputCls}`}/>
       </td>
-      <td className="px-4 py-1.5 whitespace-nowrap font-black text-right text-indigo-700 font-mono min-w-[100px]">
-        {row.TOTAL === 0 ? "—" : `S/ ${row.TOTAL.toFixed(2)}`}
+      <td className="px-4 py-1.5 whitespace-nowrap font-black text-right font-mono min-w-[100px]">
+        {isMismatch ? (
+          <span className="text-rose-600 text-xs animate-pulse">S/ {currentSum.toFixed(2)}</span>
+        ) : (
+          <span className="text-indigo-700">{row.TOTAL === 0 ? "—" : `S/ ${row.TOTAL.toFixed(2)}`}</span>
+        )}
       </td>
       <td className="px-2 py-1 whitespace-nowrap min-w-[160px]">
-        <input type="text" value={rowBuffer.comentario} onChange={e => handleChange('comentario', e.target.value)} onKeyDown={handleKeyDown} className={inlineCellCls} placeholder="Opcional..." />
+        <input disabled={isSaving} type="text" value={rowBuffer.comentario} onChange={e => handleChange('comentario', e.target.value)} onKeyDown={handleKeyDown} className={inlineCellCls} placeholder="Opcional..." />
       </td>
     </tr>
   );

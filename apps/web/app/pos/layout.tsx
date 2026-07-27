@@ -2,13 +2,14 @@
 
 import React, { useEffect, useState } from "react";
 import { useRole } from "../context/RoleContext";
+import { AccessDeniedView } from "../components/AccessDeniedView";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { syncCatalog, db } from "../lib/localDb";
 import { supabase } from "../lib/supabase";
 
 export default function PosLayout({ children }: { children: React.ReactNode }) {
-  const { role, username, isHydrated } = useRole();
+  const { role, username, isHydrated, permissions } = useRole();
   const router = useRouter();
   const [isChecking, setIsChecking] = useState(true);
 
@@ -65,6 +66,10 @@ export default function PosLayout({ children }: { children: React.ReactNode }) {
         <p className="text-muted-foreground font-medium animate-pulse">Cargando Sistema POS...</p>
       </div>
     );
+  }
+
+  if (!permissions?.access_pos) {
+    return <AccessDeniedView moduleName="Punto de Venta (POS)" />;
   }
 
   return (

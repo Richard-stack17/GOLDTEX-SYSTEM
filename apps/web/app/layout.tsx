@@ -2,6 +2,7 @@ import "@goltex/ui/globals.css";
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { RoleProvider } from "./context/RoleContext";
+import { StoreProvider } from "./context/StoreContext";
 import { ThemeProvider } from "./context/ThemeContext";
 import { HydrationGate } from "./context/HydrationGate";
 
@@ -25,12 +26,14 @@ export default function RootLayout({
       <body className={`${inter.className} min-h-screen bg-background antialiased overflow-y-scroll`} suppressHydrationWarning>
         <ThemeProvider>
           <RoleProvider>
-            {/* HydrationGate muestra un spinner mientras localStorage
-                no haya sido leído (isHydrated=false). Evita parpadeos
-                de UI dependientes del rol y errores de hidratación. */}
-            <HydrationGate>
-              {children}
-            </HydrationGate>
+            <StoreProvider>
+              {/* HydrationGate muestra un spinner mientras localStorage
+                  no haya sido leído (isHydrated=false). Evita parpadeos
+                  de UI dependientes del rol y errores de hidratación. */}
+              <HydrationGate>
+                {children}
+              </HydrationGate>
+            </StoreProvider>
           </RoleProvider>
         </ThemeProvider>
       </body>

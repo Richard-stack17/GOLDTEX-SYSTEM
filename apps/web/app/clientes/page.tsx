@@ -5,27 +5,40 @@ import { supabase } from "../lib/supabase";
 import { Users, Search, Plus, Edit, Trash2, ArrowLeft } from "lucide-react";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import Link from "next/link";
+import { useRole } from "../context/RoleContext";
+import { useStore } from "../context/StoreContext";
+import StoreSwitcher from "../components/StoreSwitcher";
+import { AccessDeniedView } from "../components/AccessDeniedView";
 
 type Customer = {
   id: string;
   business_name: string;
-  ruc: string;
+  doc_number: string;
   document_type: string;
   is_frequent: boolean;
+  store_id?: string | null;
   created_at?: string;
 };
 
 export default function ClientesPage() {
+  const { role, isHydrated, permissions } = useRole();
+  const { activeStoreId, availableStores } = useStore();
+
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+
+  if (!isHydrated) return null;
+  if (!permissions?.access_clientes) {
+    return <AccessDeniedView moduleName="Clientes Frecuentes" />;
+  }
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [customerToDelete, setCustomerToDelete] = useState<Customer | null>(null);
   const [formData, setFormData] = useState({
     business_name: "",
-    ruc: "",
+    doc_number: "",
     document_type: "DNI",
   });
   const [isSaving, setIsSaving] = useState(false);
@@ -33,14 +46,15 @@ export default function ClientesPage() {
 
   useEffect(() => {
     fetchCustomers();
-  }, []);
+  }, [activeStoreId]);
 
   const fetchCustomers = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from("customers")
-      .select("*")
-      .order("created_at", { ascending: false });
+    let query = supabase.from("customers").select("*").order("created_at", { ascending: false });
+    if (activeStoreId) {
+      query = query.or(`store_id.eq.${activeStoreId},store_id.is.null`);
+    }
+    const { data, error } = await query;
 
     if (!error && data) {
       setCustomers(data as Customer[]);
@@ -50,7 +64,7 @@ export default function ClientesPage() {
 
   const filteredCustomers = customers.filter(c =>
     c.business_name.toLowerCase().includes(search.toLowerCase()) ||
-    (c.ruc && c.ruc.includes(search))
+    (c.doc_number && c.doc_number.includes(search))
   );
 
   const handleOpenModal = (customer?: Customer) => {
@@ -59,26 +73,26 @@ export default function ClientesPage() {
       setEditingCustomer(customer);
       setFormData({
         business_name: customer.business_name || "",
-        ruc: customer.ruc || "",
-        document_type: customer.document_type || (customer.ruc?.length === 11 ? "RUC" : "DNI"),
+        doc_number: customer.doc_number || "",
+        document_type: customer.document_type || (customer.doc_number?.length === 11 ? "RUC" : "DNI"),
       });
     } else {
       setEditingCustomer(null);
-      setFormData({ business_name: "", ruc: "", document_type: "DNI" });
+      setFormData({ business_name: "", doc_number: "", document_type: "DNI" });
     }
     setIsModalOpen(true);
   };
 
   const handleSave = async () => {
     setError(null);
-    const { business_name, ruc, document_type } = formData;
+    const { business_name, doc_number, document_type } = formData;
 
     if (business_name.trim().length < 3) {
       setError("La Razón Social debe tener al menos 3 caracteres.");
       return;
     }
 
-    const cleanDoc = ruc.replace(/\D/g, "");
+    const cleanDoc = doc_number.replace(/\D/g, "");
     if (document_type === "DNI" && cleanDoc.length !== 8) {
       setError("El DNI debe tener exactamente 8 dígitos.");
       return;
@@ -91,9 +105,10 @@ export default function ClientesPage() {
     setIsSaving(true);
     const payload = {
       business_name: business_name.trim().toUpperCase(),
-      ruc: cleanDoc,
+      doc_number: cleanDoc,
       document_type,
       is_frequent: true,
+      store_id: activeStoreId,
     };
 
     try {
@@ -151,12 +166,17 @@ export default function ClientesPage() {
               </div>
             </div>
           </div>
-          <button
-            onClick={() => handleOpenModal()}
-            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-sm flex items-center gap-2 shadow-sm transition-colors"
-          >
-            <Plus className="w-4 h-4" /> Nuevo Cliente
-          </button>
+          <div className="flex items-center gap-4">
+            <StoreSwitcher />
+            {Boolean(permissions?.customers_create) && (
+              <button
+                onClick={() => handleOpenModal()}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-sm flex items-center gap-2 shadow-sm transition-colors"
+              >
+                <Plus className="w-4 h-4" /> Nuevo Cliente
+              </button>
+            )}
+          </div>
         </header>
 
         <div className="p-8 max-w-5xl mx-auto space-y-6">
@@ -178,22 +198,23 @@ export default function ClientesPage() {
                   <th className="px-6 py-4 font-bold">Documento</th>
                   <th className="px-6 py-4 font-bold">Razón Social / Nombre</th>
                   <th className="px-6 py-4 font-bold text-center">Tipo</th>
+                  <th className="px-6 py-4 font-bold text-center">Tienda</th>
                   <th className="px-6 py-4 font-bold text-right">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {loading ? (
                   <tr>
-                    <td colSpan={4} className="px-6 py-12 text-center text-gray-500">Cargando clientes...</td>
+                    <td colSpan={5} className="px-6 py-12 text-center text-gray-500">Cargando clientes...</td>
                   </tr>
                 ) : filteredCustomers.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-6 py-12 text-center text-muted-foreground">No se encontraron clientes registrados en la base de datos.</td>
+                    <td colSpan={5} className="px-6 py-12 text-center text-muted-foreground">No se encontraron clientes registrados en la base de datos.</td>
                   </tr>
                 ) : (
                   filteredCustomers.map(c => (
                     <tr key={c.id} className="hover:bg-gray-50/50 transition-colors">
-                      <td className="px-6 py-4 font-mono font-medium text-gray-600">{c.ruc || "---"}</td>
+                      <td className="px-6 py-4 font-mono font-medium text-gray-600">{c.doc_number || "---"}</td>
                       <td className="px-6 py-4 font-bold text-gray-900">{c.business_name}</td>
                       <td className="px-6 py-4 text-center">
                         <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
@@ -202,13 +223,30 @@ export default function ClientesPage() {
                           {c.document_type || "DNI"}
                         </span>
                       </td>
+                      <td className="px-6 py-4 text-center">
+                        {c.store_id && availableStores.find(s => s.id === c.store_id) ? (
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap bg-blue-50 text-blue-700 border border-blue-200">
+                            {availableStores.find(s => s.id === c.store_id)?.name}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap bg-purple-50 text-purple-700 border border-purple-200">
+                            Acceso Global
+                          </span>
+                        )}
+                      </td>
                       <td className="px-6 py-4 text-right">
-                        <button onClick={() => handleOpenModal(c)} className="p-2 text-gray-400 hover:text-indigo-600 transition-colors">
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        <button onClick={() => handleDelete(c)} className="p-2 text-gray-400 hover:text-red-600 transition-colors ml-1">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center justify-end gap-1">
+                          {Boolean(permissions?.customers_edit) && (
+                            <button onClick={() => handleOpenModal(c)} className="p-2 text-gray-400 hover:text-indigo-600 transition-colors" title="Editar cliente">
+                              <Edit className="w-4 h-4" />
+                            </button>
+                          )}
+                          {Boolean(permissions?.customers_delete) && (
+                            <button onClick={() => handleDelete(c)} className="p-2 text-gray-400 hover:text-red-600 transition-colors" title="Eliminar cliente">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -269,10 +307,11 @@ export default function ClientesPage() {
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Documento</label>
                   <input
                     type="text"
-                    value={formData.ruc}
-                    onChange={(e) => setFormData({ ...formData, ruc: e.target.value })}
-                    className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm focus:border-indigo-500 focus:bg-white focus:outline-none"
-                    placeholder="Ej. 12345678"
+                    value={formData.doc_number}
+                    maxLength={formData.document_type === "DNI" ? 8 : 11}
+                    onChange={(e) => setFormData({ ...formData, doc_number: e.target.value.replace(/\D/g, "") })}
+                    className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm focus:border-indigo-500 focus:bg-white focus:outline-none font-mono"
+                    placeholder={formData.document_type === "DNI" ? "Ej. 71234567 (8 dígitos)" : "Ej. 20601234567 (11 dígitos)"}
                   />
                 </div>
 

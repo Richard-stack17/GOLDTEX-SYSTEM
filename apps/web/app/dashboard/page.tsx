@@ -4,6 +4,8 @@ import React, { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRole } from "../context/RoleContext";
+import { useStore } from "../context/StoreContext";
+import { AccessDeniedView } from "../components/AccessDeniedView";
 import {
   Button,
   Card,
@@ -41,26 +43,29 @@ const formatYMD = (d: Date) => {
 export default function DashboardPage() {
   const router = useRouter();
   const { isHydrated, permissions } = useRole();
+  const { activeStore, activeStoreId, isAllStoresMode, isLoadingStores } = useStore();
 
   const [dateFilter, setDateFilter] = useState<DateFilter>("THIS_WEEK");
   const [selectedYear, setSelectedYear] = useState<number | "">(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState<number | "">(new Date().getMonth());
   const [selectedDay, setSelectedDay] = useState<number | "">("");
 
-  useEffect(() => {
-    if (isHydrated && !permissions?.access_dashboard) {
-      router.push('/hub');
-    }
-  }, [isHydrated, permissions, router]);
+  if (!isHydrated) return null;
+  if (!permissions?.access_dashboard) {
+    return <AccessDeniedView moduleName="Dashboard de Analítica" />;
+  }
 
-  if (!isHydrated || !permissions?.access_dashboard) return null;
-
-  // Sync on mount
+  // Sync when store context resolves or active store changes
   useEffect(() => {
+    if (isLoadingStores) return;
     if (typeof window !== 'undefined' && navigator.onLine) {
-      syncCatalog();
+      if (isAllStoresMode) {
+        syncCatalog();
+      } else if (activeStoreId) {
+        syncCatalog(activeStoreId);
+      }
     }
-  }, []);
+  }, [activeStoreId, isAllStoresMode, isLoadingStores]);
 
   // ── Date Range Calculation (Timezone Safe) ──
   const dateRange = useMemo(() => {
@@ -157,17 +162,19 @@ export default function DashboardPage() {
     if (!rawSales) return [];
     return rawSales.filter(s =>
       s.status !== 'CANCELLED' &&
-      s.status !== 'PENDING'
+      s.status !== 'PENDING' &&
+      (isAllStoresMode ? true : s.store_id === activeStoreId)
     );
-  }, [rawSales]);
+  }, [rawSales, isAllStoresMode, activeStoreId]);
 
   const prevSales = useMemo(() => {
     if (!rawPrevSales) return [];
     return rawPrevSales.filter(s =>
       s.status !== 'CANCELLED' &&
-      s.status !== 'PENDING'
+      s.status !== 'PENDING' &&
+      (isAllStoresMode ? true : s.store_id === activeStoreId)
     );
-  }, [rawPrevSales]);
+  }, [rawPrevSales, isAllStoresMode, activeStoreId]);
 
   const transactions = useLiveQuery(() => db.transactions.toArray(), [], []);
   const employees = useLiveQuery(() => db.employees.toArray(), [], []);
@@ -333,7 +340,7 @@ export default function DashboardPage() {
           if (!productStats[item.id]) {
             productStats[item.id] = { name: item.name, familyId: item.familyId || item.family_id, amount: 0 };
           }
-          productStats[item.id].amount += income;
+          productStats[item.id]!.amount += income;
 
           // Families
           const famId = item.familyId || item.family_id;
@@ -380,8 +387,8 @@ export default function DashboardPage() {
       if (!sellerStats[sellerKey]) {
         sellerStats[sellerKey] = { total: 0, count: 0 };
       }
-      sellerStats[sellerKey].total += sale.total;
-      sellerStats[sellerKey].count += 1;
+      sellerStats[sellerKey]!.total += sale.total;
+      sellerStats[sellerKey]!.count += 1;
       totalSellersSales += sale.total;
     }
 
@@ -419,15 +426,18 @@ export default function DashboardPage() {
         if (hour < 0) hour += 24;
         // Encontrar el bloque al que pertenece (ej: si es 13:00 va al bloque de 12:00 o 14:00, según redondeo)
         // Redondearemos al bloque anterior más cercano (ej: 13:00 -> 12:00, 09:30 -> 08:00)
-        let block = hourBlocks[0];
+        let block = hourBlocks[0] || 0;
         for (let i = hourBlocks.length - 1; i >= 0; i--) {
-          if (hour >= hourBlocks[i]) {
-            block = hourBlocks[i];
+          const hb = hourBlocks[i];
+          if (hb !== undefined && hour >= hb) {
+            block = hb;
             break;
           }
         }
         const key = `${block.toString().padStart(2, '0')}:00`;
-        daysMap[key] += sale.total;
+        if (daysMap[key] !== undefined) {
+          daysMap[key] += sale.total;
+        }
       }
     } else {
       // Por día
@@ -441,9 +451,7 @@ export default function DashboardPage() {
       }
 
       for (const sale of sales) {
-        if (daysMap[sale.issue_date] !== undefined) {
-          daysMap[sale.issue_date] += sale.total;
-        }
+        daysMap[sale.issue_date] = (daysMap[sale.issue_date] || 0) + sale.total;
       }
     }
 
@@ -458,9 +466,7 @@ export default function DashboardPage() {
         prevDates.push(ymd);
       }
       for (const sale of prevSales) {
-        if (prevDaysMap[sale.issue_date] !== undefined) {
-          prevDaysMap[sale.issue_date] += sale.total;
-        }
+        prevDaysMap[sale.issue_date] = (prevDaysMap[sale.issue_date] || 0) + sale.total;
       }
     }
 
@@ -468,7 +474,7 @@ export default function DashboardPage() {
     let totalChartSales = 0;
 
     const items = dates.map((date, index) => {
-      const total = daysMap[date];
+      const total = daysMap[date] || 0;
       totalChartSales += total;
 
       const prevDate = prevDates[index];
@@ -524,7 +530,18 @@ export default function DashboardPage() {
               <TrendingUp className="w-4 h-4 text-white" />
             </div>
             <div>
-              <h1 className="text-base font-bold leading-none">Módulo de Dashboard</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-base font-bold leading-none">Módulo de Dashboard</h1>
+                {isAllStoresMode ? (
+                  <span className="text-[10px] font-bold text-blue-700 bg-blue-100 border border-blue-200 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                    Todas las Tiendas
+                  </span>
+                ) : activeStore ? (
+                  <span className="text-[10px] font-bold text-amber-700 bg-amber-100 border border-amber-200 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                    {activeStore.name}
+                  </span>
+                ) : null}
+              </div>
               <p className="text-xs text-muted-foreground mt-0.5">Analítica en Tiempo Real</p>
             </div>
           </div>
