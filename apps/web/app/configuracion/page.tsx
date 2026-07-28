@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { Settings, ArrowLeft, Printer, Plus, ChevronRight, Loader2, Info, CreditCard, Save, Store, Edit2, Power } from 'lucide-react';
+import { Settings, ArrowLeft, Printer, Plus, ChevronRight, Loader2, Info, CreditCard, Save, Store, Edit2, Power, AlertTriangle, AlertCircle, CheckCircle2, Users } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useRole } from '../context/RoleContext';
@@ -33,6 +33,7 @@ export default function ConfiguracionPage() {
   // Printers state
   const [printers, setPrinters] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [showInactive, setShowInactive] = useState(false);
 
   // Settings state per store
   const [storeSettingsMap, setStoreSettingsMap] = useState<Record<string, { izipay_debit_fee: string; izipay_credit_fee: string; isDefault: boolean }>>({});
@@ -66,7 +67,7 @@ export default function ConfiguracionPage() {
     } else if (activeTab === 'STORES') {
       fetchStores();
     }
-  }, [activeTab, activeStoreId]);
+  }, [activeTab, activeStoreId, showInactive]);
 
   const fetchStores = async () => {
     setIsLoading(true);
@@ -166,6 +167,7 @@ export default function ConfiguracionPage() {
 
     let query = supabase.from('printers').select('*').order('created_at', { ascending: false });
     if (activeStoreId) query = query.eq('store_id', activeStoreId);
+    if (!showInactive) query = query.eq('is_active', true);
     const { data, error } = await query;
     
     if (!error && data) {
@@ -174,6 +176,17 @@ export default function ConfiguracionPage() {
       console.error("Error fetching printers:", error);
     }
     setIsLoading(false);
+  };
+
+  const handleReactivatePrinter = async (printerId: string) => {
+    try {
+      const { error } = await supabase.from('printers').update({ is_active: true }).eq('id', printerId);
+      if (error) throw error;
+      showToast('Impresora reactivada', 'success');
+      fetchPrinters();
+    } catch (err: any) {
+      showToast('Error reactivando impresora: ' + err.message, 'error');
+    }
   };
 
   const fetchSettings = async () => {
@@ -402,6 +415,15 @@ export default function ConfiguracionPage() {
           </div>
         ) : activeTab === 'PRINTERS' ? (
           <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div />
+              <div className="flex items-center gap-3">
+                <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+                  <input type="checkbox" className="sr-only" checked={showInactive} onChange={() => { setShowInactive(v => !v); }} />
+                  <span className="px-2 py-1 rounded-full border border-border bg-card text-xs font-bold">Mostrar Inactivas</span>
+                </label>
+              </div>
+            </div>
             {isLoading ? (
           <div className="flex flex-col items-center justify-center mt-20 text-emerald-600">
             <Loader2 className="w-8 h-8 animate-spin mb-2" />
@@ -417,35 +439,52 @@ export default function ConfiguracionPage() {
           </div>
         ) : (
           <div className="divide-y divide-gray-100">
-            {printers.map(printer => (
-              <div 
-                key={printer.id}
-                onClick={() => router.push(`/configuracion/impresoras/editar?id=${printer.id}`)}
-                className="flex items-center px-4 py-4 hover:bg-gray-50 cursor-pointer transition-colors active:bg-gray-100"
-              >
-                <div className="w-12 h-12 rounded-full bg-gray-100 flex flex-shrink-0 items-center justify-center mr-4 border border-gray-200">
-                  <Printer className="w-6 h-6 text-gray-600" />
-                </div>
-                
-                <div className="flex-1 min-w-0">
-                  <h3 className="text-[17px] font-bold text-gray-900 truncate">{printer.name}</h3>
-                  <div className="flex items-center mt-0.5 text-[14px] text-gray-500 space-x-1">
-                    <span>{printer.type === 'wifi' ? 'WiFi' : printer.type === 'bluetooth' ? 'Bluetooth' : 'USB'}</span>
-                    <span>•</span>
-                    <span className="truncate">{printer.type === 'wifi' ? `${printer.ip_address}:${printer.port}` : printer.mac_address || 'Otro modelo'}</span>
+            {printers.map(printer => {
+              const inactive = printer.is_active === false;
+              return (
+                <div 
+                  key={printer.id}
+                  onClick={() => router.push(`/configuracion/impresoras/editar?id=${printer.id}`)}
+                  className={`flex items-center px-4 py-4 hover:bg-gray-50 cursor-pointer transition-colors active:bg-gray-100 ${inactive ? 'opacity-60 grayscale' : ''}`}
+                >
+                  <div className="w-12 h-12 rounded-full bg-gray-100 flex flex-shrink-0 items-center justify-center mr-4 border border-gray-200">
+                    <Printer className="w-6 h-6 text-gray-600" />
+                  </div>
+                  
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-[17px] font-bold text-gray-900 truncate">{printer.name}</h3>
+                      {inactive && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded border bg-zinc-100 text-zinc-600 border-zinc-200">INACTIVA</span>
+                      )}
+                    </div>
+                    <div className="flex items-center mt-0.5 text-[14px] text-gray-500 space-x-1">
+                      <span>{printer.type === 'wifi' ? 'WiFi' : printer.type === 'bluetooth' ? 'Bluetooth' : 'USB'}</span>
+                      <span>•</span>
+                      <span className="truncate">{printer.type === 'wifi' ? `${printer.ip_address}:${printer.port}` : printer.mac_address || 'Otro modelo'}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center ml-2 space-x-3">
+                    {(printer.auto_print || true) && (
+                      <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-200 uppercase tracking-wider">
+                        Recibos
+                      </span>
+                    )}
+                    {inactive ? (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleReactivatePrinter(printer.id); }}
+                        className="px-3 py-1 rounded-lg border border-border bg-emerald-50 text-emerald-700 text-sm font-bold"
+                      >
+                        Reactivar
+                      </button>
+                    ) : (
+                      <ChevronRight className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                    )}
                   </div>
                 </div>
-
-                <div className="flex items-center ml-2 space-x-3">
-                  {(printer.auto_print || true) && (
-                    <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-200 uppercase tracking-wider">
-                      Recibos
-                    </span>
-                  )}
-                  <ChevronRight className="w-5 h-5 text-gray-400 flex-shrink-0" />
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
           )}
         </div>
@@ -625,20 +664,34 @@ export default function ConfiguracionPage() {
       {isConfirmDeactivateOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-card rounded-2xl w-full max-w-md overflow-hidden shadow-2xl border border-border p-6 space-y-4 animate-in zoom-in-95 duration-200">
-            <h3 className="font-bold text-lg text-red-500 uppercase tracking-wider flex items-center gap-2">
-              ⚠️ Desactivar Tienda
-            </h3>
+              <h3 className="font-bold text-lg text-red-500 uppercase tracking-wider flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-red-600 inline" />
+                Desactivar Tienda
+              </h3>
             <p className="text-sm text-foreground leading-relaxed">
               Estás a punto de desactivar la tienda <strong>{targetStoreToDeactivate?.name}</strong>.
             </p>
-            <div className="bg-red-500/10 border border-red-500/20 text-red-700 dark:text-red-300 p-4 rounded-xl space-y-2 text-xs">
-              <p className="font-bold">⚠️ Advertencias importantes:</p>
-              <ul className="list-disc pl-4 space-y-1">
-                <li>Tiene <strong>{linkedEmpCount}</strong> empleados vinculados.</li>
-                <li>Tiene <strong>{linkedProfCount}</strong> perfiles de usuario vinculados.</li>
-                <li>Al desactivarla, estos usuarios <strong>perderán el acceso al sistema</strong> y no podrán operar hasta que sean reasignados.</li>
-              </ul>
-            </div>
+            { (linkedEmpCount > 0 || linkedProfCount > 0) ? (
+              <div className="bg-red-500/10 border border-red-500/20 text-red-700 p-4 rounded-xl space-y-2 text-xs">
+                <div className="flex items-center gap-2 font-bold">
+                  <AlertTriangle className="w-5 h-5 text-red-600 inline" />
+                  <span>Advertencias importantes:</span>
+                </div>
+                <ul className="list-disc pl-4 space-y-1">
+                  {linkedEmpCount > 0 && <li>Tiene <strong>{linkedEmpCount}</strong> empleado(s) vinculado(s).</li>}
+                  {linkedProfCount > 0 && <li>Tiene <strong>{linkedProfCount}</strong> perfil(es) de usuario vinculado(s).</li>}
+                  <li>Al desactivarla, estos usuarios <strong>perderán el acceso al sistema</strong> y no podrán operar hasta que sean reasignados.</li>
+                </ul>
+              </div>
+            ) : (
+              <div className="bg-blue-50 border border-blue-200 text-blue-900 p-4 rounded-xl space-y-2 text-sm">
+                <div className="flex items-center gap-2 font-bold">
+                  <CheckCircle2 className="w-5 h-5 text-blue-600 inline" />
+                  <span>Esta tienda no tiene empleados ni usuarios vinculados.</span>
+                </div>
+                <p className="text-sm">Puedes desactivarla con seguridad y reactivarla cuando lo necesites.</p>
+              </div>
+            ) }
             <p className="text-xs text-muted-foreground">
               ¿Estás seguro de que deseas continuar con la desactivación lógica de esta tienda?
             </p>

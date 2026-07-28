@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { ArrowLeft, Printer, Trash2, Search, CheckCircle2, AlertCircle, Loader2, Save } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useRole } from '../../context/RoleContext';
+import { useStore } from '../../context/StoreContext';
 import { requestBluetoothDevice, printTestReceipt } from '../utils/printerEngine';
 import ReceiptPreview from '../../components/ReceiptPreview';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
@@ -42,6 +43,12 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
   const [printReceipts, setPrintReceipts] = useState(true);
   const [autoPrint, setAutoPrint] = useState(false);
   const [maxChars, setMaxChars] = useState(42);
+  const { activeStoreId } = useStore();
+
+  // Store / Tenant assignment (required)
+  const [stores, setStores] = useState<any[]>([]);
+  const [storeId, setStoreId] = useState<string | null>(null);
+  const [isActive, setIsActive] = useState<boolean>(true);
 
   // Hardware state
   const [btDeviceObj, setBtDeviceObj] = useState<any>(null);
@@ -71,9 +78,25 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
       setIpAddress(data.ip_address || '192.168.1.100');
       setPort(data.port || 9100);
       setAutoPrint(data.auto_print);
+      setStoreId(data.store_id || null);
+      setIsActive(data.is_active !== false);
       if (data.max_chars) setMaxChars(data.max_chars);
     }
   };
+
+  useEffect(() => {
+    // Load stores for selector
+    const loadStores = async () => {
+      const { data } = await supabase.from('stores').select('*').order('created_at', { ascending: true });
+      if (data) setStores(data);
+    };
+    loadStores();
+
+    // If creating and there is an active store, preselect it
+    if (!isEditing && activeStoreId) {
+      setStoreId(activeStoreId);
+    }
+  }, [activeStoreId, isEditing]);
 
   const showToast = (message: string, type: 'success' | 'error') => {
     setToast({ message, type });
@@ -83,6 +106,11 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
   const handleSave = async () => {
     if (!name.trim()) {
       showToast('El nombre es requerido', 'error');
+      return;
+    }
+
+    if (!storeId) {
+      showToast('La tienda es obligatoria', 'error');
       return;
     }
 
@@ -97,6 +125,7 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
       port: type === 'wifi' ? port : null,
       auto_print: autoPrint,
       max_chars: maxChars
+      ,store_id: storeId
     };
 
     let error;
@@ -104,6 +133,8 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
       const res = await supabase.from('printers').update(payload).eq('id', printerId);
       error = res.error;
     } else {
+      // New printers are active by default
+      payload.is_active = true;
       const res = await supabase.from('printers').insert(payload);
       error = res.error;
     }
@@ -124,16 +155,30 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
 
   const confirmDelete = async () => {
     setIsLoading(true);
-    const { error } = await supabase.from('printers').delete().eq('id', printerId);
+    const { error } = await supabase.from('printers').update({ is_active: false }).eq('id', printerId);
     setIsLoading(false);
     
     if (error) {
       showToast(error.message, 'error');
     } else {
-      showToast('Impresora eliminada', 'success');
+      showToast('Impresora desactivada correctamente', 'success');
       setTimeout(() => router.push('/configuracion'), 1000);
     }
     setShowDeleteConfirm(false);
+  };
+
+  const confirmReactivate = async () => {
+    if (!printerId) return;
+    setIsLoading(true);
+    const { error } = await supabase.from('printers').update({ is_active: true }).eq('id', printerId);
+    setIsLoading(false);
+    if (error) {
+      showToast(error.message, 'error');
+    } else {
+      showToast('Impresora reactivada', 'success');
+      setIsActive(true);
+      setTimeout(() => router.push('/configuracion'), 800);
+    }
   };
 
   const handleBuscarBT = async () => {
@@ -254,6 +299,19 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
               <option value="bluetooth">Bluetooth</option>
               <option value="wifi">WiFi</option>
               <option value="usb">USB</option>
+            </select>
+          </div>
+          <div className="px-5 py-4">
+            <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Tienda / Sucursal *</label>
+            <select
+              value={storeId || ''}
+              onChange={e => { setStoreId(e.target.value || null); setHasUnsavedChanges(true); }}
+              className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer"
+            >
+              <option value="">-- Selecciona una tienda --</option>
+              {stores.map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
             </select>
           </div>
         </div>
@@ -388,14 +446,25 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
           </button>
 
           {isEditing && Boolean(permissions?.settings_printers_delete) && (
-            <button 
-              onClick={handleDelete}
-              disabled={isLoading}
-              className="flex items-center justify-center w-full max-w-sm py-3 text-red-500 font-bold text-sm rounded-xl hover:bg-red-500/10 active:bg-red-500/20 transition-colors disabled:opacity-50"
-            >
-              <Trash2 className="w-4 h-4 mr-2" />
-              ELIMINAR IMPRESORA
-            </button>
+            isActive ? (
+              <button 
+                onClick={handleDelete}
+                disabled={isLoading}
+                className="flex items-center justify-center w-full max-w-sm py-3 text-red-500 font-bold text-sm rounded-xl hover:bg-red-500/10 active:bg-red-500/20 transition-colors disabled:opacity-50"
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                DESACTIVAR IMPRESORA
+              </button>
+            ) : (
+              <button
+                onClick={confirmReactivate}
+                disabled={isLoading}
+                className="flex items-center justify-center w-full max-w-sm py-3 text-emerald-600 font-bold text-sm rounded-xl hover:bg-emerald-600/10 active:bg-emerald-600/20 transition-colors disabled:opacity-50"
+              >
+                <CheckCircle2 className="w-4 h-4 mr-2" />
+                REACTIVAR IMPRESORA
+              </button>
+            )
           )}
         </div>
       </main>
@@ -425,8 +494,8 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
         isOpen={showDeleteConfirm}
         onCancel={() => setShowDeleteConfirm(false)}
         onConfirm={confirmDelete}
-        title="Eliminar Impresora"
-        description="¿Estás seguro de eliminar esta impresora? Esta acción no se puede deshacer."
+        title="Desactivar Impresora"
+        description="¿Estás seguro de desactivar esta impresora? Podrás reactivarla luego desde el listado."
         isLoading={isLoading}
       />
 

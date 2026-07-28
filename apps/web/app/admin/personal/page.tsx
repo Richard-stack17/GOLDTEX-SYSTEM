@@ -536,7 +536,7 @@ export default function PersonalPage() {
           await supabase.from('employee_stores').insert({
             employee_id: editingEmployee.id,
             store_id: empStoreId,
-            role: empRole || 'CAJERA'
+            role: empRole ?? (editingEmployee.employee_stores?.[0] as any)?.role ?? 'CAJERA'
           });
         }
 
@@ -598,6 +598,8 @@ export default function PersonalPage() {
     setPhone(emp.phone || '');
     if (emp.employee_stores && emp.employee_stores.length > 0) {
       setEmpStoreId(emp.employee_stores[0]?.store_id || '');
+      // Preserve the role assigned for this employee-store so edits don't overwrite it
+      setEmpRole((emp.employee_stores[0] as any)?.role || 'CAJERA');
     } else {
       setEmpStoreId('');
     }

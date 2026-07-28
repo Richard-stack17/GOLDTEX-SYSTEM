@@ -208,39 +208,63 @@ export default function POSPage() {
 
   useEffect(() => {
     const syncCajaStateFromCloud = async () => {
+      if (!activeStoreId) return;
       try {
-        let stQuery = supabase.from('settings').select('key, value, store_id').in('key', ['pos_caja_open', 'pos_caja_open_date']);
-        if (activeStoreId) stQuery = stQuery.eq('store_id', activeStoreId);
-        const { data } = await stQuery;
-        if (data && data.length > 0) {
-          const openSetting = data.find(s => s.key === 'pos_caja_open');
-          const dateSetting = data.find(s => s.key === 'pos_caja_open_date');
-          const today = getLimaTodayStr();
-          
-          if (dateSetting?.value === today && String(openSetting?.value) === "true") {
-            setIsCajaOpen(true);
-            localStorage.setItem("isCajaOpen", "true");
-            localStorage.setItem("cajaOpenDate", today);
-          } else if (openSetting || dateSetting) {
-            setIsCajaOpen(false);
-            localStorage.setItem("isCajaOpen", "false");
-          }
+        const { data, error } = await supabase
+          .from('settings')
+          .select('key, value')
+          .eq('store_id', activeStoreId)
+          .in('key', ['pos_caja_open', 'pos_caja_open_date']);
+
+        if (error) {
+          // Possible RLS block or transient error — do not change local state when
+          // reading fails; just log and abort to avoid false closures.
+          console.error('Error leyendo settings (posible bloqueo RLS):', error);
+          return;
+        }
+
+        const openSetting = data?.find((s: any) => s.key === 'pos_caja_open');
+        const dateSetting = data?.find((s: any) => s.key === 'pos_caja_open_date');
+        const today = getLimaTodayStr();
+
+        // If cloud says it's open for today, open for everyone. Otherwise close.
+        if (dateSetting?.value === today && String(openSetting?.value) === 'true') {
+          setIsCajaOpen(true);
+          localStorage.setItem('isCajaOpen', 'true');
+          localStorage.setItem('cajaOpenDate', today);
+        } else {
+          setIsCajaOpen(false);
+          localStorage.setItem('isCajaOpen', 'false');
         }
       } catch (e) {
-        console.warn("No se pudo consultar estado de caja en Supabase:", e);
+        console.warn('Error sincronizando caja:', e);
       }
     };
 
+    // Initial sync from settings
     syncCajaStateFromCloud();
 
-    // Sincronizar en tiempo real entre distintas computadoras mediante Supabase Realtime
-    const cloudChannel = supabase
-      .channel("pos-caja-changes")
+    // 1. Realtime for settings changes (caja)
+    const settingsChannel = supabase
+      .channel(`caja_settings_${activeStoreId}`)
       .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "settings" },
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'settings', filter: `store_id=eq.${activeStoreId}` },
         () => {
           syncCajaStateFromCloud();
+        }
+      )
+      .subscribe();
+
+    // 2. Realtime for sales (proformas) to update history immediately
+    const salesChannel = supabase
+      .channel(`sales_pos_${activeStoreId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'sales', filter: `store_id=eq.${activeStoreId}` },
+        () => {
+          fetchHistory();
+          fetchTodayTicketNumber();
         }
       )
       .subscribe();
@@ -249,8 +273,8 @@ export default function POSPage() {
     const pollInterval = setInterval(syncCajaStateFromCloud, 5000);
 
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === "isCajaOpen") {
-        setIsCajaOpen(e.newValue === "true");
+      if (e.key === 'isCajaOpen') {
+        setIsCajaOpen(e.newValue === 'true');
       }
     };
 
@@ -268,11 +292,12 @@ export default function POSPage() {
 
     return () => {
       clearInterval(pollInterval);
-      supabase.removeChannel(cloudChannel);
-      window.removeEventListener("storage", handleStorage);
+      supabase.removeChannel(settingsChannel);
+      supabase.removeChannel(salesChannel);
+      window.removeEventListener('storage', handleStorage);
       if (channel) channel.close();
     };
-  }, []);
+  }, [activeStoreId]);
 
   const handleOpenCaja = async () => {
     const today = getLimaTodayStr();
