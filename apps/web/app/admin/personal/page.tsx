@@ -220,7 +220,7 @@ export default function PersonalPage() {
   const [empUsername, setEmpUsername] = useState('');
   const [empPassword, setEmpPassword] = useState('');
   const [empEmail, setEmpEmail] = useState('');
-  const [empRole, setEmpRole] = useState('CAJERA');
+  const [empRole, setEmpRole] = useState('CAJERO');
   const [empStoreId, setEmpStoreId] = useState('');
 
   // ── Usuarios form state (Crear / Editar)
@@ -230,7 +230,7 @@ export default function PersonalPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
-  const [selectedRole, setSelectedRole] = useState('CAJERA');
+  const [selectedRole, setSelectedRole] = useState('CAJERO');
   const [selectedStoreId, setSelectedStoreId] = useState('');
   const [savingUser, setSavingUser] = useState(false);
   const [modalResetToken, setModalResetToken] = useState(0);
@@ -331,8 +331,8 @@ export default function PersonalPage() {
 
       // Update default selected roles if needed
       if (rolesData && rolesData.length > 0) {
-        if (empRole === 'CAJERA' || !empRole) setEmpRole(rolesData[0].name);
-        if (selectedRole === 'CAJERA' || !selectedRole) setSelectedRole(rolesData[0].name);
+        if (empRole === 'CAJERO' || empRole === 'CAJERA' || !empRole) setEmpRole(rolesData[0].name);
+        if (selectedRole === 'CAJERO' || selectedRole === 'CAJERA' || !selectedRole) setSelectedRole(rolesData[0].name);
       }
     } catch (err: any) {
       showToast(err.message || 'Error al cargar datos', 'error');
@@ -506,6 +506,33 @@ export default function PersonalPage() {
     setTimeout(() => setToast(null), 3500);
   };
 
+  const syncEmployeeStoreAssignment = async (employeeId: string, storeId: string | null, roleName: string) => {
+    const cleanStoreId = storeId || null;
+
+    console.log('🔴 [ADMIN - PERSONAL] Empleado/Perfil actualizado:', { employeeId, newStoreId: cleanStoreId, roleName });
+
+    const { error: profileError } = await supabase
+      .from('profiles')
+      .update({ default_store_id: cleanStoreId })
+      .eq('employee_id', employeeId);
+
+    if (profileError) throw profileError;
+
+    if (cleanStoreId) {
+      await supabase.from('employee_stores').delete().eq('employee_id', employeeId);
+      const { error: storeError } = await supabase.from('employee_stores').insert({
+        employee_id: employeeId,
+        store_id: cleanStoreId,
+        role: roleName
+      });
+
+      if (storeError) throw storeError;
+    } else {
+      const { error: storeError } = await supabase.from('employee_stores').delete().eq('employee_id', employeeId);
+      if (storeError) throw storeError;
+    }
+  };
+
   // ── Create / Edit employee (+ Optional Profile)
   const handleCreateEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -532,12 +559,13 @@ export default function PersonalPage() {
         if (empErr) throw empErr;
 
         if (empStoreId) {
-          await supabase.from('employee_stores').delete().eq('employee_id', editingEmployee.id);
-          await supabase.from('employee_stores').insert({
-            employee_id: editingEmployee.id,
-            store_id: empStoreId,
-            role: empRole ?? (editingEmployee.employee_stores?.[0] as any)?.role ?? 'CAJERA'
-          });
+          await syncEmployeeStoreAssignment(
+            editingEmployee.id,
+            empStoreId,
+            empRole ?? (editingEmployee.employee_stores?.[0] as any)?.role ?? 'CAJERO'
+          );
+        } else {
+          await syncEmployeeStoreAssignment(editingEmployee.id, null, empRole ?? (editingEmployee.employee_stores?.[0] as any)?.role ?? 'CAJERO');
         }
 
         showToast('Empleado actualizado correctamente', 'success');
@@ -551,12 +579,12 @@ export default function PersonalPage() {
 
         if (empErr) throw empErr;
 
-        if (empStoreId && newEmp) {
-          await supabase.from('employee_stores').insert({
-            employee_id: newEmp.id,
-            store_id: empStoreId,
-            role: createAccess ? empRole : 'CAJERA'
-          });
+        if (newEmp) {
+          await syncEmployeeStoreAssignment(
+            newEmp.id,
+            empStoreId || null,
+            createAccess ? empRole : 'CAJERO'
+          );
         }
 
         // 2. Insert Profile (if toggled)
@@ -581,7 +609,7 @@ export default function PersonalPage() {
       setIsEmployeeModalOpen(false);
       setEditingEmployee(null);
       setFullName(''); setDni(''); setPhone('');
-      setCreateAccess(false); setEmpUsername(''); setEmpPassword(''); setEmpEmail(''); setEmpRole('CAJERA'); setEmpStoreId('');
+      setCreateAccess(false); setEmpUsername(''); setEmpPassword(''); setEmpEmail(''); setEmpRole('CAJERO'); setEmpStoreId('');
 
       loadData();
     } catch (err: any) {
@@ -599,7 +627,7 @@ export default function PersonalPage() {
     if (emp.employee_stores && emp.employee_stores.length > 0) {
       setEmpStoreId(emp.employee_stores[0]?.store_id || '');
       // Preserve the role assigned for this employee-store so edits don't overwrite it
-      setEmpRole((emp.employee_stores[0] as any)?.role || 'CAJERA');
+      setEmpRole((emp.employee_stores[0] as any)?.role || 'CAJERO');
     } else {
       setEmpStoreId('');
     }
@@ -659,6 +687,8 @@ export default function PersonalPage() {
         };
         if (hash) updates.password_hash = hash;
 
+        console.log('🔴 [ADMIN - USUARIOS] Intentando actualizar rol de perfil:', { profileId: editingUserId, newRole: selectedRole, updates });
+
         const { error } = await supabase.from('profiles').update(updates).eq('id', editingUserId);
         if (error) throw error;
 
@@ -697,7 +727,7 @@ export default function PersonalPage() {
       // Reset form
       setIsUserModalOpen(false);
       setEditingUserId(null);
-      setUsername(''); setPassword(''); setEmail(''); setSelectedEmpId(''); setSelectedRole('CAJERA'); setSelectedStoreId('');
+      setUsername(''); setPassword(''); setEmail(''); setSelectedEmpId(''); setSelectedRole('CAJERO'); setSelectedStoreId('');
       loadData();
     } catch (err: any) {
       showToast(err.message || 'Error al guardar acceso', 'error');
@@ -723,7 +753,7 @@ export default function PersonalPage() {
       if (error) throw error;
       showToast('Acceso creado y vinculado correctamente', 'success');
       setLinkingEmployee(null);
-      setEmpUsername(''); setEmpPassword(''); setEmpEmail(''); setEmpRole('CAJERA');
+      setEmpUsername(''); setEmpPassword(''); setEmpEmail(''); setEmpRole('CAJERO');
       loadData();
     } catch (err: any) {
       showToast(err.message || 'Error al crear acceso', 'error');
@@ -764,7 +794,7 @@ export default function PersonalPage() {
   };
 
   const handleCancelEdit = () => {
-    setUsername(''); setPassword(''); setEmail(''); setSelectedEmpId(''); setSelectedRole('CAJERA'); setSelectedStoreId('');
+    setUsername(''); setPassword(''); setEmail(''); setSelectedEmpId(''); setSelectedRole('CAJERO'); setSelectedStoreId('');
     setEditingUserId(null);
     setIsUserModalOpen(false);
   };
@@ -910,7 +940,7 @@ export default function PersonalPage() {
                               {profile ? (
                                 <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${profile.role === 'ADMIN'
                                   ? 'bg-purple-500/10 border-purple-500/30 text-purple-500'
-                                  : profile.role === 'CAJERA'
+                                  : (profile.role === 'CAJERA' || profile.role === 'CAJERO')
                                     ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-500'
                                     : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
                                   }`}>
@@ -990,7 +1020,7 @@ export default function PersonalPage() {
                       setPassword('');
                       setEmail('');
                       setSelectedEmpId('');
-                      setSelectedRole('CAJERA');
+                      setSelectedRole('CAJERO');
                       setSelectedStoreId('');
                       setEditingUserId(null);
                       setModalResetToken(prev => prev + 1);
@@ -1036,7 +1066,7 @@ export default function PersonalPage() {
                             <td className="px-5 py-3.5">
                               <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${profile.role === 'ADMIN'
                                 ? 'bg-purple-500/10 border-purple-500/30 text-purple-500'
-                                : profile.role === 'CAJERA'
+                                : (profile.role === 'CAJERA' || profile.role === 'CAJERO')
                                   ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-500'
                                   : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
                                 }`}>

@@ -174,39 +174,115 @@ export default function POSPage() {
 
   const confirmCloseCaja = async () => {
     setIsCajaOpen(false);
+    if (activeStoreId) {
+      localStorage.setItem(`isCajaOpen_${activeStoreId}`, "false");
+    }
     localStorage.setItem("isCajaOpen", "false");
     setCajaSummaryOpen(false);
 
     try {
       const channel = new BroadcastChannel("goltex_caja_channel");
-      channel.postMessage({ type: "CAJA_STATE_CHANGED", isCajaOpen: false });
+      channel.postMessage({ type: "CAJA_STATE_CHANGED", isCajaOpen: false, storeId: activeStoreId });
       channel.close();
     } catch (e) {}
 
+    if (!activeStoreId) return;
+
     try {
-      const closeRow: any = { key: 'pos_caja_open', value: 'false', updated_at: new Date().toISOString() };
-      if (activeStoreId) closeRow.store_id = activeStoreId;
-      await supabase.from('settings').upsert([closeRow]);
+      const closeRow: any = {
+        key: 'pos_caja_open',
+        value: 'false',
+        store_id: activeStoreId,
+        updated_at: new Date().toISOString()
+      };
+      await supabase.from('settings').upsert([closeRow], { onConflict: 'key,store_id' });
     } catch (e) {
       console.warn("Error guardando cierre en Supabase:", e);
     }
   };
 
-  const [isCajaOpen, setIsCajaOpen] = useState(() => {
-    if (typeof window !== "undefined") {
-      const today = getLimaTodayStr();
-      const savedDate = localStorage.getItem("cajaOpenDate");
-      if (savedDate !== today) {
-        localStorage.setItem("isCajaOpen", "false");
-        return false;
-      }
-      const saved = localStorage.getItem("isCajaOpen");
-      return saved === "true";
+  // ── Fetch logic ──
+  const fetchTodayTicketNumber = useCallback(async () => {
+    const todayStr = getLimaTodayStr();
+
+    let query = supabase
+      .from("sales")
+      .select("internal_ticket_number")
+      .eq("record_date", todayStr)
+      .eq("source_type", "POS");
+
+    if (activeStoreId) {
+      query = query.eq("store_id", activeStoreId);
     }
-    return false;
-  });
+
+    const { data } = await query;
+
+    setTicketNumber(computeNextDailyTicketNumber(data ?? []));
+  }, [activeStoreId]);
+
+  const fetchHistory = useCallback(async () => {
+    const todayStr = getLimaTodayStr();
+    
+    console.log(`🔍 [fetchHistory] Buscando proformas del día: ${todayStr} para tienda: ${activeStoreId}`);
+
+    let query = supabase
+      .from("sales")
+      .select("*, transactions(payment_method, amount, surcharge_amount)")
+      .eq("record_date", todayStr)
+      .eq("source_type", "POS")
+      .order("created_at", { ascending: false });
+
+    if (activeStoreId) {
+      query = query.eq("store_id", activeStoreId);
+    }
+
+    const { data, error } = await query;
+    
+    console.log(`📡 [fetchHistory] Respuesta completa:`, { data, error });
+
+    if (error) {
+      console.error("❌ [fetchHistory] Error en la consulta:", error);
+    }
+
+    if (data) {
+      console.log(`✅ [fetchHistory] Proformas encontradas: ${data.length}`);
+      
+      try {
+        // Enriquecer el ticket con el username del vendedor desde Dexie local (ya que quitamos el JOIN)
+        const profiles = await db.profiles.toArray();
+        const profileMap = new Map(profiles.map(p => [p.id, p.username]));
+        
+        const enrichedData = data.map((ticket: any) => ({
+          ...ticket,
+          seller: ticket.seller_id ? { username: profileMap.get(ticket.seller_id) || 'ADMIN' } : null,
+          cashier: ticket.cashier_id ? { username: profileMap.get(ticket.cashier_id) || 'ADMIN' } : null
+        }));
+        
+        setHistoryTickets(enrichedData as HistoryTicket[]);
+      } catch (e) {
+        console.warn("No se pudo cargar perfiles locales para historial", e);
+        setHistoryTickets(data as HistoryTicket[]);
+      }
+    }
+  }, [activeStoreId]);
+
+  const [isCajaOpen, setIsCajaOpen] = useState(false);
 
   useEffect(() => {
+    if (!activeStoreId) return;
+
+    const today = getLimaTodayStr();
+
+    // Check store-specific local state first
+    const localStoreOpened = localStorage.getItem(`isCajaOpen_${activeStoreId}`);
+    const localStoreDate = localStorage.getItem(`cajaOpenDate_${activeStoreId}`);
+
+    if (localStoreOpened === 'true' && localStoreDate === today) {
+      setIsCajaOpen(true);
+    } else {
+      setIsCajaOpen(false);
+    }
+
     const syncCajaStateFromCloud = async () => {
       if (!activeStoreId) return;
       try {
@@ -217,23 +293,22 @@ export default function POSPage() {
           .in('key', ['pos_caja_open', 'pos_caja_open_date']);
 
         if (error) {
-          // Possible RLS block or transient error — do not change local state when
-          // reading fails; just log and abort to avoid false closures.
-          console.error('Error leyendo settings (posible bloqueo RLS):', error);
+          console.error('Error leyendo settings de caja (posible RLS):', error);
           return;
         }
 
         const openSetting = data?.find((s: any) => s.key === 'pos_caja_open');
         const dateSetting = data?.find((s: any) => s.key === 'pos_caja_open_date');
-        const today = getLimaTodayStr();
 
-        // If cloud says it's open for today, open for everyone. Otherwise close.
         if (dateSetting?.value === today && String(openSetting?.value) === 'true') {
           setIsCajaOpen(true);
+          localStorage.setItem(`isCajaOpen_${activeStoreId}`, 'true');
+          localStorage.setItem(`cajaOpenDate_${activeStoreId}`, today);
           localStorage.setItem('isCajaOpen', 'true');
           localStorage.setItem('cajaOpenDate', today);
         } else {
           setIsCajaOpen(false);
+          localStorage.setItem(`isCajaOpen_${activeStoreId}`, 'false');
           localStorage.setItem('isCajaOpen', 'false');
         }
       } catch (e) {
@@ -256,24 +331,41 @@ export default function POSPage() {
       )
       .subscribe();
 
-    // 2. Realtime for sales (proformas) to update history immediately
+    // 2. Realtime for sales (proformas) & transactions to update history immediately
     const salesChannel = supabase
       .channel(`sales_pos_${activeStoreId}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'sales', filter: `store_id=eq.${activeStoreId}` },
-        () => {
+        { 
+          event: '*', 
+          schema: 'public', 
+          table: 'sales'
+        },
+        (payload) => {
+          console.log('⚡ [REALTIME - POS] Cambio en proformas de tienda detectado:', payload);
           fetchHistory();
           fetchTodayTicketNumber();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'transactions' },
+        (payload) => {
+          console.log('⚡ [REALTIME - POS] Evento recibido en tabla transactions:', payload);
+          fetchHistory();
         }
       )
       .subscribe();
 
     // Polling de respaldo cada 5s
-    const pollInterval = setInterval(syncCajaStateFromCloud, 5000);
+    const pollInterval = setInterval(() => {
+      syncCajaStateFromCloud();
+      fetchHistory();
+      fetchTodayTicketNumber();
+    }, 5000);
 
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === 'isCajaOpen') {
+      if (e.key === `isCajaOpen_${activeStoreId}` || e.key === 'isCajaOpen') {
         setIsCajaOpen(e.newValue === 'true');
       }
     };
@@ -282,7 +374,7 @@ export default function POSPage() {
     try {
       channel = new BroadcastChannel("goltex_caja_channel");
       channel.onmessage = (e) => {
-        if (e.data?.type === "CAJA_STATE_CHANGED") {
+        if (e.data?.type === "CAJA_STATE_CHANGED" && (!e.data.storeId || e.data.storeId === activeStoreId)) {
           setIsCajaOpen(!!e.data.isCajaOpen);
         }
       };
@@ -297,28 +389,43 @@ export default function POSPage() {
       window.removeEventListener('storage', handleStorage);
       if (channel) channel.close();
     };
-  }, [activeStoreId]);
+  }, [activeStoreId, fetchHistory, fetchTodayTicketNumber]);
 
   const handleOpenCaja = async () => {
     const today = getLimaTodayStr();
     setIsCajaOpen(true);
+    if (activeStoreId) {
+      localStorage.setItem(`isCajaOpen_${activeStoreId}`, "true");
+      localStorage.setItem(`cajaOpenDate_${activeStoreId}`, today);
+    }
     localStorage.setItem("isCajaOpen", "true");
     localStorage.setItem("cajaOpenDate", today);
 
     try {
       const channel = new BroadcastChannel("goltex_caja_channel");
-      channel.postMessage({ type: "CAJA_STATE_CHANGED", isCajaOpen: true, date: today });
+      channel.postMessage({ type: "CAJA_STATE_CHANGED", isCajaOpen: true, date: today, storeId: activeStoreId });
       channel.close();
     } catch (e) {}
 
+    if (!activeStoreId) return;
+
     try {
-      const openRow: any = { key: 'pos_caja_open', value: 'true', updated_at: new Date().toISOString() };
-      const dateRow: any = { key: 'pos_caja_open_date', value: today, updated_at: new Date().toISOString() };
-      if (activeStoreId) {
-        openRow.store_id = activeStoreId;
-        dateRow.store_id = activeStoreId;
+      const openRow: any = {
+        key: 'pos_caja_open',
+        value: 'true',
+        store_id: activeStoreId,
+        updated_at: new Date().toISOString()
+      };
+      const dateRow: any = {
+        key: 'pos_caja_open_date',
+        value: today,
+        store_id: activeStoreId,
+        updated_at: new Date().toISOString()
+      };
+      const { error } = await supabase.from('settings').upsert([openRow, dateRow], { onConflict: 'key,store_id' });
+      if (error) {
+        console.error("Error guardando apertura en Supabase:", error);
       }
-      await supabase.from('settings').upsert([openRow, dateRow]);
     } catch (e) {
       console.warn("Error guardando apertura en Supabase:", e);
     }
@@ -375,9 +482,9 @@ export default function POSPage() {
 
 
 
-  const localServices = useLiveQuery(() => db.services.toArray(), []) || [];
-  const localFamilies = useLiveQuery(() => db.families.toArray(), []) || [];
-  const localProductsRaw = useLiveQuery(() => db.products.toArray(), []) || [];
+  const localServices = useLiveQuery(() => db.services.toArray(), [activeStoreId]) || [];
+  const localFamilies = useLiveQuery(() => db.families.toArray(), [activeStoreId]) || [];
+  const localProductsRaw = useLiveQuery(() => db.products.toArray(), [activeStoreId]) || [];
 
   const sortByNumericPrefix = (a: any, b: any) => {
     const valA = `${a.code || ""} ${a.name || ""}`.trim();
@@ -417,32 +524,8 @@ export default function POSPage() {
     router.push("/hub");
   };
 
-  // ── Fetch logic ──
-  const fetchTodayTicketNumber = useCallback(async () => {
-    const todayStr = getLimaTodayStr();
-
-    const { data } = await supabase
-      .from("sales")
-      .select("internal_ticket_number")
-      .eq("record_date", todayStr)
-      .eq("source_type", "POS");
-
-    setTicketNumber(computeNextDailyTicketNumber(data ?? []));
-  }, []);
-
-  const fetchHistory = useCallback(async () => {
-    const todayStr = getLimaTodayStr();
-    const { data } = await supabase
-      .from("sales")
-      .select("*, seller:profiles!seller_id(username), transactions(payment_method, amount, surcharge_amount)")
-      .eq("record_date", todayStr)
-      .eq("source_type", "POS")
-      .order("created_at", { ascending: false });
-    if (data) setHistoryTickets(data as HistoryTicket[]);
-  }, []);
-
   useEffect(() => { fetchTodayTicketNumber(); }, [fetchTodayTicketNumber]);
-  useEffect(() => { if (rightPanelMode === "history") fetchHistory(); }, [rightPanelMode, fetchHistory]);
+  useEffect(() => { fetchHistory(); }, [fetchHistory]);
 
   // ── Catalog logic ──
   const handleQwertyKey = (key: string) => {
@@ -563,13 +646,6 @@ export default function POSPage() {
 
       const todayStr = getLimaTodayStr();
 
-      let tktQuery = supabase.from("sales").select("internal_ticket_number").eq("record_date", todayStr).eq("source_type", "POS");
-      if (activeStoreId) tktQuery = tktQuery.eq("store_id", activeStoreId);
-      const { data: todayTickets } = await tktQuery;
-
-      const nextInternalNum = computeNextDailyTicketNumber(todayTickets ?? []);
-      const docNum = `TKT-${todayStr.replace(/-/g, "")}-${String(nextInternalNum).padStart(4, "0")}`;
-
       /**
        * Formatea el detalle de cada ítem según su tipo:
        * - Telas: "CODE NOMBRE — Xm × S/ Y.YY"
@@ -589,45 +665,50 @@ export default function POSPage() {
         if (profData?.id) sellerId = profData.id;
       } catch (e) {}
 
-      const { error: saleError } = await supabase.from("sales").insert({
+      const rpcPayload = {
         customer_id: customerId,
-        proforma_number: docNum,
-        invoice_number: null,
-        internal_ticket_number: nextInternalNum,
-        document_type: "TICKET",
-        issue_date: todayStr,
         record_date: todayStr,
         detail: cart.map(formatItemDetail).join('\n'),
         items: cart,
         total: total,
         seller_id: sellerId,
-        source_type: "POS",
-        is_fractional: false,
-        status: "PENDING",
-        store_id: activeStoreId,
+        store_id: activeStoreId
+      };
+
+      const { data: rpcResult, error: saleError } = await supabase.rpc('emit_pos_ticket', {
+        p_payload: rpcPayload
       });
+
       if (saleError) throw saleError;
+      if (!rpcResult || !rpcResult.success) throw new Error("Error interno al emitir el ticket.");
+
+      const nextInternalNum = rpcResult.internal_ticket_number;
+      const docNum = rpcResult.proforma_number;
 
       // Snapshot para impresión
       setLastSaleInfo({ ticketNum: nextInternalNum, docNum, items: [...cart], total });
 
       // Limpiar y preparar siguiente cliente
       setCart([]);
-      await fetchTodayTicketNumber();
+      await Promise.all([
+        fetchTodayTicketNumber(),
+        fetchHistory()
+      ]);
 
-      // Imprimir silenciosamente
-      try {
+      // Imprimir silenciosamente (Fire and Forget para no bloquear el UI de React)
+      const cartSnapshot = [...cart]; // Capturar el estado actual del carrito
+      setTimeout(() => {
         const saleDataForPrint = {
           proforma_number: docNum,
           customer_name: username || "Propietario",
-          items: cart,
+          items: cartSnapshot,
           total: total
         };
         console.log('Iniciando auto-impresión POS (Doble Copia)...');
-        await silentPrintSaleReceipt(saleDataForPrint, true);
-      } catch (e: any) {
-        console.error('Error impresión POS:', e);
-      }
+        silentPrintSaleReceipt(saleDataForPrint, true)
+          .catch((e: any) => console.error('Error impresión POS:', e));
+      }, 50);
+
     } catch (err) {
       console.error(err);
       alert(err instanceof Error ? err.message : "Error al emitir el ticket.");
@@ -1308,25 +1389,31 @@ export default function POSPage() {
                       </div>
                       <div className="flex justify-between items-center text-xs mt-0.5">
                         <span className="text-muted-foreground font-mono">{new Date(ticket.created_at).toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" })}</span>
-                        <span className="font-black text-emerald-500 text-sm">S/ {ticket.total.toFixed(2)}</span>
+                        <span className={`font-black text-sm ${
+                          ticket.status === 'PENDING' ? 'text-orange-500' :
+                          ticket.status === 'COMPLETED' ? 'text-emerald-500' :
+                          'text-muted-foreground line-through'
+                        }`}>
+                          S/ {ticket.total.toFixed(2)}
+                        </span>
                       </div>
-                      {(() => {
-                        if (ticket.status === 'PENDING') {
-                          return (
-                            <div className="text-[10px] font-medium text-muted-foreground mt-0.5">
-                              Aún no se ha cobrado
-                            </div>
-                          );
-                        }
-                        if (!permissions?.view_cashier_name) return null;
-                        const atendidoName = (ticket as any).seller?.username || 'ADMIN';
-                        return (
-                          <div className="text-[10px] font-bold text-emerald-600 uppercase mt-0.5">
-                            ATENDIDO POR: {atendidoName}
+                      <div className="flex flex-col gap-0.5 mt-1">
+                        {permissions?.view_cashier_name && (
+                          <div className={`text-[10px] font-bold uppercase ${
+                            ticket.status === 'PENDING' ? 'text-orange-600/90' :
+                            ticket.status === 'COMPLETED' ? 'text-emerald-600' :
+                            'text-muted-foreground'
+                          }`}>
+                            ATENDIDO POR: {(ticket as any).seller?.username || 'ADMIN'}
                           </div>
-                        );
-                      })()}
-                      <div className="flex gap-2 mt-1">
+                        )}
+                        {ticket.status === 'PENDING' && (
+                          <div className="text-[10px] font-medium text-orange-500/80">
+                            Aún no se ha cobrado
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex gap-2 mt-2">
                         <button
                           onClick={() => handleReprint(ticket)}
                           className="flex-1 py-1.5 bg-secondary/50 hover:bg-secondary rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition-colors"

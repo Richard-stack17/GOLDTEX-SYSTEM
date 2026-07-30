@@ -10,9 +10,11 @@ import {
 import {
   CreditCard, Banknote, Smartphone, RefreshCw,
   CheckCircle2, AlertCircle, ArrowLeft, Clock, Receipt, XCircle,
-  LayoutGrid, List, Trash2, Delete, Sun, Moon, FileText, User, Printer, Lock
+  LayoutGrid, List, Trash2, Delete, Sun, Moon, FileText, User, Printer, Lock,
+  ArrowUpDown, ArrowUp, ArrowDown
 } from "lucide-react";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { useTableSort } from "../hooks/useTableSort";
 import { supabase } from "../lib/supabase";
 import {
   formatTicketHash,
@@ -267,7 +269,18 @@ function TicketTableRow({
       </td>
       <td className="px-6 py-4 text-right whitespace-nowrap">
         {ticket.status === "PENDING" ? (
-          <span className="font-black text-emerald-500 dark:text-emerald-400 text-lg">—</span>
+          <div className="flex flex-col items-end leading-none">
+            <span className="font-black text-orange-500 text-lg">
+              S/ {ticket.total.toFixed(2)}
+            </span>
+            <span className="text-[10px] font-bold text-orange-500/80 uppercase mt-1">
+              Por cobrar
+            </span>
+          </div>
+        ) : ticket.status === "CANCELLED" ? (
+          <span className="font-black text-muted-foreground/60 line-through text-lg">
+            S/ {ticket.total.toFixed(2)}
+          </span>
         ) : (() => {
           const typedSuma = (Number(rowBuffer.monto) || 0) + (Number(rowBuffer.bcp) || 0) + (Number(rowBuffer.bbva) || 0) + (Number(rowBuffer.izipay) || 0);
           const isMatch = Math.abs(typedSuma - ticket.total) < 0.01;
@@ -546,7 +559,7 @@ export default function CajaPage() {
       setLastRefresh(new Date());
     }
     setIsLoading(false);
-  }, []);
+  }, [activeStoreId]);
 
   useEffect(() => {
     async function loadSettings() {
@@ -563,16 +576,36 @@ export default function CajaPage() {
       }
     }
     loadSettings();
-  }, []);
+  }, [activeStoreId]);
 
   useEffect(() => {
     fetchTickets();
-    const channel = supabase
-      .channel("caja-sales-changes")
+
+    const channelName = activeStoreId ? `caja_tickets_${activeStoreId}` : 'caja_tickets_all';
+
+    const cajaChannel = supabase
+      .channel(channelName)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "sales" },
-        () => {
+        {
+          event: "*",
+          schema: "public",
+          table: "sales"
+        },
+        (payload) => {
+          console.log('⚡ [REALTIME - CAJA] Evento detectado en sales:', payload);
+          fetchTickets();
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "transactions"
+        },
+        (payload) => {
+          console.log('⚡ [REALTIME - CAJA] Evento detectado en transactions:', payload);
           fetchTickets();
         }
       )
@@ -581,16 +614,46 @@ export default function CajaPage() {
     const interval = setInterval(fetchTickets, 5000);
     return () => {
       clearInterval(interval);
-      supabase.removeChannel(channel);
+      supabase.removeChannel(cajaChannel);
     };
-  }, [fetchTickets]);
+  }, [activeStoreId, fetchTickets]);
 
-  // ── Filtered tickets ──
-  const filteredTickets = statusFilter === "ALL"
-    ? tickets
-    : tickets.filter(t => t.status === statusFilter);
+  // ── Filtered & Sorted tickets ──
+  const enrichedFilteredTickets = useMemo(() => {
+    const base = statusFilter === "ALL"
+      ? tickets
+      : tickets.filter(t => t.status === statusFilter);
 
-  const filteredTotal = filteredTickets.reduce((s, t) => s + t.total, 0);
+    return base.map(t => {
+      const txs = t.transactions || [];
+      const sumBy = (m: string) => txs.filter((tx: any) => tx.payment_method === m).reduce((s: number, tx: any) => s + (tx.amount || 0), 0);
+      return {
+        ...t,
+        efectivo_amt: sumBy("EFECTIVO"),
+        bcp_amt: sumBy("BCP"),
+        bbva_amt: sumBy("BBVA"),
+        izipay_amt: sumBy("IZIPAY"),
+      };
+    });
+  }, [tickets, statusFilter]);
+
+  const { items: sortedTickets, requestSort, sortConfig } = useTableSort(enrichedFilteredTickets, {
+    key: 'internal_ticket_number',
+    direction: 'desc'
+  });
+
+  const filteredTotal = enrichedFilteredTickets.reduce((s, t) => s + t.total, 0);
+
+  const renderSortIcon = (key: string) => {
+    if (!sortConfig || sortConfig.key !== key) {
+      return <ArrowUpDown className="w-3.5 h-3.5 text-muted-foreground/50 opacity-60 group-hover:opacity-100 transition-opacity" />;
+    }
+    return sortConfig.direction === 'asc' ? (
+      <ArrowUp className="w-3.5 h-3.5 text-primary font-bold" />
+    ) : (
+      <ArrowDown className="w-3.5 h-3.5 text-primary font-bold" />
+    );
+  };
 
   // ─────────────── Handlers ───────────────
   const handleNumpadKey = (key: string) => {
@@ -786,14 +849,11 @@ export default function CajaPage() {
         } catch (e) {}
       }
 
-      const { error } = await supabase
-        .from("sales")
-        .update({
-          status: "CANCELLED",
-          updated_at: updated_at,
-          cancelled_by_id: cancellerId
-        })
-        .eq("id", ticketToCancel.id);
+      const { error } = await supabase.rpc('cancel_pos_ticket', {
+        p_sale_id: ticketToCancel.id,
+        p_cancel_reason: "Anulado por el Cajero",
+        p_cancelled_by_id: cancellerId
+      });
       if (error) throw error;
 
       setTickets((prev) => prev.map(t => t.id === ticketToCancel.id ? {
@@ -1023,7 +1083,7 @@ export default function CajaPage() {
       <div className="bg-card/60 border-b border-border/50 px-6 py-3 flex items-center gap-6">
         <div className="flex items-center gap-2.5">
           <AlertCircle className="w-4 h-4 text-orange-500" />
-          <span className="text-orange-500 font-black text-lg">{filteredTickets.length}</span>
+          <span className="text-orange-500 font-black text-lg">{sortedTickets.length}</span>
           <span className="text-muted-foreground text-sm font-medium">
             tickets {
               statusFilter === "PENDING" ? "pendientes" :
@@ -1051,7 +1111,7 @@ export default function CajaPage() {
             <RefreshCw className="w-10 h-10 animate-spin" />
             <p className="font-medium">Cargando tickets del día...</p>
           </div>
-        ) : filteredTickets.length === 0 ? (
+        ) : sortedTickets.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 gap-4">
             <CheckCircle2 className="w-16 h-16 text-emerald-500" />
             <p className="text-xl font-bold">
@@ -1063,7 +1123,7 @@ export default function CajaPage() {
           </div>
         ) : viewMode === "grid" ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 max-w-screen-xl mx-auto">
-            {filteredTickets.map((ticket) => {
+            {sortedTickets.map((ticket) => {
               const time = formatTime(ticket.created_at);
               const badge = statusBadge(ticket.status);
               const ticketNo = parseInternalTicketNum(ticket);
@@ -1138,21 +1198,85 @@ export default function CajaPage() {
         ) : (
           <div className="max-w-screen-xl mx-auto overflow-hidden rounded-xl border border-border bg-card">
             <table className="w-full text-left text-sm">
-              <thead className="bg-background text-muted-foreground border-b border-border">
+              <thead className="bg-background text-muted-foreground border-b border-border select-none">
                 <tr>
-                  <th className="px-6 py-4 font-bold">Ticket</th>
-                  <th className="px-6 py-4 font-bold">Documento</th>
-                  <th className="px-6 py-4 font-bold text-right">Efectivo</th>
-                  <th className="px-6 py-4 font-bold text-right">BCP</th>
-                  <th className="px-6 py-4 font-bold text-right">BBVA</th>
-                  <th className="px-6 py-4 font-bold text-right">Izipay</th>
-                  <th className="px-6 py-4 font-bold text-right whitespace-nowrap">Total</th>
-                  <th className="px-6 py-4 font-bold">Estado</th>
+                  <th
+                    onClick={() => requestSort("internal_ticket_number" as any)}
+                    className="px-6 py-4 font-bold cursor-pointer group hover:text-foreground transition-colors"
+                  >
+                    <div className="inline-flex items-center gap-1.5">
+                      <span>Ticket</span>
+                      {renderSortIcon("internal_ticket_number")}
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => requestSort("proforma_number" as any)}
+                    className="px-6 py-4 font-bold cursor-pointer group hover:text-foreground transition-colors"
+                  >
+                    <div className="inline-flex items-center gap-1.5">
+                      <span>Documento</span>
+                      {renderSortIcon("proforma_number")}
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => requestSort("efectivo_amt" as any)}
+                    className="px-6 py-4 font-bold text-right cursor-pointer group hover:text-foreground transition-colors"
+                  >
+                    <div className="inline-flex items-center justify-end gap-1.5 w-full">
+                      <span>Efectivo</span>
+                      {renderSortIcon("efectivo_amt")}
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => requestSort("bcp_amt" as any)}
+                    className="px-6 py-4 font-bold text-right cursor-pointer group hover:text-foreground transition-colors"
+                  >
+                    <div className="inline-flex items-center justify-end gap-1.5 w-full">
+                      <span>BCP</span>
+                      {renderSortIcon("bcp_amt")}
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => requestSort("bbva_amt" as any)}
+                    className="px-6 py-4 font-bold text-right cursor-pointer group hover:text-foreground transition-colors"
+                  >
+                    <div className="inline-flex items-center justify-end gap-1.5 w-full">
+                      <span>BBVA</span>
+                      {renderSortIcon("bbva_amt")}
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => requestSort("izipay_amt" as any)}
+                    className="px-6 py-4 font-bold text-right cursor-pointer group hover:text-foreground transition-colors"
+                  >
+                    <div className="inline-flex items-center justify-end gap-1.5 w-full">
+                      <span>Izipay</span>
+                      {renderSortIcon("izipay_amt")}
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => requestSort("total" as any)}
+                    className="px-6 py-4 font-bold text-right whitespace-nowrap cursor-pointer group hover:text-foreground transition-colors"
+                  >
+                    <div className="inline-flex items-center justify-end gap-1.5 w-full">
+                      <span>Total</span>
+                      {renderSortIcon("total")}
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => requestSort("status" as any)}
+                    className="px-6 py-4 font-bold cursor-pointer group hover:text-foreground transition-colors"
+                  >
+                    <div className="inline-flex items-center gap-1.5">
+                      <span>Estado</span>
+                      {renderSortIcon("status")}
+                    </div>
+                  </th>
                   <th className="px-6 py-4 font-bold text-right">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {filteredTickets.map((ticket) => (
+                {sortedTickets.map((ticket) => (
                   <TicketTableRow
                     key={ticket.id}
                     ticket={ticket}

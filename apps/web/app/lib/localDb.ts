@@ -67,7 +67,7 @@ export interface LocalTransaction {
 export interface LocalEmployee {
   id: string;
   full_name: string;
-  document_number: string | null;
+  dni: string | null;
 }
 
 export interface PendingSale {
@@ -102,7 +102,7 @@ export class GoltexPosDB extends Dexie {
       roles: 'id, name',
       sales: 'id, issue_date, status',
       transactions: 'id, sale_id, payment_method',
-      employees: 'id, full_name, document_number'
+      employees: 'id, full_name, dni'
     });
   }
 }
@@ -203,11 +203,11 @@ export async function syncCatalog(targetStoreId?: string) {
     }
 
     // 6. Sincronizar empleados
-    const { data: employeesData, error: employeesError } = await supabase
+    const { data: employeesData, error: empError } = await supabase
       .from('employees')
-      .select('id, full_name, document_number');
+      .select('id, full_name, dni');
 
-    if (!employeesError && employeesData) {
+    if (!empError && employeesData) {
       await db.employees.bulkPut(employeesData);
       console.log(`✅ ${employeesData.length} empleados sincronizados.`);
     }

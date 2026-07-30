@@ -51,6 +51,8 @@ export default function HubPage() {
     permissions?.access_settings
   );
 
+  console.log('🎨 [HUB RENDER] Evaluando permisos en vivo para rol:', role, permissions);
+
   return (
     <div className="min-h-screen p-8 max-w-[1400px] mx-auto space-y-12">
       <header className="flex justify-between items-end border-b border-white/10 pb-6">

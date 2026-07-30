@@ -1,6 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect } from "react";
+import { usePathname } from "next/navigation";
 import { supabase } from "../lib/supabase";
 import { useRole } from "./RoleContext";
 import { syncCatalog, db } from "../lib/localDb";
@@ -28,7 +29,8 @@ interface StoreContextProps {
 const StoreContext = createContext<StoreContextProps | undefined>(undefined);
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
-  const { employeeId, isHydrated, setRole, role } = useRole();
+  const pathname = usePathname();
+  const { employeeId, isHydrated, setRole, role, defaultStoreId, profileId } = useRole();
   const [activeStore, setActiveStoreState] = useState<Store | null>(null);
   const [availableStores, setAvailableStores] = useState<Store[]>([]);
   const [isLoadingStores, setIsLoadingStores] = useState(true);
@@ -43,6 +45,100 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!isHydrated || !role) return;
     loadUserStores();
   }, [isHydrated, employeeId, role]);
+
+  const applyProfileStore = async (targetStoreId: string | null) => {
+    if (!targetStoreId) return;
+
+    let targetStore = availableStores.find((store) => store.id === targetStoreId);
+
+    if (!targetStore) {
+      const { data: storeData } = await supabase
+        .from("stores")
+        .select("*")
+        .eq("id", targetStoreId)
+        .maybeSingle();
+
+      if (storeData) {
+        targetStore = { ...storeData, role: role || "USER" };
+      }
+    }
+
+    if (!targetStore) return;
+
+    // Si el usuario NO es ADMIN, solo agregamos la tienda si estamos seguros
+    // de que fue autorizada. Pero loadUserStores ya es el único que debe setear
+    // availableStores. Así que para no-admins, simplemente evitamos sobrescribir su lista 
+    // con una tienda a la que no tengan acceso.
+    if (role !== "ADMIN") {
+      // No hacemos setAvailableStores. La lista de tiendas asignadas NO debe alterarse
+      // si intentan cambiar a una tienda fantasma.
+    } else {
+      setAvailableStores((prev) => {
+        if (prev.some((s) => s.id === targetStore!.id)) return prev;
+        return [...prev, targetStore!];
+      });
+    }
+
+    const currentStoreId = activeStore?.id || localStorage.getItem("goltex_active_store_id");
+    if (currentStoreId === targetStoreId && activeStore?.id === targetStoreId && !isAllStoresMode) return;
+
+    console.log("🔄 [STORE CONTEXT] Forzando re-render visual a tienda única:", targetStore.name, "(", targetStoreId, ")");
+
+    await clearDexieCache();
+    setIsAllStoresModeState(false);
+    setActiveStoreState(targetStore);
+    localStorage.setItem("goltex_active_store_id", targetStore.id);
+    localStorage.setItem("goltex_active_store_name", targetStore.name);
+    localStorage.setItem("goltex_store_mode", "SINGLE");
+    await syncCatalog(targetStore.id);
+  };
+
+  // Reaccionar inmediatamente a los cambios en defaultStoreId para usuarios no-ADMIN
+  useEffect(() => {
+    if (!isHydrated || !defaultStoreId || role === "ADMIN") return;
+
+    // Validar que el defaultStoreId sea una de las tiendas permitidas del usuario
+    if (availableStores.length > 0 && !availableStores.some(s => s.id === defaultStoreId)) {
+      return; // Ignorar el defaultStoreId si no está en la lista de tiendas del cajero
+    }
+
+    const currentStoreId = activeStore?.id || localStorage.getItem("goltex_active_store_id");
+    if (defaultStoreId !== currentStoreId) {
+      console.log("🏬 [STORE CONTEXT] Cambio reactivo detectado en defaultStoreId para empleado:", { defaultStoreId, currentStoreId });
+      void applyProfileStore(defaultStoreId);
+    }
+  }, [defaultStoreId, isHydrated, role, availableStores, activeStore?.id]);
+
+  useEffect(() => {
+    if (!isHydrated || !profileId || role === "ADMIN") return;
+
+    const recheckCurrentStore = async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("default_store_id")
+        .eq("id", profileId)
+        .single();
+
+      if (error || !data?.default_store_id) return;
+
+      // Validar que el nuevo defaultStoreId del backend exista en sus tiendas permitidas
+      if (availableStores.length > 0 && !availableStores.some(s => s.id === data.default_store_id)) {
+        return;
+      }
+
+      const currentStoreId = activeStore?.id || localStorage.getItem("goltex_active_store_id");
+      if (data.default_store_id !== currentStoreId) {
+        void applyProfileStore(data.default_store_id);
+      }
+    };
+
+    const handleFocus = () => {
+      void recheckCurrentStore();
+    };
+
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, [activeStore?.id, isHydrated, pathname, profileId, role]);
 
   const loadUserStores = async () => {
     setIsLoadingStores(true);
@@ -64,31 +160,31 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       // Si es ADMIN, tiene acceso a TODAS las tiendas
       if (role === 'ADMIN') {
         storesForUser = allStores.map(s => ({ ...s, role: 'ADMIN' }));
-      } else if (employeeId) {
-        // Consultar employee_stores para ver a qué tiendas pertenece el empleado
-        const { data: empStores, error: empError } = await supabase
-          .from("employee_stores")
-          .select("store_id, role, stores (*)")
-          .eq("employee_id", employeeId);
-          
-        if (empError) {
-           console.error("Error al consultar employee_stores:", empError);
-        }
-
-        if (empStores && empStores.length > 0) {
-          storesForUser = empStores.map((es: any) => ({
-            id: es.stores.id,
-            name: es.stores.name,
-            address: es.stores.address,
-            phone: es.stores.phone,
-            role: es.role || role
-          }));
-        } else {
-          // Fallback: si no tiene asignación explícita, ve todas
-          storesForUser = allStores.map(s => ({ ...s, role }));
-        }
       } else {
-        storesForUser = allStores.map(s => ({ ...s, role }));
+        // REGLA ESTRICTA PARA NO-ADMINS: Solo tienen acceso a sus tiendas explícitamente asignadas en employee_stores.
+        if (employeeId) {
+          const { data: empStores, error: empError } = await supabase
+            .from("employee_stores")
+            .select("store_id, role, stores (*)")
+            .eq("employee_id", employeeId);
+            
+          if (empError) {
+             console.error("Error al consultar employee_stores:", empError);
+          }
+
+          if (empStores && empStores.length > 0) {
+            storesForUser = empStores.map((es: any) => ({
+              id: es.stores.id,
+              name: es.stores.name,
+              address: es.stores.address,
+              phone: es.stores.phone,
+              role: es.role || role
+            }));
+          }
+        }
+        
+        // Si no se encontraron por employee_stores, el usuario NO TIENE tiendas (se evita asimilar todas las tiendas)
+        // Ya no forzamos a 1 sola tienda. El usuario conserva todas las tiendas que le dio employee_stores.
       }
 
       setAvailableStores(storesForUser);
@@ -100,6 +196,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       // Limpiar basura del localStorage ("null" literal o "undefined")
       if (savedMode === "null" || savedMode === "undefined") savedMode = null;
       if (savedStoreId === "null" || savedStoreId === "undefined") savedStoreId = null;
+
+      // REGLA ESTRICTA PARA NO-ADMINS en la inicialización:
+      if (role !== "ADMIN") {
+         // Los no-admins nunca deben estar en modo consolidado
+         savedMode = "SINGLE";
+         
+         // Validar defaultStoreId
+         const isDefaultValid = defaultStoreId && storesForUser.some(s => s.id === defaultStoreId);
+         const preferredStartId = isDefaultValid ? defaultStoreId : (storesForUser.length > 0 ? storesForUser[0]?.id : null);
+         
+         // Si la tienda guardada no es válida para sus permisos, resetearla
+         const isSavedValid = savedStoreId && storesForUser.some(s => s.id === savedStoreId);
+         if (!isSavedValid && preferredStartId) {
+            console.log("🔒 [STORE CONTEXT] Reset de seguridad: LocalStorage o defaultStoreId inválido. Forzando a:", preferredStartId);
+            savedStoreId = preferredStartId;
+         }
+      }
 
       let debugMode = "NINGUNO";
 
