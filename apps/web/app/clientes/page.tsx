@@ -2,13 +2,15 @@
 
 import React, { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
-import { Users, Search, Plus, Edit, Trash2, ArrowLeft } from "lucide-react";
+import { Users, Search, Plus, Edit, Trash2, ArrowLeft, RotateCcw, CheckCircle2, ShieldAlert } from "lucide-react";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import Link from "next/link";
 import { useRole } from "../context/RoleContext";
 import { useStore } from "../context/StoreContext";
 import StoreSwitcher from "../components/StoreSwitcher";
 import { AccessDeniedView } from "../components/AccessDeniedView";
+import { Pagination, SortableTableHead } from "@goltex/ui";
+import { useTableSort } from "../hooks/useTableSort";
 
 type Customer = {
   id: string;
@@ -18,7 +20,24 @@ type Customer = {
   is_frequent: boolean;
   store_id?: string | null;
   created_at?: string;
+  is_active?: boolean;
 };
+
+// ─── Toast helper ─────────────────────────────────────────────────────────────
+function Toast({ message, type }: { message: string; type: 'success' | 'error' }) {
+  return (
+    <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 px-5 py-3.5 rounded-2xl border shadow-2xl font-bold text-sm opacity-100 animate-in fade-in slide-in-from-bottom-4 ${
+      type === 'success'
+        ? 'bg-emerald-600 text-white border-emerald-700'
+        : 'bg-red-600 text-white border-red-700'
+    }`}>
+      {type === 'success'
+        ? <CheckCircle2 className="w-5 h-5 shrink-0 text-white" />
+        : <ShieldAlert className="w-5 h-5 shrink-0 text-white" />}
+      <span>{message}</span>
+    </div>
+  );
+}
 
 export default function ClientesPage() {
   const { role, isHydrated, permissions } = useRole();
@@ -27,11 +46,12 @@ export default function ClientesPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [showInactive, setShowInactive] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
-  if (!isHydrated) return null;
-  if (!permissions?.access_clientes) {
-    return <AccessDeniedView moduleName="Clientes Frecuentes" />;
-  }
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
@@ -48,6 +68,16 @@ export default function ClientesPage() {
     fetchCustomers();
   }, [activeStoreId]);
 
+  // Reset page when search or toggle changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, showInactive]);
+
+  const showToast = (message: string, type: 'success' | 'error') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  };
+
   const fetchCustomers = async () => {
     setLoading(true);
     let query = supabase.from("customers").select("*").order("created_at", { ascending: false });
@@ -62,10 +92,20 @@ export default function ClientesPage() {
     setLoading(false);
   };
 
-  const filteredCustomers = customers.filter(c =>
-    c.business_name.toLowerCase().includes(search.toLowerCase()) ||
-    (c.doc_number && c.doc_number.includes(search))
-  );
+  const baseFilteredCustomers = customers.filter(c => {
+    const matchesSearch = c.business_name.toLowerCase().includes(search.toLowerCase()) ||
+      (c.doc_number && c.doc_number.includes(search));
+    const matchesActive = showInactive ? true : (c.is_active !== false);
+    return matchesSearch && matchesActive;
+  });
+
+  const { items: sortedCustomers, requestSort, sortConfig } = useTableSort(baseFilteredCustomers, {
+    key: "business_name",
+    direction: "asc"
+  });
+
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedCustomers = sortedCustomers.slice(startIndex, startIndex + itemsPerPage);
 
   const handleOpenModal = (customer?: Customer) => {
     setError(null);
@@ -109,6 +149,7 @@ export default function ClientesPage() {
       document_type,
       is_frequent: true,
       store_id: activeStoreId,
+      is_active: true,
     };
 
     try {
@@ -118,11 +159,13 @@ export default function ClientesPage() {
           .update(payload)
           .eq("id", editingCustomer.id);
         if (updateErr) throw updateErr;
+        showToast("Cliente actualizado correctamente", "success");
       } else {
         const { error: insertErr } = await supabase
           .from("customers")
           .insert([payload]);
         if (insertErr) throw insertErr;
+        showToast("Cliente creado correctamente", "success");
       }
       setIsModalOpen(false);
       fetchCustomers();
@@ -139,17 +182,48 @@ export default function ClientesPage() {
 
   const confirmDelete = async () => {
     if (!customerToDelete) return;
-    const { error } = await supabase.from("customers").delete().eq("id", customerToDelete.id);
-    if (!error) {
-      setCustomers(customers.filter(c => c.id !== customerToDelete.id));
-    } else {
-      alert("Error al eliminar. Es posible que el cliente tenga ventas asociadas.");
+    try {
+      const { error } = await supabase
+        .from("customers")
+        .update({ is_active: false })
+        .eq("id", customerToDelete.id);
+
+      if (error) throw error;
+
+      showToast("Cliente desactivado correctamente", "success");
+      fetchCustomers();
+    } catch (err: any) {
+      showToast(err.message || "Error al desactivar cliente", "error");
+    } finally {
+      setCustomerToDelete(null);
     }
-    setCustomerToDelete(null);
   };
+
+  const handleReactivate = async (customer: Customer) => {
+    try {
+      const { error } = await supabase
+        .from("customers")
+        .update({ is_active: true })
+        .eq("id", customer.id);
+
+      if (error) throw error;
+
+      showToast("Cliente reactivado correctamente", "success");
+      fetchCustomers();
+    } catch (err: any) {
+      showToast(err.message || "Error al reactivar cliente", "error");
+    }
+  };
+
+  if (!isHydrated) return null;
+  if (!permissions?.access_clientes) {
+    return <AccessDeniedView moduleName="Clientes Frecuentes" />;
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
+      {toast && <Toast message={toast.message} type={toast.type} />}
+
       <main className="flex-1">
         <header className="bg-card border-b border-border px-6 h-16 flex items-center justify-between shadow-sm">
           <div className="flex items-center gap-4">
@@ -180,24 +254,49 @@ export default function ClientesPage() {
         </header>
 
         <div className="p-8 max-w-5xl mx-auto space-y-6">
-          <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-200 flex items-center gap-3">
-            <Search className="w-5 h-5 text-gray-400 shrink-0 ml-2" />
-            <input
-              type="text"
-              placeholder="Buscar por DNI/RUC o Nombre..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="w-full bg-transparent border-none focus:outline-none text-gray-900 font-medium placeholder:text-gray-400"
-            />
+          {/* Controls bar */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+            <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-200 flex items-center gap-3 flex-1">
+              <Search className="w-5 h-5 text-gray-400 shrink-0 ml-2" />
+              <input
+                type="text"
+                placeholder="Buscar por DNI/RUC o Nombre..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="w-full bg-transparent border-none focus:outline-none text-gray-900 font-medium placeholder:text-gray-400"
+              />
+            </div>
+
+            {/* Toggle show inactive */}
+            <div className="bg-white px-4 py-3.5 rounded-2xl shadow-sm border border-gray-200 flex items-center gap-3 shrink-0">
+              <label className="text-xs font-bold text-gray-600 cursor-pointer select-none flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={showInactive}
+                  onChange={(e) => setShowInactive(e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                />
+                Mostrar inactivos
+              </label>
+            </div>
           </div>
 
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
             <table className="w-full text-left text-sm">
               <thead className="bg-gray-50 border-b border-gray-200 text-gray-600">
                 <tr>
-                  <th className="px-6 py-4 font-bold">Documento</th>
-                  <th className="px-6 py-4 font-bold">Razón Social / Nombre</th>
-                  <th className="px-6 py-4 font-bold text-center">Tipo</th>
+                  <SortableTableHead field="doc_number" currentSort={sortConfig} onSort={(k) => requestSort(k as any)}>
+                    Documento
+                  </SortableTableHead>
+                  <SortableTableHead field="business_name" currentSort={sortConfig} onSort={(k) => requestSort(k as any)}>
+                    Razón Social / Nombre
+                  </SortableTableHead>
+                  <SortableTableHead field="document_type" currentSort={sortConfig} onSort={(k) => requestSort(k as any)} className="text-center">
+                    Tipo
+                  </SortableTableHead>
+                  <SortableTableHead field="is_active" currentSort={sortConfig} onSort={(k) => requestSort(k as any)} className="text-center">
+                    Estado
+                  </SortableTableHead>
                   <th className="px-6 py-4 font-bold text-center">Tienda</th>
                   <th className="px-6 py-4 font-bold text-right">Acciones</th>
                 </tr>
@@ -205,54 +304,98 @@ export default function ClientesPage() {
               <tbody className="divide-y divide-gray-100">
                 {loading ? (
                   <tr>
-                    <td colSpan={5} className="px-6 py-12 text-center text-gray-500">Cargando clientes...</td>
+                    <td colSpan={6} className="px-6 py-12 text-center text-gray-500">Cargando clientes...</td>
                   </tr>
-                ) : filteredCustomers.length === 0 ? (
+                ) : paginatedCustomers.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-6 py-12 text-center text-muted-foreground">No se encontraron clientes registrados en la base de datos.</td>
+                    <td colSpan={6} className="px-6 py-12 text-center text-muted-foreground">
+                      {search ? "No se encontraron clientes que coincidan con la búsqueda." : "No hay clientes registrados en esta vista."}
+                    </td>
                   </tr>
                 ) : (
-                  filteredCustomers.map(c => (
-                    <tr key={c.id} className="hover:bg-gray-50/50 transition-colors">
-                      <td className="px-6 py-4 font-mono font-medium text-gray-600">{c.doc_number || "---"}</td>
-                      <td className="px-6 py-4 font-bold text-gray-900">{c.business_name}</td>
-                      <td className="px-6 py-4 text-center">
-                        <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
-                          c.document_type === 'RUC' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
-                        }`}>
-                          {c.document_type || "DNI"}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-center">
-                        {c.store_id && availableStores.find(s => s.id === c.store_id) ? (
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap bg-blue-50 text-blue-700 border border-blue-200">
-                            {availableStores.find(s => s.id === c.store_id)?.name}
+                  paginatedCustomers.map(c => {
+                    const isActive = c.is_active !== false;
+                    return (
+                      <tr key={c.id} className={`transition-colors ${!isActive ? 'bg-gray-50/80 opacity-75' : 'hover:bg-gray-50/50'}`}>
+                        <td className="px-6 py-4 font-mono font-medium text-gray-600">{c.doc_number || "---"}</td>
+                        <td className="px-6 py-4 font-bold text-gray-900 flex items-center gap-2">
+                          <span>{c.business_name}</span>
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
+                            c.document_type === 'RUC' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
+                          }`}>
+                            {c.document_type || "DNI"}
                           </span>
-                        ) : (
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap bg-purple-50 text-purple-700 border border-purple-200">
-                            Acceso Global
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                            isActive
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              : 'bg-gray-100 text-gray-600 border border-gray-300'
+                          }`}>
+                            {isActive ? 'Activo' : 'Inactivo'}
                           </span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          {Boolean(permissions?.customers_edit) && (
-                            <button onClick={() => handleOpenModal(c)} className="p-2 text-gray-400 hover:text-indigo-600 transition-colors" title="Editar cliente">
-                              <Edit className="w-4 h-4" />
-                            </button>
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          {c.store_id && availableStores.find(s => s.id === c.store_id) ? (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap bg-blue-50 text-blue-700 border border-blue-200">
+                              {availableStores.find(s => s.id === c.store_id)?.name}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap bg-purple-50 text-purple-700 border border-purple-200">
+                              Acceso Global
+                            </span>
                           )}
-                          {Boolean(permissions?.customers_delete) && (
-                            <button onClick={() => handleDelete(c)} className="p-2 text-gray-400 hover:text-red-600 transition-colors" title="Eliminar cliente">
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            {isActive ? (
+                              <>
+                                {Boolean(permissions?.customers_edit) && (
+                                  <button onClick={() => handleOpenModal(c)} className="p-2 text-gray-400 hover:text-indigo-600 transition-colors" title="Editar cliente">
+                                    <Edit className="w-4 h-4" />
+                                  </button>
+                                )}
+                                {Boolean(permissions?.customers_delete) && (
+                                  <button onClick={() => handleDelete(c)} className="p-2 text-gray-400 hover:text-red-600 transition-colors" title="Desactivar cliente">
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </>
+                            ) : (
+                              Boolean(permissions?.customers_edit) && (
+                                <button
+                                  onClick={() => handleReactivate(c)}
+                                  className="p-2 text-gray-400 hover:text-emerald-600 transition-colors flex items-center gap-1 text-xs font-bold"
+                                  title="Reactivar cliente"
+                                >
+                                  <RotateCcw className="w-4 h-4 text-emerald-600" />
+                                  <span className="text-emerald-600 hidden sm:inline">Reactivar</span>
+                                </button>
+                              )
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
+
+            {/* Pagination Component */}
+            {sortedCustomers.length > 0 && (
+              <div className="border-t border-gray-200 bg-gray-50/50">
+                <Pagination
+                  currentPage={currentPage}
+                  totalItems={sortedCustomers.length}
+                  itemsPerPage={itemsPerPage}
+                  onPageChange={setCurrentPage}
+                  onItemsPerPageChange={setItemsPerPage}
+                />
+              </div>
+            )}
           </div>
         </div>
       </main>
@@ -261,8 +404,8 @@ export default function ClientesPage() {
         isOpen={!!customerToDelete}
         onCancel={() => setCustomerToDelete(null)}
         onConfirm={confirmDelete}
-        title="Eliminar Cliente"
-        description={`¿Estás seguro de que deseas eliminar al cliente ${customerToDelete?.business_name}? Esta acción no se puede deshacer.`}
+        title="Desactivar Cliente"
+        description={`¿Estás seguro de que deseas desactivar al cliente "${customerToDelete?.business_name}"? Podrás reactivarlo en cualquier momento desde el filtro de inactivos.`}
       />
 
       {isModalOpen && (

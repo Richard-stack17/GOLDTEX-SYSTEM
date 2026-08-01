@@ -71,7 +71,10 @@ export default function ConfiguracionPage() {
 
   const fetchStores = async () => {
     setIsLoading(true);
-    const { data, error } = await supabase.from('stores').select('*').order('created_at', { ascending: true });
+    let query = supabase.from('stores').select('*').order('created_at', { ascending: true });
+    if (!showInactive) query = query.eq('is_active', true);
+    
+    const { data, error } = await query;
     if (data) setStores(data);
     setIsLoading(false);
   };
@@ -349,6 +352,26 @@ export default function ConfiguracionPage() {
         {/* Tab Content */}
         {activeTab === 'STORES' ? (
           <div className="space-y-6">
+            <div className="flex justify-between items-center bg-card p-4 rounded-xl border border-border shadow-sm">
+              <div>
+                <h2 className="text-lg font-bold">Gestión de Tiendas</h2>
+                <p className="text-sm text-muted-foreground">Administra las sucursales de tu negocio.</p>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <span className="text-sm font-medium text-muted-foreground">Mostrar inactivas</span>
+                <div className="relative">
+                  <input
+                    type="checkbox"
+                    className="sr-only"
+                    checked={showInactive}
+                    onChange={(e) => setShowInactive(e.target.checked)}
+                  />
+                  <div className={`block w-10 h-6 rounded-full transition-colors ${showInactive ? 'bg-primary' : 'bg-secondary-foreground/20'}`}></div>
+                  <div className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${showInactive ? 'transform translate-x-4' : ''}`}></div>
+                </div>
+              </label>
+            </div>
+            
             {isLoading ? (
               <div className="flex flex-col items-center justify-center mt-20 text-blue-600">
                 <Loader2 className="w-8 h-8 animate-spin mb-2" />
@@ -365,7 +388,7 @@ export default function ConfiguracionPage() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {stores.map(store => (
-                  <div key={store.id} className={`bg-card border border-border rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow relative group ${store.is_active === false ? 'opacity-60 bg-secondary/10' : ''}`}>
+                  <div key={store.id} className={`bg-card border border-border rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow relative group flex flex-col h-full ${store.is_active === false ? 'opacity-60 bg-secondary/10' : ''}`}>
                     <div className="flex justify-between items-start mb-4">
                       <div className="w-12 h-12 bg-blue-500/10 rounded-xl flex items-center justify-center">
                         <Store className="w-6 h-6 text-blue-600" />
@@ -379,22 +402,22 @@ export default function ConfiguracionPage() {
                       </span>
                     </div>
                     <h3 className="text-lg font-bold text-foreground mb-1">{store.name}</h3>
-                    <div className="text-sm text-muted-foreground space-y-1 mt-3 font-semibold">
+                    <div className="text-sm text-muted-foreground space-y-1 mt-3 font-semibold mb-4">
                       <p><span className="font-bold text-muted-foreground/80">Dirección:</span> {store.address || 'No especificada'}</p>
                       <p><span className="font-bold text-muted-foreground/80">Teléfono:</span> {store.phone || 'No especificado'}</p>
                     </div>
-                    <div className="absolute top-4 right-4 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="mt-auto pt-4 border-t border-border flex justify-end gap-2">
                       <button 
                         onClick={() => { setEditingStore(store); setStoreForm({name: store.name, address: store.address || '', phone: store.phone || ''}); setIsStoreModalOpen(true); }}
-                        className="p-2 rounded-lg bg-secondary text-muted-foreground hover:text-foreground transition-colors border border-border"
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary text-muted-foreground hover:text-foreground transition-colors border border-border text-xs font-bold"
                         title="Editar tienda"
                       >
-                        <Edit2 className="w-4 h-4" />
+                        <Edit2 className="w-3.5 h-3.5" /> Editar
                       </button>
                       <button 
                         disabled={isCheckingStoreRefs}
                         onClick={() => handleToggleStoreActive(store)}
-                        className={`p-2 rounded-lg border border-border transition-colors ${
+                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border transition-colors text-xs font-bold ${
                           store.is_active !== false 
                             ? 'bg-red-500/10 hover:bg-red-500 hover:text-white text-red-500'
                             : 'bg-emerald-500/10 hover:bg-emerald-500 hover:text-white text-emerald-500'
@@ -402,10 +425,11 @@ export default function ConfiguracionPage() {
                         title={store.is_active !== false ? 'Desactivar tienda' : 'Reactivar tienda'}
                       >
                         {isCheckingStoreRefs && targetStoreToDeactivate?.id === store.id ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
                         ) : (
-                          <Power className="w-4 h-4" />
+                          <Power className="w-3.5 h-3.5" />
                         )}
+                        {store.is_active !== false ? 'Desactivar' : 'Reactivar'}
                       </button>
                     </div>
                   </div>

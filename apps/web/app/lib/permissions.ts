@@ -20,7 +20,8 @@ export async function hasPermission(roleName: string | null | undefined, permiss
     .from('roles')
     .select('permissions')
     .eq('name', roleName)
-    .single();
+    .limit(1)
+    .maybeSingle();
 
   if (error || !data || !data.permissions) {
     return false;

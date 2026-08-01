@@ -24,7 +24,8 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  SortableTableHead
+  SortableTableHead,
+  Pagination
 } from "@goltex/ui";
 import { useTableSort } from "../hooks/useTableSort";
 import { ArrowLeft, Search, Download, Filter, Plus, Edit2, Trash2, Save, FolderPlus, PackageSearch, AlertTriangle, Scissors, RefreshCcw } from "lucide-react";
@@ -212,6 +213,35 @@ export default function InventarioPage() {
 
   const { items: filteredFamilies, requestSort: requestFamilySort, sortConfig: familySortConfig } = useTableSort(baseFilteredFamilies, { key: "code", direction: "asc" });
 
+  const baseFilteredServices = services.filter(s => 
+    (statusFilter === "ALL" ? true : statusFilter === "ACTIVE" ? s.is_active !== false : s.is_active === false) && 
+    s.name.toLowerCase().includes(serviceSearch.toLowerCase())
+  );
+
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+
+  // Reset page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab, statusFilter, search, familySearch, serviceSearch, itemsPerPage]);
+
+  const paginatedProducts = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    return filteredProducts.slice(start, start + itemsPerPage);
+  }, [filteredProducts, currentPage, itemsPerPage]);
+
+  const paginatedFamilies = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    return filteredFamilies.slice(start, start + itemsPerPage);
+  }, [filteredFamilies, currentPage, itemsPerPage]);
+
+  const paginatedServices = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    return baseFilteredServices.slice(start, start + itemsPerPage);
+  }, [baseFilteredServices, currentPage, itemsPerPage]);
+
   // Product CRUD functions
   const openModal = (product?: Product, mode: "catalogo" | "inventario" = "catalogo") => {
     setModalError("");
@@ -313,10 +343,7 @@ export default function InventarioPage() {
   };
 
   // Service CRUD functions
-  const filteredServices = services.filter(s => 
-    (statusFilter === "ALL" ? true : statusFilter === "ACTIVE" ? s.is_active !== false : s.is_active === false) && 
-    s.name.toLowerCase().includes(serviceSearch.toLowerCase())
-  );
+
 
   const restoreProduct = async (product: Product) => {
     const { error } = await supabase.from("products").update({ is_active: true }).eq("id", product.id);
@@ -664,7 +691,7 @@ export default function InventarioPage() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filteredProducts.map((product) => (
+                    paginatedProducts.map((product) => (
                       <TableRow key={product.id} className={`hover:bg-white/5 transition-colors ${product.is_active === false ? 'opacity-50 grayscale bg-gray-50' : ''}`}>
                         <TableCell className="font-mono text-sm font-bold text-primary">
                           {product.sku}
@@ -693,7 +720,7 @@ export default function InventarioPage() {
                                 {Boolean(permissions?.inventory_edit) && (
                                   <button onClick={() => openModal(product, "catalogo")} className="p-2 text-muted-foreground hover:text-indigo-600 transition-colors" title="Editar Producto">
                                     <Edit2 className="w-4 h-4" />
-                                  </button>
+                                 </button>
                                 )}
                                 {Boolean(permissions?.inventory_delete) && (
                                   <button onClick={() => handleDelete(product)} className="p-2 text-muted-foreground hover:text-rose-600 transition-colors" title="Eliminar Producto">
@@ -709,6 +736,17 @@ export default function InventarioPage() {
                   )}
                 </TableBody>
               </Table>
+              {filteredProducts.length > 0 && (
+                <div className="border-t border-border bg-surface/50">
+                  <Pagination
+                    currentPage={currentPage}
+                    totalItems={filteredProducts.length}
+                    itemsPerPage={itemsPerPage}
+                    onPageChange={setCurrentPage}
+                    onItemsPerPageChange={setItemsPerPage}
+                  />
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
@@ -760,7 +798,7 @@ export default function InventarioPage() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filteredProducts.map((product) => (
+                    paginatedProducts.map((product) => (
                       <TableRow key={product.id} className={`hover:bg-white/5 transition-colors ${product.is_active === false ? 'opacity-50 grayscale bg-gray-50' : ''}`}>
                         <TableCell className="font-mono text-sm font-bold text-primary">
                           {product.sku}
@@ -774,8 +812,8 @@ export default function InventarioPage() {
                         <TableCell className="text-muted-foreground text-sm font-medium">
                           {getStoreName(product.store_id)}
                         </TableCell>
-                        <TableCell className="text-right">
-                          <div className={`inline-flex items-center gap-1.5 ${product.stock <= 10 ? 'text-amber-500 font-bold' : ''}`}>
+                        <TableCell className="text-center">
+                          <div className={`inline-flex items-center justify-center gap-1.5 ${product.stock <= 10 ? 'text-amber-500 font-bold' : ''}`}>
                             {product.stock <= 10 && <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />}
                             {product.stock?.toFixed(2) || "0.00"}
                           </div>
@@ -802,6 +840,17 @@ export default function InventarioPage() {
                   )}
                 </TableBody>
               </Table>
+              {filteredProducts.length > 0 && (
+                <div className="border-t border-border bg-surface/50">
+                  <Pagination
+                    currentPage={currentPage}
+                    totalItems={filteredProducts.length}
+                    itemsPerPage={itemsPerPage}
+                    onPageChange={setCurrentPage}
+                    onItemsPerPageChange={setItemsPerPage}
+                  />
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
@@ -851,7 +900,7 @@ export default function InventarioPage() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filteredFamilies.map((family) => (
+                    paginatedFamilies.map((family) => (
                       <TableRow key={family.id} className={`hover:bg-white/5 transition-colors ${family.is_active === false ? 'opacity-50 grayscale bg-gray-50' : ''}`}>
                         <TableCell className="font-mono text-muted-foreground font-bold">
                           {family.code || "—"}
@@ -893,6 +942,17 @@ export default function InventarioPage() {
                   )}
                 </TableBody>
               </Table>
+              {filteredFamilies.length > 0 && (
+                <div className="border-t border-border bg-surface/50">
+                  <Pagination
+                    currentPage={currentPage}
+                    totalItems={filteredFamilies.length}
+                    itemsPerPage={itemsPerPage}
+                    onPageChange={setCurrentPage}
+                    onItemsPerPageChange={setItemsPerPage}
+                  />
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
@@ -934,14 +994,14 @@ export default function InventarioPage() {
                         Cargando servicios...
                       </TableCell>
                     </TableRow>
-                  ) : filteredServices.length === 0 ? (
+                  ) : baseFilteredServices.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={4} className="text-center py-12 text-muted-foreground">
                         No se encontraron servicios registrados. Agrega uno nuevo para usar en el POS.
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filteredServices.map((service) => (
+                    paginatedServices.map((service) => (
                       <TableRow key={service.id} className={`hover:bg-white/5 transition-colors ${service.is_active === false ? 'opacity-50 grayscale bg-gray-50' : ''}`}>
                         <TableCell className="font-bold text-foreground">
                           {service.name}
@@ -982,6 +1042,17 @@ export default function InventarioPage() {
                   )}
                 </TableBody>
               </Table>
+              {baseFilteredServices.length > 0 && (
+                <div className="border-t border-border bg-surface/50">
+                  <Pagination
+                    currentPage={currentPage}
+                    totalItems={baseFilteredServices.length}
+                    itemsPerPage={itemsPerPage}
+                    onPageChange={setCurrentPage}
+                    onItemsPerPageChange={setItemsPerPage}
+                  />
+                </div>
+              )}
             </CardContent>
           </Card>
         )}

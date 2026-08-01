@@ -87,7 +87,7 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
   useEffect(() => {
     // Load stores for selector
     const loadStores = async () => {
-      const { data } = await supabase.from('stores').select('*').order('created_at', { ascending: true });
+      const { data } = await supabase.from('stores').select('*').eq('is_active', true).order('created_at', { ascending: true });
       if (data) setStores(data);
     };
     loadStores();

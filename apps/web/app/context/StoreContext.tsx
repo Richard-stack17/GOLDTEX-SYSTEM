@@ -56,6 +56,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         .from("stores")
         .select("*")
         .eq("id", targetStoreId)
+        .eq("is_active", true)
         .maybeSingle();
 
       if (storeData) {
@@ -147,6 +148,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const { data: allStores, error: storesErr } = await supabase
         .from("stores")
         .select("*")
+        .eq("is_active", true)
         .order("name", { ascending: true });
 
       if (storesErr || !allStores) {
@@ -173,7 +175,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           }
 
           if (empStores && empStores.length > 0) {
-            storesForUser = empStores.map((es: any) => ({
+            // Filter strictly for active stores
+            const activeEmpStores = empStores.filter((es: any) => es.stores && es.stores.is_active === true);
+            
+            storesForUser = activeEmpStores.map((es: any) => ({
               id: es.stores.id,
               name: es.stores.name,
               address: es.stores.address,
@@ -183,8 +188,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           }
         }
         
-        // Si no se encontraron por employee_stores, el usuario NO TIENE tiendas (se evita asimilar todas las tiendas)
-        // Ya no forzamos a 1 sola tienda. El usuario conserva todas las tiendas que le dio employee_stores.
+        // BLOQUEO AUTOMÁTICO DE USUARIOS DE TIENDAS INACTIVAS
+        if (storesForUser.length === 0) {
+          console.error("🚫 [AUTH GUARD] Todas las tiendas del usuario están inactivas o no tiene tiendas asignadas.");
+          
+          // Clear session explicitly
+          localStorage.removeItem("goltex_role");
+          localStorage.removeItem("goltex_username");
+          localStorage.removeItem("goltex_employee_id");
+          localStorage.removeItem("goltex_profile_id");
+          localStorage.removeItem("goltex_default_store_id");
+          localStorage.removeItem("goltex_active_store_id");
+          localStorage.removeItem("goltex_store_mode");
+          localStorage.removeItem("goltex_permissions");
+          
+          if (typeof window !== "undefined") {
+            window.location.href = "/login?inactive_store=true";
+          }
+          return;
+        }
       }
 
       setAvailableStores(storesForUser);

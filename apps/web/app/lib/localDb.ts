@@ -39,6 +39,7 @@ export interface LocalRole {
   description: string;
   permissions: any;
   is_system: boolean;
+  store_id?: string | null;
 }
 
 export interface LocalSale {
@@ -177,9 +178,16 @@ export async function syncCatalog(targetStoreId?: string) {
     }
 
     // 4. Sincronizar roles y permisos
-    const { data: rolesData, error: rolesError } = await supabase
+    let rolesQuery = supabase
       .from('roles')
-      .select('id, name, description, permissions, is_system');
+      .select('id, name, description, permissions, is_system, store_id')
+      .eq('is_active', true);
+
+    if (storeId) {
+      rolesQuery = rolesQuery.or(`store_id.is.null,store_id.eq.${storeId}`);
+    }
+
+    const { data: rolesData, error: rolesError } = await rolesQuery;
 
     if (!rolesError && rolesData) {
       await db.roles.bulkPut(rolesData);

@@ -36,11 +36,15 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
   const fetchPermissions = useCallback(async (roleName: string) => {
     if (!roleName) return;
     try {
-      const { data, error } = await supabase
-        .from("roles")
-        .select("permissions")
-        .eq("name", roleName)
-        .single();
+      let query = supabase.from("roles").select("permissions").eq("name", roleName);
+      
+      const activeStoreId = localStorage.getItem("goltex_active_store_id") || localStorage.getItem("goltex_default_store_id");
+      
+      if (roleName !== 'ADMIN' && activeStoreId) {
+        query = query.eq("store_id", activeStoreId);
+      }
+      
+      const { data, error } = await query.limit(1).maybeSingle();
 
       if (!error && data && data.permissions) {
         let finalPerms = { ...data.permissions };
@@ -113,6 +117,24 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
           window.location.href = "/login?revoked=true";
         }
         return;
+      }
+
+      // 🛡️ AUTH GUARD: Verificar si el usuario tiene al menos una tienda activa
+      if (profile.role !== "ADMIN" && profile.employee_id) {
+        const { data: activeStoresCount, error: countErr } = await supabase
+          .from("employee_stores")
+          .select("store_id, stores!inner(is_active)")
+          .eq("employee_id", profile.employee_id)
+          .eq("stores.is_active", true);
+
+        if (!countErr && (!activeStoresCount || activeStoresCount.length === 0)) {
+          console.error("🚫 [AUTH GUARD] El usuario no tiene tiendas activas. Bloqueando sesión...");
+          clearSession();
+          if (typeof window !== "undefined") {
+            window.location.href = "/login?inactive_store=true";
+          }
+          return;
+        }
       }
 
       const freshRole = profile.role;

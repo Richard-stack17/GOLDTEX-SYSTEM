@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useState, useEffect } from "react";
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input } from "@goltex/ui";
 import { Box } from "lucide-react";
 import { useRole, type Role } from "../context/RoleContext";
@@ -10,8 +10,15 @@ import bcrypt from "bcryptjs";
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { setUsername, setRole, setEmployeeId, setProfileId, setDefaultStoreId } = useRole();
   const [error, setError] = useState<string | null>(null);
+  
+  useEffect(() => {
+    if (searchParams.get("inactive_store") === "true") {
+      setError("Acceso Restringido: La sucursal asignada a tu cuenta ha sido desactivada. Contacta al administrador.");
+    }
+  }, [searchParams]);
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -50,6 +57,23 @@ export default function LoginPage() {
       // Password verification: compare plain text against password_hash column using bcrypt
       if (!bcrypt.compareSync(passwordInput, profileData.password_hash)) {
         throw new Error("Contraseña incorrecta.");
+      }
+
+      // 🛡️ AUTH GUARD: Verificar que el usuario tenga al menos una tienda activa
+      if (profileData.role !== "ADMIN" && profileData.employee_id) {
+        const { data: activeStoresCount, error: countErr } = await supabase
+          .from("employee_stores")
+          .select("store_id, stores!inner(is_active)")
+          .eq("employee_id", profileData.employee_id)
+          .eq("stores.is_active", true);
+          
+        if (countErr) {
+          throw new Error("Error al verificar los permisos de acceso.");
+        }
+        
+        if (!activeStoresCount || activeStoresCount.length === 0) {
+          throw new Error("Acceso Restringido: La sucursal asignada a tu cuenta ha sido desactivada. Contacta al administrador.");
+        }
       }
 
       const userRole = profileData.role as Role;
