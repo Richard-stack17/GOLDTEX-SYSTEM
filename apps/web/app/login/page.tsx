@@ -3,7 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState, useEffect } from "react";
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input } from "@goltex/ui";
-import { Box } from "lucide-react";
+import { Box, Eye, EyeOff } from "lucide-react";
 import { useRole, type Role } from "../context/RoleContext";
 import { supabase } from "../lib/supabase";
 import bcrypt from "bcryptjs";
@@ -13,6 +13,7 @@ export default function LoginPage() {
   const searchParams = useSearchParams();
   const { setUsername, setRole, setEmployeeId, setProfileId, setDefaultStoreId } = useRole();
   const [error, setError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
   
   useEffect(() => {
     if (searchParams.get("inactive_store") === "true") {
@@ -157,7 +158,24 @@ export default function LoginPage() {
                   ¿Olvidaste tu contraseña?
                 </a>
               </div>
-              <Input id="password" name="password" type="password" required className="bg-background/50 border-white/10" disabled={loading} />
+              <div className="relative">
+                <Input
+                  id="password"
+                  name="password"
+                  type={showPassword ? "text" : "password"}
+                  required
+                  className="bg-background/50 border-white/10 pr-10"
+                  disabled={loading}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-1"
+                  title={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
             </div>
             <Button type="submit" className="w-full h-11 text-base" disabled={loading}>
               {loading ? "Iniciando sesión..." : "Entrar al Sistema"}

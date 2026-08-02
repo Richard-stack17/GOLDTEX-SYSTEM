@@ -78,11 +78,6 @@ export default function InventarioPage() {
   const [activeTab, setActiveTab] = useState<"catalogo" | "inventario" | "familias" | "servicios">("catalogo");
   const [statusFilter, setStatusFilter] = useState<"ALL" | "ACTIVE" | "INACTIVE">("ACTIVE");
 
-  if (!isHydrated) return null;
-  if (!permissions?.access_inventory) {
-    return <AccessDeniedView moduleName="Catálogo / Inventario" />;
-  }
-
   // Products states
   const [products, setProducts] = useState<Product[]>([]);
   const [loadingProducts, setLoadingProducts] = useState(true);
@@ -160,8 +155,11 @@ export default function InventarioPage() {
   const fetchProducts = async () => {
     setLoadingProducts(true);
     let query = supabase.from("products").select("*").order("created_at", { ascending: false });
-    if (isAllStoresMode) query = query.in("store_id", availableStoreIds);
-    else if (activeStoreId) query = query.eq("store_id", activeStoreId);
+    if (isAllStoresMode) {
+      query = query.in("store_id", availableStoreIds.length > 0 ? availableStoreIds : ['none']);
+    } else if (activeStoreId) {
+      query = query.eq("store_id", activeStoreId);
+    }
     
     const { data, error } = await query;
 
@@ -174,8 +172,11 @@ export default function InventarioPage() {
   const fetchFamilies = async () => {
     setLoadingFamilies(true);
     let query = supabase.from("families").select("*").order("name", { ascending: true });
-    if (isAllStoresMode) query = query.in("store_id", availableStoreIds);
-    else if (activeStoreId) query = query.eq("store_id", activeStoreId);
+    if (isAllStoresMode) {
+      query = query.in("store_id", availableStoreIds.length > 0 ? availableStoreIds : ['none']);
+    } else if (activeStoreId) {
+      query = query.eq("store_id", activeStoreId);
+    }
     
     const { data, error } = await query;
 
@@ -188,8 +189,11 @@ export default function InventarioPage() {
   const fetchServices = async () => {
     setLoadingServices(true);
     let query = supabase.from("services").select("*").order("name", { ascending: true });
-    if (isAllStoresMode) query = query.in("store_id", availableStoreIds);
-    else if (activeStoreId) query = query.eq("store_id", activeStoreId);
+    if (isAllStoresMode) {
+      query = query.in("store_id", availableStoreIds.length > 0 ? availableStoreIds : ['none']);
+    } else if (activeStoreId) {
+      query = query.eq("store_id", activeStoreId);
+    }
     
     const { data, error } = await query;
     if (!error && data) setServices(data as Service[]);
@@ -276,6 +280,11 @@ export default function InventarioPage() {
     if (editMode === "catalogo") {
       if (!formData.sku || !formData.name || !formData.family_id || !formData.price) {
         setModalError("Por favor completa los campos obligatorios (SKU, Nombre, Familia, Precio).");
+        return;
+      }
+      const skuVal = formData.sku.trim();
+      if (isNaN(Number(skuVal)) || Number(skuVal) <= 0) {
+        setModalError("El SKU / Código debe ser un número válido (ej: 1.01, 2.01).");
         return;
       }
     } else {
@@ -474,11 +483,17 @@ export default function InventarioPage() {
       return;
     }
 
+    const codeVal = familyFormData.code?.trim();
+    if (!codeVal || !/^[1-9]\d*$/.test(codeVal)) {
+      setFamilyModalError("El código de familia debe ser un número entero positivo (ej: 1, 2, 10).");
+      return;
+    }
+
     setIsSavingFamily(true);
     const payload = {
-      name: familyFormData.name,
+      name: familyFormData.name.trim().toUpperCase(),
       description: familyFormData.description,
-      code: familyFormData.code,
+      code: codeVal,
       store_id: familyFormData.store_id,
     };
 
@@ -566,6 +581,12 @@ export default function InventarioPage() {
       ))}
     </div>
   );
+
+  // ── Permission guards – placed AFTER all hooks (Rules of Hooks) ──────────
+  if (!isHydrated) return null;
+  if (!permissions?.access_inventory) {
+    return <AccessDeniedView moduleName="Catálogo / Inventario" />;
+  }
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
@@ -1075,6 +1096,7 @@ export default function InventarioPage() {
                     value={formData.store_id}
                     onChange={(val) => setFormData(prev => ({ ...prev, store_id: val, family_id: "" }))}
                     disabled={!!editingProduct}
+                    allowedStoreIds={availableStoreIds}
                   />
 
                   {/* 2. Familia / Categoría */}
@@ -1110,11 +1132,14 @@ export default function InventarioPage() {
 
                   {/* 4. SKU */}
                   <div className="space-y-2">
-                    <label className="text-xs font-bold text-muted-foreground uppercase">SKU *</label>
+                    <label className="text-xs font-bold text-muted-foreground uppercase">SKU / Código de Tela *</label>
                     <Input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
                       value={formData.sku}
                       onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
-                      placeholder="Ej: 2.2"
+                      placeholder="Ej: 2.01"
                     />
                   </div>
 
@@ -1192,14 +1217,17 @@ export default function InventarioPage() {
                 value={familyFormData.store_id}
                 onChange={(val) => setFamilyFormData({ ...familyFormData, store_id: val })}
                 disabled={!!editingFamily}
+                allowedStoreIds={availableStoreIds}
               />
               <div className="grid grid-cols-4 gap-4">
                 <div className="space-y-2 col-span-1">
-                  <label className="text-xs font-bold text-muted-foreground uppercase">Código</label>
+                  <label className="text-xs font-bold text-muted-foreground uppercase">Código *</label>
                   <Input
+                    type="text"
+                    inputMode="numeric"
                     value={familyFormData.code}
-                    onChange={(e) => setFamilyFormData({ ...familyFormData, code: e.target.value })}
-                    placeholder="Ej: 37"
+                    onChange={(e) => setFamilyFormData({ ...familyFormData, code: e.target.value.replace(/\D/g, "") })}
+                    placeholder="Ej: 2"
                   />
                 </div>
                 <div className="space-y-2 col-span-3">
@@ -1254,6 +1282,7 @@ export default function InventarioPage() {
                 value={serviceFormData.store_id}
                 onChange={(val) => setServiceFormData({ ...serviceFormData, store_id: val })}
                 disabled={!!editingService}
+                allowedStoreIds={availableStoreIds}
               />
               <div className="space-y-2">
                 <label className="text-sm font-medium">Nombre del Servicio</label>

@@ -5,7 +5,7 @@ import { Store as StoreIcon, ChevronDown, Check, Building2, LayoutGrid } from 'l
 import { useStore, Store as StoreType } from '../context/StoreContext';
 
 export default function StoreSwitcher() {
-  const { activeStore, availableStores, setActiveStore, setAllStoresMode, isLoadingStores, isAllStoresMode } = useStore();
+  const { activeStore, availableStores, setActiveStore, setAllStoresMode, isLoadingStores, isAllStoresMode, isGlobalUser, availableStoreIds } = useStore();
   const [isOpen, setIsOpen] = useState(false);
 
   if (isLoadingStores) {
@@ -29,7 +29,9 @@ export default function StoreSwitcher() {
   }
 
   // Texto del botón según el modo
-  const buttonLabel = isAllStoresMode ? "Todas las Tiendas" : activeStore?.name || "Seleccionar tienda";
+  const buttonLabel = isAllStoresMode
+    ? (isGlobalUser ? "Todas las Tiendas" : "Mis Tiendas (Todas)")
+    : activeStore?.name || "Seleccionar tienda";
   const ButtonIcon = isAllStoresMode ? LayoutGrid : Building2;
 
   const handleSelectStore = async (store: StoreType) => {
@@ -67,34 +69,46 @@ export default function StoreSwitcher() {
             className="fixed inset-0 z-40"
             onClick={() => setIsOpen(false)}
           />
-          <div className="absolute right-0 mt-2 w-56 bg-card border border-border rounded-2xl shadow-xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150 p-1.5">
+          <div className="absolute right-0 mt-2 w-64 bg-card border border-border rounded-2xl shadow-xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150 p-1.5">
             <div className="px-3 py-2 text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground border-b border-border mb-1">
               Cambiar de Tienda
             </div>
             <div className="space-y-0.5 max-h-60 overflow-y-auto">
-              {/* Opción "Todas las Tiendas" */}
-              <button
-                onClick={handleSelectAll}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-colors text-left ${
-                  isAllStoresMode
-                    ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300'
-                    : 'text-foreground hover:bg-secondary/70'
-                }`}
-              >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <LayoutGrid className={`w-4 h-4 shrink-0 ${isAllStoresMode ? 'text-amber-600' : 'text-muted-foreground'}`} />
-                  <div className="truncate">
-                    <div className="truncate">Todas las Tiendas</div>
-                    <div className="text-[10px] text-muted-foreground font-normal">
-                      Vista consolidada
+              {/* Opción "Todas las Tiendas" o "Mis Tiendas" según acceso */}
+              {(isGlobalUser || availableStores.length >= 2) && (
+                <>
+                  <button
+                    onClick={handleSelectAll}
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-colors text-left ${
+                      isAllStoresMode
+                        ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300'
+                        : 'text-foreground hover:bg-secondary/70'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <LayoutGrid className={`w-4 h-4 shrink-0 ${isAllStoresMode ? 'text-amber-600' : 'text-muted-foreground'}`} />
+                      <div className="truncate">
+                        <div className="truncate">
+                          {isGlobalUser ? "Todas las Tiendas" : "Mis Tiendas (Todas)"}
+                        </div>
+                        <div className="text-[10px] text-muted-foreground font-normal truncate">
+                          {isGlobalUser ? (
+                            "Vista consolidada global"
+                          ) : (
+                            availableStoreIds.length === availableStores.length
+                              ? `Consolidando ${availableStoreIds.length} sucursales`
+                              : `${availableStoreIds.length} de ${availableStores.length} sucursales con acceso aquí`
+                          )}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
-                {isAllStoresMode && <Check className="w-4 h-4 text-amber-600 shrink-0 ml-1" />}
-              </button>
+                    {isAllStoresMode && <Check className="w-4 h-4 text-amber-600 shrink-0 ml-1" />}
+                  </button>
 
-              {/* Separador */}
-              <div className="border-t border-border my-1" />
+                  {/* Separador */}
+                  <div className="border-t border-border my-1" />
+                </>
+              )}
 
               {/* Tiendas individuales */}
               {availableStores.map(store => {

@@ -11,6 +11,7 @@ interface StoreSelectorProps {
   disabled?: boolean;
   required?: boolean;
   className?: string;
+  allowedStoreIds?: string[];
 }
 
 /**
@@ -24,11 +25,17 @@ export default function StoreSelector({
   disabled = false,
   required = true,
   className = "",
+  allowedStoreIds,
 }: StoreSelectorProps) {
   const { availableStores } = useStore();
 
+  const filteredStores = React.useMemo(() => {
+    if (!allowedStoreIds) return availableStores;
+    return availableStores.filter(s => allowedStoreIds.includes(s.id));
+  }, [availableStores, allowedStoreIds]);
+
   // Si solo tiene 1 tienda, mostrar como texto fijo (no hay opción)
-  if (availableStores.length <= 1) {
+  if (filteredStores.length <= 1) {
     return (
       <div className={`space-y-1.5 ${className}`}>
         {Boolean(label) && (
@@ -39,7 +46,7 @@ export default function StoreSelector({
         )}
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-secondary/50 border border-border text-sm font-medium text-foreground">
           <Building2 className="w-4 h-4 text-indigo-500" />
-          {availableStores[0]?.name || "Sin tienda"}
+          {filteredStores[0]?.name || "Sin tienda"}
         </div>
       </div>
     );
@@ -64,7 +71,7 @@ export default function StoreSelector({
         <option value="" disabled>
           Selecciona una tienda...
         </option>
-        {availableStores.map((store) => (
+        {filteredStores.map((store) => (
           <option key={store.id} value={store.id}>
             {store.name}
           </option>

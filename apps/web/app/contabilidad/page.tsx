@@ -101,20 +101,14 @@ function Toast({ message, type }: { message: string; type: 'success' | 'error' }
 }
 
 export default function ContabilidadPage() {
-  const { isHydrated, permissions } = useRole();
-  const { activeStoreId } = useStore();
+  const { isHydrated, permissions, role } = useRole();
+  const { activeStoreId, isAllStoresMode, availableStoreIds, getStoreIdsWithPermission } = useStore();
 
   const [dateFilter, setDateFilter] = useState<'TODAY' | 'MONTH' | 'CUSTOM'>('TODAY');
   const [customStart, setCustomStart] = useState(limaToday());
   const [customEnd, setCustomEnd] = useState(limaToday());
-
-  if (!isHydrated) return null;
-  if (!permissions?.access_contabilidad) {
-    return <AccessDeniedView moduleName="Módulo de Contabilidad" />;
-  }
-
-  const [startDate, setStartDate] = useState<string>(limaToday);
-  const [endDate, setEndDate] = useState<string>(limaToday);
+  const [startDate, setStartDate] = useState<string>(limaToday());
+  const [endDate, setEndDate] = useState<string>(limaToday());
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewRows, setPreviewRows] = useState<ExcelRow[] | null>(null);
@@ -129,7 +123,6 @@ export default function ContabilidadPage() {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3500);
   };
-
 
   // ── Supabase query ─────────────────────────────────────────────────────────
   const querySales = (start: string, end: string) => {
@@ -146,9 +139,16 @@ export default function ContabilidadPage() {
       .eq('status', 'COMPLETED')
       .order('issue_date', { ascending: true });
       
+    // ── BLINDAJE CAPA 2: Filtrado estricto por permiso contextual de módulo ──────
+    const permittedStoreIds = getStoreIdsWithPermission('access_contabilidad');
     if (activeStoreId) {
+      // Caso normal: tienda activa específica
       query = query.eq('store_id', activeStoreId);
+    } else if (isAllStoresMode && role !== 'ADMIN' && permittedStoreIds.length > 0) {
+      // Modo ALL para empleado multi-tienda: restringe a sus tiendas autorizadas CON PERMISO en este módulo
+      query = query.in('store_id', permittedStoreIds);
     }
+    // Si es ADMIN global en modo ALL: sin filtro (ve todo)
     
     return query;
   };
@@ -188,6 +188,10 @@ export default function ContabilidadPage() {
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [loadRows, startDate, endDate]);
+
+  // ── Permission guards – placed AFTER all hooks (Rules of Hooks) ──────────
+  // NOTE: The actual guards are placed just before return() below.
+  // This comment marks the end of the setup hooks block.
 
   const handlePreview = () => {
     if (!startDate || !endDate || startDate > endDate) { setError('Rango de fechas inválido.'); return; }
@@ -417,6 +421,12 @@ export default function ContabilidadPage() {
 
   const spinnerOff = '[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none';
   const inlineCellCls = 'h-7 px-1.5 border-2 border-transparent hover:border-indigo-200 focus:border-indigo-500 rounded bg-transparent focus:bg-white text-xs font-bold w-full focus:outline-none transition-colors';
+
+  // ── Permission guards – placed AFTER all hooks (Rules of Hooks) ──────────
+  if (!isHydrated) return null;
+  if (!permissions?.access_contabilidad) {
+    return <AccessDeniedView moduleName="Módulo de Contabilidad" />;
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 flex">

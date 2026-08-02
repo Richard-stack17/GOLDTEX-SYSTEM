@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect, useMemo } from "react";
 import { usePathname } from "next/navigation";
 import { supabase } from "../lib/supabase";
 import { useRole } from "./RoleContext";
@@ -20,10 +20,12 @@ interface StoreContextProps {
   availableStores: Store[];
   availableStoreIds: string[];
   isAllStoresMode: boolean;
+  isGlobalUser: boolean;
   setActiveStore: (store: Store) => Promise<void>;
   setAllStoresMode: () => Promise<void>;
   isLoadingStores: boolean;
   reloadStores: () => Promise<void>;
+  getStoreIdsWithPermission: (permissionKey: string) => string[];
 }
 
 const StoreContext = createContext<StoreContextProps | undefined>(undefined);
@@ -35,9 +37,37 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [availableStores, setAvailableStores] = useState<Store[]>([]);
   const [isLoadingStores, setIsLoadingStores] = useState(true);
   const [isAllStoresMode, setIsAllStoresModeState] = useState(false);
+  const [isGlobalUser, setIsGlobalUser] = useState(false);
+  const [rolesMap, setRolesMap] = useState<Record<string, Record<string, boolean>>>({});
 
-  // IDs derivados para queries .in()
-  const availableStoreIds = availableStores.map(s => s.id);
+  // IDs derivados para queries .in() filtrados dinámicamente por permisos de la ruta actual
+  const availableStoreIds = useMemo(() => {
+    const rawIds = availableStores.map(s => s.id);
+    if (role === 'ADMIN' || !pathname) return rawIds;
+
+    // Detectar qué permiso principal rige la ruta actual
+    let requiredPermission: string | null = null;
+    if (pathname.startsWith("/inventario")) requiredPermission = "access_inventory";
+    else if (pathname.startsWith("/dashboard")) requiredPermission = "access_dashboard";
+    else if (pathname.startsWith("/admin/personal")) requiredPermission = "access_personal";
+    else if (pathname.startsWith("/pos")) requiredPermission = "access_pos";
+    else if (pathname.startsWith("/caja")) requiredPermission = "access_caja";
+    else if (pathname.startsWith("/clientes")) requiredPermission = "access_clientes";
+    else if (pathname.startsWith("/contabilidad")) requiredPermission = "access_contabilidad";
+    else if (pathname.startsWith("/historial-proformas")) requiredPermission = "access_proformas";
+    else if (pathname.startsWith("/configuracion")) requiredPermission = "access_settings";
+
+    if (!requiredPermission) return rawIds;
+
+    return availableStores
+      .filter(s => {
+        const storeRole = s.role || role;
+        if (storeRole === 'ADMIN') return true;
+        const perms = rolesMap[storeRole];
+        return perms ? Boolean(perms[requiredPermission!]) : true;
+      })
+      .map(s => s.id);
+  }, [availableStores, pathname, role, rolesMap]);
 
   // Cargar tiendas al hidratar la sesión
   useEffect(() => {
@@ -94,52 +124,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     await syncCatalog(targetStore.id);
   };
 
-  // Reaccionar inmediatamente a los cambios en defaultStoreId para usuarios no-ADMIN
-  useEffect(() => {
-    if (!isHydrated || !defaultStoreId || role === "ADMIN") return;
-
-    // Validar que el defaultStoreId sea una de las tiendas permitidas del usuario
-    if (availableStores.length > 0 && !availableStores.some(s => s.id === defaultStoreId)) {
-      return; // Ignorar el defaultStoreId si no está en la lista de tiendas del cajero
-    }
-
-    const currentStoreId = activeStore?.id || localStorage.getItem("goltex_active_store_id");
-    if (defaultStoreId !== currentStoreId) {
-      console.log("🏬 [STORE CONTEXT] Cambio reactivo detectado en defaultStoreId para empleado:", { defaultStoreId, currentStoreId });
-      void applyProfileStore(defaultStoreId);
-    }
-  }, [defaultStoreId, isHydrated, role, availableStores, activeStore?.id]);
-
-  useEffect(() => {
-    if (!isHydrated || !profileId || role === "ADMIN") return;
-
-    const recheckCurrentStore = async () => {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("default_store_id")
-        .eq("id", profileId)
-        .single();
-
-      if (error || !data?.default_store_id) return;
-
-      // Validar que el nuevo defaultStoreId del backend exista en sus tiendas permitidas
-      if (availableStores.length > 0 && !availableStores.some(s => s.id === data.default_store_id)) {
-        return;
-      }
-
-      const currentStoreId = activeStore?.id || localStorage.getItem("goltex_active_store_id");
-      if (data.default_store_id !== currentStoreId) {
-        void applyProfileStore(data.default_store_id);
-      }
-    };
-
-    const handleFocus = () => {
-      void recheckCurrentStore();
-    };
-
-    window.addEventListener("focus", handleFocus);
-    return () => window.removeEventListener("focus", handleFocus);
-  }, [activeStore?.id, isHydrated, pathname, profileId, role]);
+  // ── Modificado: Eliminados useEffects que forzaban el regreso automático a defaultStoreId al cambiar de tienda ──
 
   const loadUserStores = async () => {
     setIsLoadingStores(true);
@@ -157,56 +142,88 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      // Cargar mapa de roles y permisos
+      const { data: rolesData } = await supabase.from("roles").select("name, permissions");
+      if (rolesData) {
+        const map: Record<string, Record<string, boolean>> = {};
+        rolesData.forEach((r: any) => {
+          if (r.name && r.permissions) {
+            map[r.name] = r.permissions;
+          }
+        });
+        setRolesMap(map);
+      }
+
       let storesForUser: Store[] = [];
 
-      // Si es ADMIN, tiene acceso a TODAS las tiendas
-      if (role === 'ADMIN') {
-        storesForUser = allStores.map(s => ({ ...s, role: 'ADMIN' }));
-      } else {
-        // REGLA ESTRICTA PARA NO-ADMINS: Solo tienen acceso a sus tiendas explícitamente asignadas en employee_stores.
-        if (employeeId) {
-          const { data: empStores, error: empError } = await supabase
-            .from("employee_stores")
-            .select("store_id, role, stores (*)")
-            .eq("employee_id", employeeId);
-            
-          if (empError) {
-             console.error("Error al consultar employee_stores:", empError);
-          }
+      // ── VERIFICACIÓN DE ACCESO GLOBAL VS ACCESO RESTRINGIDO POR TIENDA ──
+      let empStores: any[] = [];
+      if (profileId) {
+        const { data: esData } = await supabase
+          .from("employee_stores")
+          .select("store_id, role, stores (*)")
+          .eq("profile_id", profileId);
+        if (esData) {
+          empStores = esData.filter((es: any) => es.stores && es.stores.is_active === true);
+        }
+      }
 
-          if (empStores && empStores.length > 0) {
-            // Filter strictly for active stores
-            const activeEmpStores = empStores.filter((es: any) => es.stores && es.stores.is_active === true);
-            
-            storesForUser = activeEmpStores.map((es: any) => ({
-              id: es.stores.id,
-              name: es.stores.name,
-              address: es.stores.address,
-              phone: es.stores.phone,
-              role: es.role || role
-            }));
+      let isGlobalRoleTemplate = false;
+      if (role && role !== 'ADMIN') {
+        const { data: roleDef } = await supabase
+          .from("roles")
+          .select("store_id")
+          .eq("name", role)
+          .maybeSingle();
+        if (roleDef && (roleDef.store_id === null || !roleDef.store_id)) {
+          isGlobalRoleTemplate = true;
+        }
+      }
+
+      const hasSpecificStoreAssignments = empStores.length > 0 || Boolean(defaultStoreId);
+      const isTrulyGlobalUser = role === 'ADMIN' || (isGlobalRoleTemplate && !hasSpecificStoreAssignments);
+      
+      setIsGlobalUser(isTrulyGlobalUser);
+
+      if (isTrulyGlobalUser) {
+        // ACCESO GLOBAL: Admin o Rol plantilla global SIN tiendas específicas asignadas
+        storesForUser = allStores.map(s => ({ ...s, role: role || 'ADMIN' }));
+      } else {
+        // ACCESO RESTRINGIDO: Respeta estrictamente las tiendas asignadas
+        if (empStores.length > 0) {
+          storesForUser = empStores.map((es: any) => ({
+            id: es.stores.id,
+            name: es.stores.name,
+            address: es.stores.address,
+            phone: es.stores.phone,
+            role: es.role || role
+          }));
+        } else if (defaultStoreId) {
+          const matched = allStores.find(s => s.id === defaultStoreId);
+          if (matched) {
+            storesForUser = [{ ...matched, role: role }];
           }
         }
+      }
+
+      // BLOQUEO AUTOMÁTICO DE USUARIOS DE TIENDAS INACTIVAS O SIN TIENDAS
+      if (storesForUser.length === 0) {
+        console.error("🚫 [AUTH GUARD] Todas las tiendas del usuario están inactivas o no tiene tiendas asignadas.");
         
-        // BLOQUEO AUTOMÁTICO DE USUARIOS DE TIENDAS INACTIVAS
-        if (storesForUser.length === 0) {
-          console.error("🚫 [AUTH GUARD] Todas las tiendas del usuario están inactivas o no tiene tiendas asignadas.");
-          
-          // Clear session explicitly
-          localStorage.removeItem("goltex_role");
-          localStorage.removeItem("goltex_username");
-          localStorage.removeItem("goltex_employee_id");
-          localStorage.removeItem("goltex_profile_id");
-          localStorage.removeItem("goltex_default_store_id");
-          localStorage.removeItem("goltex_active_store_id");
-          localStorage.removeItem("goltex_store_mode");
-          localStorage.removeItem("goltex_permissions");
-          
-          if (typeof window !== "undefined") {
-            window.location.href = "/login?inactive_store=true";
-          }
-          return;
+        // Clear session explicitly
+        localStorage.removeItem("goltex_role");
+        localStorage.removeItem("goltex_username");
+        localStorage.removeItem("goltex_employee_id");
+        localStorage.removeItem("goltex_profile_id");
+        localStorage.removeItem("goltex_default_store_id");
+        localStorage.removeItem("goltex_active_store_id");
+        localStorage.removeItem("goltex_store_mode");
+        localStorage.removeItem("goltex_permissions");
+        
+        if (typeof window !== "undefined") {
+          window.location.href = "/login?inactive_store=true";
         }
+        return;
       }
 
       setAvailableStores(storesForUser);
@@ -220,8 +237,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (savedStoreId === "null" || savedStoreId === "undefined") savedStoreId = null;
 
       // REGLA ESTRICTA PARA NO-ADMINS en la inicialización:
-      if (role !== "ADMIN") {
-         // Los no-admins nunca deben estar en modo consolidado
+      if (!isTrulyGlobalUser && storesForUser.length < 2) {
+         // Los usuarios sin acceso global y con menos de 2 tiendas nunca deben estar en modo consolidado
          savedMode = "SINGLE";
          
          // Validar defaultStoreId
@@ -304,6 +321,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * Limpia el caché Dexie y re-sincroniza con la nueva tienda.
    */
   const setActiveStore = async (store: Store) => {
+    // Validar si el store.id existe en las tiendas asignadas al usuario
+    const isAllowed = availableStores.some(s => s.id === store.id) || role === 'ADMIN';
+    if (!isAllowed) {
+      console.warn("⚠️ [STORE CONTEXT] Intento de cambiar a una tienda no asignada:", store.id);
+      return;
+    }
+
     // 1. Limpiar caché Dexie antes de cambiar (regla de seguridad)
     await clearDexieCache();
 
@@ -328,7 +352,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * Limpia el caché Dexie por seguridad.
    */
   const setAllStoresMode = async () => {
-    // 1. Limpiar caché Dexie (no queremos datos de una tienda sola en offline)
+    // ── BLINDAJE CAPA 1: Solo usuarios globales o con 2+ tiendas ──
+    const hasMultipleStores = availableStores.length >= 2;
+    if (!isGlobalUser && !hasMultipleStores) {
+      console.warn("⚠️ [STORE CONTEXT] setAllStoresMode bloqueado: el usuario no tiene acceso global ni múltiples tiendas.");
+      return;
+    }
     await clearDexieCache();
 
     // 2. Actualizar estado
@@ -360,6 +389,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     await loadUserStores();
   };
 
+  const getStoreIdsWithPermission = (permissionKey: string): string[] => {
+    if (role === 'ADMIN') {
+      return availableStores.map(s => s.id);
+    }
+    return availableStores
+      .filter(s => {
+        const storeRole = s.role || role;
+        if (storeRole === 'ADMIN') return true;
+        const perms = rolesMap[storeRole];
+        return perms ? Boolean(perms[permissionKey]) : true;
+      })
+      .map(s => s.id);
+  };
+
   return (
     <StoreContext.Provider
       value={{
@@ -371,7 +414,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setActiveStore,
         setAllStoresMode,
         isLoadingStores,
-        reloadStores
+        isGlobalUser,
+        reloadStores,
+        getStoreIdsWithPermission
       }}
     >
       {children}

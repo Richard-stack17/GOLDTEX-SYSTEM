@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useRole } from "../context/RoleContext";
 import { useStore } from "../context/StoreContext";
 import { AccessDeniedView } from "../components/AccessDeniedView";
+import StoreSwitcher from "../components/StoreSwitcher";
 import {
   Button,
   Card,
@@ -43,17 +44,12 @@ const formatYMD = (d: Date) => {
 export default function DashboardPage() {
   const router = useRouter();
   const { isHydrated, permissions } = useRole();
-  const { activeStore, activeStoreId, isAllStoresMode, isLoadingStores } = useStore();
+  const { activeStore, activeStoreId, isAllStoresMode, isLoadingStores, isGlobalUser, availableStoreIds } = useStore();
 
   const [dateFilter, setDateFilter] = useState<DateFilter>("THIS_WEEK");
   const [selectedYear, setSelectedYear] = useState<number | "">(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState<number | "">(new Date().getMonth());
   const [selectedDay, setSelectedDay] = useState<number | "">("");
-
-  if (!isHydrated) return null;
-  if (!permissions?.access_dashboard) {
-    return <AccessDeniedView moduleName="Dashboard de Analítica" />;
-  }
 
   // Sync when store context resolves or active store changes
   useEffect(() => {
@@ -163,18 +159,18 @@ export default function DashboardPage() {
     return rawSales.filter(s =>
       s.status !== 'CANCELLED' &&
       s.status !== 'PENDING' &&
-      (isAllStoresMode ? true : s.store_id === activeStoreId)
+      (isAllStoresMode ? availableStoreIds.includes(s.store_id || '') : s.store_id === activeStoreId)
     );
-  }, [rawSales, isAllStoresMode, activeStoreId]);
+  }, [rawSales, isAllStoresMode, activeStoreId, availableStoreIds]);
 
   const prevSales = useMemo(() => {
     if (!rawPrevSales) return [];
     return rawPrevSales.filter(s =>
       s.status !== 'CANCELLED' &&
       s.status !== 'PENDING' &&
-      (isAllStoresMode ? true : s.store_id === activeStoreId)
+      (isAllStoresMode ? availableStoreIds.includes(s.store_id || '') : s.store_id === activeStoreId)
     );
-  }, [rawPrevSales, isAllStoresMode, activeStoreId]);
+  }, [rawPrevSales, isAllStoresMode, activeStoreId, availableStoreIds]);
 
   const transactions = useLiveQuery(() => db.transactions.toArray(), [], []);
   const employees = useLiveQuery(() => db.employees.toArray(), [], []);
@@ -517,6 +513,12 @@ export default function DashboardPage() {
   const COLORS = ['#10b981', '#3b82f6', '#8b5cf6', '#f59e0b', '#ef4444'];
 
 
+  // ── Permission guards – placed AFTER all hooks (Rules of Hooks) ──────────
+  if (!isHydrated) return null;
+  if (!permissions?.access_dashboard) {
+    return <AccessDeniedView moduleName="Dashboard de Analítica" />;
+  }
+
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
       {/* ── Header ── */}
@@ -534,7 +536,7 @@ export default function DashboardPage() {
                 <h1 className="text-base font-bold leading-none">Módulo de Dashboard</h1>
                 {isAllStoresMode ? (
                   <span className="text-[10px] font-bold text-blue-700 bg-blue-100 border border-blue-200 px-2 py-0.5 rounded-full uppercase tracking-wider">
-                    Todas las Tiendas
+                    {isGlobalUser ? "Todas las Tiendas" : "Mis Tiendas (Todas)"}
                   </span>
                 ) : activeStore ? (
                   <span className="text-[10px] font-bold text-amber-700 bg-amber-100 border border-amber-200 px-2 py-0.5 rounded-full uppercase tracking-wider">
@@ -546,6 +548,7 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
+        <StoreSwitcher />
       </header>
 
       <main className="flex-1 p-6 max-w-screen-xl w-full mx-auto space-y-6">

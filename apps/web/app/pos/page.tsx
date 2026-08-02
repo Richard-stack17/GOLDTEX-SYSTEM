@@ -1,6 +1,6 @@
 "use client";
 import { useLiveQuery } from "dexie-react-hooks";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
   Button, Card, CardContent, Dialog, DialogContent,
@@ -139,20 +139,20 @@ export default function POSPage() {
   const handleCloseCajaAttempt = async () => {
     setClosingCajaLoading(true);
     setCajaSummaryOpen(true);
-    
+
     try {
       const now = new Date();
       const formatter = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima", year: "numeric", month: "2-digit", day: "2-digit" });
       const todayStr = formatter.format(now);
-      
+
       const { data, error } = await supabase
         .from('sales')
         .select('transactions(payment_method, amount)')
         .eq('record_date', todayStr)
         .eq('status', 'COMPLETED');
-        
+
       if (error) throw error;
-      
+
       let efe = 0, bcp = 0, bbva = 0, izi = 0;
       data?.forEach(sale => {
         sale.transactions?.forEach((tx: any) => {
@@ -162,7 +162,7 @@ export default function POSPage() {
           else if (tx.payment_method === 'IZIPAY') izi += tx.amount;
         });
       });
-      
+
       setCajaSummary({ efectivo: efe, bcp: bcp, bbva: bbva, izipay: izi, total: efe + bcp + bbva + izi });
     } catch (e: any) {
       alert("Error al obtener resumen: " + e.message);
@@ -184,7 +184,7 @@ export default function POSPage() {
       const channel = new BroadcastChannel("goltex_caja_channel");
       channel.postMessage({ type: "CAJA_STATE_CHANGED", isCajaOpen: false, storeId: activeStoreId });
       channel.close();
-    } catch (e) {}
+    } catch (e) { }
 
     if (!activeStoreId) return;
 
@@ -221,8 +221,13 @@ export default function POSPage() {
   }, [activeStoreId]);
 
   const fetchHistory = useCallback(async () => {
+    if (!activeStoreId) {
+      setHistoryTickets([]);
+      return;
+    }
+
     const todayStr = getLimaTodayStr();
-    
+
     console.log(`🔍 [fetchHistory] Buscando proformas del día: ${todayStr} para tienda: ${activeStoreId}`);
 
     let query = supabase
@@ -230,14 +235,11 @@ export default function POSPage() {
       .select("*, transactions(payment_method, amount, surcharge_amount)")
       .eq("record_date", todayStr)
       .eq("source_type", "POS")
+      .eq("store_id", activeStoreId)
       .order("created_at", { ascending: false });
 
-    if (activeStoreId) {
-      query = query.eq("store_id", activeStoreId);
-    }
-
     const { data, error } = await query;
-    
+
     console.log(`📡 [fetchHistory] Respuesta completa:`, { data, error });
 
     if (error) {
@@ -246,18 +248,18 @@ export default function POSPage() {
 
     if (data) {
       console.log(`✅ [fetchHistory] Proformas encontradas: ${data.length}`);
-      
+
       try {
         // Enriquecer el ticket con el username del vendedor desde Dexie local (ya que quitamos el JOIN)
         const profiles = await db.profiles.toArray();
         const profileMap = new Map(profiles.map(p => [p.id, p.username]));
-        
+
         const enrichedData = data.map((ticket: any) => ({
           ...ticket,
           seller: ticket.seller_id ? { username: profileMap.get(ticket.seller_id) || 'ADMIN' } : null,
           cashier: ticket.cashier_id ? { username: profileMap.get(ticket.cashier_id) || 'ADMIN' } : null
         }));
-        
+
         setHistoryTickets(enrichedData as HistoryTicket[]);
       } catch (e) {
         console.warn("No se pudo cargar perfiles locales para historial", e);
@@ -336,9 +338,9 @@ export default function POSPage() {
       .channel(`sales_pos_${activeStoreId}`)
       .on(
         'postgres_changes',
-        { 
-          event: '*', 
-          schema: 'public', 
+        {
+          event: '*',
+          schema: 'public',
           table: 'sales'
         },
         (payload) => {
@@ -378,7 +380,7 @@ export default function POSPage() {
           setIsCajaOpen(!!e.data.isCajaOpen);
         }
       };
-    } catch (e) {}
+    } catch (e) { }
 
     window.addEventListener("storage", handleStorage);
 
@@ -405,7 +407,7 @@ export default function POSPage() {
       const channel = new BroadcastChannel("goltex_caja_channel");
       channel.postMessage({ type: "CAJA_STATE_CHANGED", isCajaOpen: true, date: today, storeId: activeStoreId });
       channel.close();
-    } catch (e) {}
+    } catch (e) { }
 
     if (!activeStoreId) return;
 
@@ -448,7 +450,8 @@ export default function POSPage() {
   const [activeFamily, setActiveFamily] = useState<Family | null>(null);
   const [qwertyOpen, setQwertyOpen] = useState(false);
   const [familyPage, setFamilyPage] = useState(1);
-  const familyPageSize = 12;
+  const FAMILIES_PER_PAGE = 15;
+  const familyPageSize = FAMILIES_PER_PAGE;
   const [servicesPage, setServicesPage] = useState(1);
   const servicesPageSize = 12;
   const [searchPage, setSearchPage] = useState(1);
@@ -464,7 +467,7 @@ export default function POSPage() {
       setViewMode('FAMILIES');
       return;
     }
-    
+
     if (activeFamily !== null) {
       setActiveFamily(null);
       setNumpadProduct(null);
@@ -472,7 +475,7 @@ export default function POSPage() {
       setQwertyOpen(false);
       return;
     }
-    
+
     if (cart.length === 0) {
       router.push("/hub");
     } else {
@@ -492,12 +495,21 @@ export default function POSPage() {
     return valA.localeCompare(valB, undefined, { numeric: true, sensitivity: 'base' });
   };
 
+  const sortByIntegerCode = (a: any, b: any) => {
+    const numA = parseInt(a.code || "0", 10);
+    const numB = parseInt(b.code || "0", 10);
+    if (!isNaN(numA) && !isNaN(numB) && numA !== numB) {
+      return numA - numB;
+    }
+    return (a.code || "").localeCompare(b.code || "", undefined, { numeric: true, sensitivity: 'base' });
+  };
+
   const families: Family[] = localFamilies.map(f => ({
     id: f.id,
     name: f.name,
     code: f.code || "",
     color: "" // Default or extract if needed
-  })).sort(sortByNumericPrefix);
+  })).sort(sortByIntegerCode);
 
   const products: Product[] = localProductsRaw.map(p => ({
     id: p.id,
@@ -509,9 +521,27 @@ export default function POSPage() {
     code: p.code || p.sku || "",
   })).sort(sortByNumericPrefix);
 
+  // Dynamic Range Pills calculation for Families
+  const totalFamilyPages = Math.max(1, Math.ceil(families.length / familyPageSize));
+
+  const familyPagePills = useMemo(() => {
+    const pills = [];
+    for (let p = 1; p <= totalFamilyPages; p++) {
+      const firstItem = families[(p - 1) * familyPageSize];
+      const lastItem = families[Math.min(p * familyPageSize - 1, families.length - 1)];
+      const startCode = firstItem ? firstItem.code : "";
+      const endCode = lastItem ? lastItem.code : "";
+      pills.push({
+        page: p,
+        label: startCode && endCode ? `[ ${startCode} - ${endCode} ]` : `[ Pág ${p} ]`,
+      });
+    }
+    return pills;
+  }, [families, totalFamilyPages, familyPageSize]);
+
   const quickAccessServices = localServices.filter(s => s.is_quick_access).sort((a, b) => a.name.localeCompare(b.name));
   const otherServices = localServices.filter(s => !s.is_quick_access).sort((a, b) => a.name.localeCompare(b.name));
-  
+
   const [viewMode, setViewMode] = useState<'FAMILIES' | 'SERVICES'>('FAMILIES');
 
   // ── Handlers de Servicios (Obsoletos, se usa Numpad) ──
@@ -541,11 +571,31 @@ export default function POSPage() {
     }
   };
 
+  const trimmedSearch = search.trim();
+  const isDecimalSearch = trimmedSearch.includes(".") && !isNaN(parseFloat(trimmedSearch));
+
   const matchedFamilies = search
-    ? families.filter((f) => f.name.toLowerCase().includes(search.toLowerCase()) || f.code.includes(search))
+    ? isDecimalSearch
+      ? [] // Decimal search strictly targets Products/Fabrics
+      : families.filter((f) => f.name.toLowerCase().includes(search.toLowerCase()) || f.code === trimmedSearch || f.code.includes(trimmedSearch))
     : [];
+
   const matchedProducts = search
-    ? products.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()) || p.code.includes(search))
+    ? isDecimalSearch
+      ? products.filter((p) =>
+        p.code === trimmedSearch ||
+        p.sku === trimmedSearch ||
+        p.code.startsWith(trimmedSearch) ||
+        p.sku?.startsWith(trimmedSearch) ||
+        p.name.toLowerCase().includes(search.toLowerCase())
+      )
+      : products.filter((p) =>
+        p.name.toLowerCase().includes(search.toLowerCase()) ||
+        p.code === trimmedSearch ||
+        p.sku === trimmedSearch ||
+        p.code.includes(trimmedSearch) ||
+        p.sku?.includes(trimmedSearch)
+      )
     : activeFamily
       ? products.filter((p) => p.familyId === activeFamily.id)
       : [];
@@ -663,7 +713,7 @@ export default function POSPage() {
       try {
         const { data: profData } = await supabase.from('profiles').select('id').eq('username', sellerName).maybeSingle();
         if (profData?.id) sellerId = profData.id;
-      } catch (e) {}
+      } catch (e) { }
 
       const rpcPayload = {
         customer_id: customerId,
@@ -803,7 +853,7 @@ export default function POSPage() {
             <h2 className="text-2xl font-bold text-foreground mb-2">Bloqueo Operativo</h2>
             <p className="text-muted-foreground text-sm leading-relaxed">
               El Punto de Venta es un módulo físico. No puedes cobrar en modo consolidado ("Todas las Tiendas").
-              <br/><br/>
+              <br /><br />
               Por favor, selecciona una tienda específica en el menú superior para poder operar.
             </p>
           </div>
@@ -856,11 +906,10 @@ export default function POSPage() {
                 <button
                   disabled={isCajaOpen}
                   onClick={handleOpenCaja}
-                  className={`px-4 h-12 rounded-2xl text-xs font-black uppercase transition-all ${
-                    !isCajaOpen 
-                      ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-md cursor-pointer animate-pulse" 
+                  className={`px-4 h-12 rounded-2xl text-xs font-black uppercase transition-all ${!isCajaOpen
+                      ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-md cursor-pointer animate-pulse"
                       : "bg-secondary/40 text-muted-foreground/50 border border-border cursor-not-allowed opacity-50"
-                  }`}
+                    }`}
                 >
                   Apertura de Caja
                 </button>
@@ -869,11 +918,10 @@ export default function POSPage() {
                 <button
                   disabled={!isCajaOpen}
                   onClick={handleCloseCajaAttempt}
-                  className={`px-4 h-12 rounded-2xl text-xs font-black uppercase transition-all ${
-                    isCajaOpen 
-                      ? "bg-red-600/10 text-red-600 border border-red-500/30 hover:bg-red-600 hover:text-white cursor-pointer" 
+                  className={`px-4 h-12 rounded-2xl text-xs font-black uppercase transition-all ${isCajaOpen
+                      ? "bg-red-600/10 text-red-600 border border-red-500/30 hover:bg-red-600 hover:text-white cursor-pointer"
                       : "bg-secondary/40 text-muted-foreground/50 border border-border cursor-not-allowed opacity-50"
-                  }`}
+                    }`}
                 >
                   Cerrar Caja
                 </button>
@@ -935,8 +983,8 @@ export default function POSPage() {
             </div>
             <h2 className="text-2xl font-black tracking-tight mb-2">Caja Actualmente Cerrada</h2>
             <p className="text-muted-foreground max-w-md text-sm mb-6 leading-relaxed">
-              {permissions?.pos_open_caja 
-                ? "Para comenzar a explorar productos, seleccionar telas y emitir tickets de corte, realiza la apertura de caja." 
+              {permissions?.pos_open_caja
+                ? "Para comenzar a explorar productos, seleccionar telas y emitir tickets de corte, realiza la apertura de caja."
                 : "Todavía no se ha aperturado la caja del día. Solicita a un usuario administrador o supervisor realizar la apertura."}
             </p>
             {permissions?.pos_open_caja && (
@@ -962,12 +1010,20 @@ export default function POSPage() {
                     <Button variant="ghost" className="h-10 px-4 rounded-lg text-xs font-bold hover:bg-purple-50 hover:text-purple-600 transition-colors" disabled={servicesPage === Math.max(1, Math.ceil(localServices.length / servicesPageSize))} onClick={() => setServicesPage(p => p + 1)}>Siguiente</Button>
                   </div>
                 ) : viewMode === 'FAMILIES' && !activeFamily && !search ? (
-                  <div className="flex gap-1 bg-background border-2 border-border/60 rounded-xl p-1 shadow-sm">
-                    <Button variant="ghost" className="h-10 px-4 rounded-lg text-xs font-bold hover:bg-emerald-50 hover:text-emerald-600 transition-colors" disabled={familyPage === 1} onClick={() => setFamilyPage(p => p - 1)}>Anterior</Button>
-                    <div className="flex items-center px-3 text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                      Pág {familyPage} de {Math.max(1, Math.ceil(families.length / familyPageSize))}
-                    </div>
-                    <Button variant="ghost" className="h-10 px-4 rounded-lg text-xs font-bold hover:bg-emerald-50 hover:text-emerald-600 transition-colors" disabled={familyPage === Math.max(1, Math.ceil(families.length / familyPageSize))} onClick={() => setFamilyPage(p => p + 1)}>Siguiente</Button>
+                  <div className="flex items-center gap-1.5 overflow-x-auto py-1 max-w-full no-scrollbar">
+                    {familyPagePills.map((pill) => (
+                      <button
+                        key={pill.page}
+                        type="button"
+                        onClick={() => setFamilyPage(pill.page)}
+                        className={`h-9 px-3.5 rounded-xl text-xs font-black transition-all whitespace-nowrap cursor-pointer shadow-sm ${familyPage === pill.page
+                            ? "bg-emerald-600 text-white shadow-emerald-500/20 scale-105"
+                            : "bg-background border-2 border-border/60 text-muted-foreground hover:border-emerald-500/50 hover:text-emerald-600 hover:bg-emerald-50/50"
+                          }`}
+                      >
+                        {pill.label}
+                      </button>
+                    ))}
                   </div>
                 ) : (
                   <div></div>
@@ -985,210 +1041,209 @@ export default function POSPage() {
                         setActiveFamily(null);
                       }
                     }}
-                    className={`h-11 px-5 rounded-2xl font-black text-xs uppercase tracking-wider transition-all flex items-center gap-2 shadow-sm ${
-                      viewMode === 'SERVICES'
+                    className={`h-11 px-5 rounded-2xl font-black text-xs uppercase tracking-wider transition-all flex items-center gap-2 shadow-sm ${viewMode === 'SERVICES'
                         ? 'bg-purple-600 text-white shadow-purple-500/20'
                         : 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:opacity-90 active:scale-95'
-                    }`}
+                      }`}
                   >
                     <Scissors className="w-4 h-4" />
                     {viewMode === 'SERVICES' ? 'Volver a Telas' : 'Servicios'}
                   </button>
                 )}
               </div>
-          {viewMode === 'SERVICES' ? (
-            <div className="p-6">
-              <h2 className="text-sm font-bold text-muted-foreground uppercase tracking-wider mb-4">Todos los Servicios</h2>
-              <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-                {localServices.slice((servicesPage - 1) * servicesPageSize, servicesPage * servicesPageSize).map((svc) => (
-                  <button key={svc.id} onClick={() => {
-                      const productObj: Product = {id: svc.id, familyId: 'SERVICE', name: svc.name, code: 'SVC', price: 0, is_service: true};
-                      const existing = cart.find(i => i.id === svc.id);
-                      openNumpad(productObj, existing);
-                    }}
-                    className="flex flex-col items-center justify-center p-6 bg-purple-50 border-2 border-purple-200 hover:bg-purple-100 transition-all active:scale-[0.96] rounded-2xl shadow-sm text-center gap-3 cursor-pointer text-purple-700">
-                    <div className="text-xl font-black uppercase tracking-tight">{svc.name}</div>
-                  </button>
-                ))}
-                {localServices.length === 0 && (
-                  <div className="col-span-full py-12 text-center text-muted-foreground text-lg">No hay servicios registrados.</div>
-                )}
-              </div>
-            </div>
-          ) : !activeFamily && !search ? (
-            <div className="p-6 flex flex-col h-full">
-              <h2 className="text-sm font-bold text-muted-foreground uppercase tracking-wider mb-4">Familias de Tela</h2>
-              <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 flex-1 content-start">
-                {families.slice((familyPage - 1) * familyPageSize, familyPage * familyPageSize).map((fam) => (
-                  <button key={fam.id} onClick={() => { setActiveFamily(fam); setNumpadProduct(null); }}
-                    className="text-left p-3 rounded-2xl border-2 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer shadow-sm bg-emerald-50 border-emerald-200 text-emerald-800 hover:bg-emerald-100 flex flex-col items-start gap-1">
-                    <div className="text-2xl font-black mb-1 opacity-80">{fam.code}</div>
-                    <div className="text-base font-semibold tracking-tight">{fam.name}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="p-6 space-y-8">
-              {search ? (
-                <>
-                  <div className="flex justify-between items-center">
-                    <h2 className="text-sm font-bold text-muted-foreground uppercase tracking-wider">
-                      Resultados ({combinedSearchResults.length}) — Pág. {searchPage}/{totalSearchPages || 1}
-                    </h2>
+              {viewMode === 'SERVICES' ? (
+                <div className="p-6">
+                  <h2 className="text-sm font-bold text-muted-foreground uppercase tracking-wider mb-4">Todos los Servicios</h2>
+                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                    {localServices.slice((servicesPage - 1) * servicesPageSize, servicesPage * servicesPageSize).map((svc) => (
+                      <button key={svc.id} onClick={() => {
+                        const productObj: Product = { id: svc.id, familyId: 'SERVICE', name: svc.name, code: 'SVC', price: 0, is_service: true };
+                        const existing = cart.find(i => i.id === svc.id);
+                        openNumpad(productObj, existing);
+                      }}
+                        className="flex flex-col items-center justify-center p-6 bg-purple-50 border-2 border-purple-200 hover:bg-purple-100 transition-all active:scale-[0.96] rounded-2xl shadow-sm text-center gap-3 cursor-pointer text-purple-700">
+                        <div className="text-xl font-black uppercase tracking-tight">{svc.name}</div>
+                      </button>
+                    ))}
+                    {localServices.length === 0 && (
+                      <div className="col-span-full py-12 text-center text-muted-foreground text-lg">No hay servicios registrados.</div>
+                    )}
                   </div>
-                  {searchFamiliesInPage.length > 0 && (
-                    <div className="space-y-4">
-                      <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Familias</h3>
-                      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-                        {searchFamiliesInPage.map((fam) => (
-                          <button key={fam.id}
-                            onClick={() => { setActiveFamily(fam); setSearch(""); setQwertyOpen(false); setNumpadProduct(null); }}
-                            className={`text-left p-3 rounded-2xl border-2 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer bg-glass shadow-sm ${fam.color || "border-border hover:border-primary"}`}>
-                            <div className="text-2xl font-black mb-1 opacity-80">{fam.code}</div>
-                            <div className="text-base font-semibold tracking-tight">{fam.name}</div>
-                          </button>
-                        ))}
+                </div>
+              ) : !activeFamily && !search ? (
+                <div className="p-6 flex flex-col h-full">
+                  <h2 className="text-sm font-bold text-muted-foreground uppercase tracking-wider mb-4">Familias de Tela</h2>
+                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 flex-1 content-start">
+                    {families.slice((familyPage - 1) * familyPageSize, familyPage * familyPageSize).map((fam) => (
+                      <button key={fam.id} onClick={() => { setActiveFamily(fam); setNumpadProduct(null); }}
+                        className="text-left p-3 rounded-2xl border-2 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer shadow-sm bg-emerald-50 border-emerald-200 text-emerald-800 hover:bg-emerald-100 flex flex-col items-start gap-1">
+                        <div className="text-2xl font-black mb-1 opacity-80">{fam.code}</div>
+                        <div className="text-base font-semibold tracking-tight">{fam.name}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="p-6 space-y-8">
+                  {search ? (
+                    <>
+                      <div className="flex justify-between items-center">
+                        <h2 className="text-sm font-bold text-muted-foreground uppercase tracking-wider">
+                          Resultados ({combinedSearchResults.length}) — Pág. {searchPage}/{totalSearchPages || 1}
+                        </h2>
                       </div>
-                    </div>
-                  )}
-                  {searchProductsInPage.length > 0 && (
-                    <div className="space-y-4">
-                      <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Telas</h3>
+                      {searchFamiliesInPage.length > 0 && (
+                        <div className="space-y-4">
+                          <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Familias</h3>
+                          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                            {searchFamiliesInPage.map((fam) => (
+                              <button key={fam.id}
+                                onClick={() => { setActiveFamily(fam); setSearch(""); setQwertyOpen(false); setNumpadProduct(null); }}
+                                className={`text-left p-3 rounded-2xl border-2 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer bg-glass shadow-sm ${fam.color || "border-border hover:border-primary"}`}>
+                                <div className="text-2xl font-black mb-1 opacity-80">{fam.code}</div>
+                                <div className="text-base font-semibold tracking-tight">{fam.name}</div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {searchProductsInPage.length > 0 && (
+                        <div className="space-y-4">
+                          <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Telas</h3>
+                          <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                            {searchProductsInPage.map((product) => (
+                              <button key={product.id} onClick={() => openNumpad(product)}
+                                className="flex flex-col items-center justify-center p-3 bg-glass border-2 border-border hover:border-primary/50 transition-all active:scale-[0.96] rounded-2xl shadow-sm text-center gap-2 cursor-pointer">
+                                <div className="text-sm font-black uppercase tracking-tight"><span className="font-mono text-primary mr-1.5">{product.code}</span>{product.name}</div>
+                                <div className="text-lg font-black text-primary">S/ {product.price.toFixed(2)}</div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {combinedSearchResults.length === 0 && (
+                        <div className="py-12 text-center text-muted-foreground text-lg">Sin resultados para "{search}".</div>
+                      )}
+                      {totalSearchPages > 1 && (
+                        <div className="flex justify-center gap-3 border-t border-border/55 pt-6">
+                          {Array.from({ length: totalSearchPages }).map((_, i) => (
+                            <Button key={i + 1} variant={searchPage === i + 1 ? "default" : "outline"}
+                              className="h-14 px-8 text-lg rounded-2xl font-bold" onClick={() => setSearchPage(i + 1)}>
+                              {i * searchPageSize + 1}–{Math.min((i + 1) * searchPageSize, combinedSearchResults.length)}
+                            </Button>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <h2 className="text-sm font-bold text-muted-foreground uppercase tracking-wider">
+                        Familia {activeFamily?.code} — {activeFamily?.name}
+                      </h2>
                       <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                        {searchProductsInPage.map((product) => (
+                        {matchedProducts.map((product) => (
                           <button key={product.id} onClick={() => openNumpad(product)}
                             className="flex flex-col items-center justify-center p-3 bg-glass border-2 border-border hover:border-primary/50 transition-all active:scale-[0.96] rounded-2xl shadow-sm text-center gap-2 cursor-pointer">
                             <div className="text-sm font-black uppercase tracking-tight"><span className="font-mono text-primary mr-1.5">{product.code}</span>{product.name}</div>
                             <div className="text-lg font-black text-primary">S/ {product.price.toFixed(2)}</div>
                           </button>
                         ))}
+                        {matchedProducts.length === 0 && (
+                          <div className="col-span-full py-12 text-center text-muted-foreground text-lg">Sin telas en esta categoría.</div>
+                        )}
                       </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+            {numpadProduct && (
+              <div className="flex flex-col justify-center items-center p-4 bg-background h-full overflow-auto">
+                <div className="w-full max-w-[540px] bg-card rounded-3xl border-2 border-border/50 flex flex-col animate-in zoom-in-95 duration-200">
+                  {/* Header */}
+                  <div className="p-4 border-b border-border bg-surface text-center shrink-0">
+                    <div className="flex items-center justify-center gap-3">
+                      <span className="font-mono text-base font-black text-muted-foreground bg-secondary px-3 py-1 rounded-lg">{numpadProduct.code}</span>
+                      <h3 className="text-lg font-black uppercase text-primary">{numpadProduct.name}</h3>
                     </div>
-                  )}
-                  {combinedSearchResults.length === 0 && (
-                    <div className="py-12 text-center text-muted-foreground text-lg">Sin resultados para "{search}".</div>
-                  )}
-                  {totalSearchPages > 1 && (
-                    <div className="flex justify-center gap-3 border-t border-border/55 pt-6">
-                      {Array.from({ length: totalSearchPages }).map((_, i) => (
-                        <Button key={i + 1} variant={searchPage === i + 1 ? "default" : "outline"}
-                          className="h-14 px-8 text-lg rounded-2xl font-bold" onClick={() => setSearchPage(i + 1)}>
-                          {i * searchPageSize + 1}–{Math.min((i + 1) * searchPageSize, combinedSearchResults.length)}
-                        </Button>
-                      ))}
-                    </div>
-                  )}
-                </>
-              ) : (
-                <>
-                  <h2 className="text-sm font-bold text-muted-foreground uppercase tracking-wider">
-                    Familia {activeFamily?.code} — {activeFamily?.name}
-                  </h2>
-                  <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                    {matchedProducts.map((product) => (
-                      <button key={product.id} onClick={() => openNumpad(product)}
-                        className="flex flex-col items-center justify-center p-3 bg-glass border-2 border-border hover:border-primary/50 transition-all active:scale-[0.96] rounded-2xl shadow-sm text-center gap-2 cursor-pointer">
-                        <div className="text-sm font-black uppercase tracking-tight"><span className="font-mono text-primary mr-1.5">{product.code}</span>{product.name}</div>
-                        <div className="text-lg font-black text-primary">S/ {product.price.toFixed(2)}</div>
-                      </button>
-                    ))}
-                    {matchedProducts.length === 0 && (
-                      <div className="col-span-full py-12 text-center text-muted-foreground text-lg">Sin telas en esta categoría.</div>
+                  </div>
+
+                  {/* Campos Precio Fijo / Variable y Cantidad */}
+                  <div className="px-4 pt-3 pb-2 bg-secondary/10 border-b border-border flex flex-col gap-2">
+                    {!numpadProduct.is_service && (
+                      <div className="flex gap-3">
+                        <div className="flex-1 bg-background rounded-xl border-2 border-border p-2.5 text-center opacity-60">
+                          <div className="text-[10px] font-bold text-muted-foreground uppercase mb-0.5">Precio Fijo</div>
+                          <div className="text-xl font-bold">S/ {numpadProduct.price.toFixed(2)}</div>
+                        </div>
+                        <div className={`flex-1 rounded-xl border-2 p-2.5 text-center cursor-pointer transition-all ${numpadField === "price" ? "border-primary bg-primary/10" : "border-border bg-background"}`}
+                          onClick={() => setNumpadField("price")}>
+                          <div className={`text-[10px] font-bold uppercase mb-0.5 ${numpadField === "price" ? "text-primary" : "text-muted-foreground"}`}>Precio Variable</div>
+                          <div className={`text-xl font-bold ${numpadField === "price" ? "text-primary" : "text-foreground"}`}>S/ {numpadPrice || "0.00"}</div>
+                        </div>
+                      </div>
+                    )}
+                    {numpadProduct.is_service && (
+                      <div className="flex gap-3">
+                        <div className={`flex-1 rounded-xl border-2 p-2.5 text-center cursor-pointer transition-all border-purple-500 bg-purple-500/10`}
+                          onClick={() => setNumpadField("price")}>
+                          <div className={`text-[10px] font-bold uppercase mb-0.5 text-purple-600`}>Precio del Servicio</div>
+                          <div className={`text-xl font-bold text-foreground`}>S/ {numpadPrice || "0.00"}</div>
+                        </div>
+                      </div>
+                    )}
+                    {!numpadProduct.is_service && (
+                      <div className={`w-full rounded-xl border-2 p-2.5 text-center cursor-pointer transition-all flex items-center justify-center gap-3 ${numpadField === "qty" ? "border-emerald-500 bg-emerald-500/10" : "border-border bg-background"}`}
+                        onClick={() => setNumpadField("qty")}>
+                        <div className={`text-xs font-bold uppercase ${numpadField === "qty" ? "text-emerald-600" : "text-muted-foreground"}`}>Cantidad:</div>
+                        <div className={`text-4xl font-black font-mono tracking-tighter ${numpadField === "qty" ? "text-emerald-500" : "text-foreground"}`}>{numpadQty || "0"}</div>
+                        <div className={`text-base font-bold uppercase ${numpadField === "qty" ? "text-emerald-600" : "text-muted-foreground"}`}>
+                          mts
+                        </div>
+                      </div>
                     )}
                   </div>
-                </>
-              )}
-            </div>
-          )}
-        </div>
-        {numpadProduct && (
-        <div className="flex flex-col justify-center items-center p-4 bg-background h-full overflow-auto">
-          <div className="w-full max-w-[540px] bg-card rounded-3xl border-2 border-border/50 flex flex-col animate-in zoom-in-95 duration-200">
-            {/* Header */}
-            <div className="p-4 border-b border-border bg-surface text-center shrink-0">
-              <div className="flex items-center justify-center gap-3">
-                <span className="font-mono text-base font-black text-muted-foreground bg-secondary px-3 py-1 rounded-lg">{numpadProduct.code}</span>
-                <h3 className="text-lg font-black uppercase text-primary">{numpadProduct.name}</h3>
-              </div>
-            </div>
 
-            {/* Campos Precio Fijo / Variable y Cantidad */}
-            <div className="px-4 pt-3 pb-2 bg-secondary/10 border-b border-border flex flex-col gap-2">
-              {!numpadProduct.is_service && (
-                <div className="flex gap-3">
-                  <div className="flex-1 bg-background rounded-xl border-2 border-border p-2.5 text-center opacity-60">
-                    <div className="text-[10px] font-bold text-muted-foreground uppercase mb-0.5">Precio Fijo</div>
-                    <div className="text-xl font-bold">S/ {numpadProduct.price.toFixed(2)}</div>
+                  {/* Teclado numérico — botones más pequeños para tablet */}
+                  <div className="px-4 pt-3 pb-2 grid grid-cols-3 gap-1.5 bg-card">
+                    {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((num) => (
+                      <button key={num} onClick={() => handleNumpadKey(num)}
+                        className="h-10 text-2xl font-black rounded-xl bg-secondary/50 border-2 border-transparent hover:border-primary active:bg-primary active:text-white transition-colors touch-manipulation">
+                        {num}
+                      </button>
+                    ))}
+                    <button onClick={() => numpadField === "price" && handleNumpadKey(".")}
+                      className={`h-10 text-2xl font-black rounded-xl border-2 border-transparent transition-colors touch-manipulation ${numpadField === "price" ? "bg-secondary/50 hover:border-primary active:bg-primary active:text-white" : "bg-secondary/20 text-muted-foreground/30 cursor-not-allowed"}`}>
+                      .
+                    </button>
+                    <button onClick={() => handleNumpadKey("0")} className="h-10 text-2xl font-black rounded-xl bg-secondary/50 border-2 border-transparent hover:border-primary active:bg-primary active:text-white transition-colors touch-manipulation">0</button>
+                    <button onClick={() => handleNumpadKey("DEL")} className="h-10 flex items-center justify-center rounded-xl bg-red-500/10 text-red-500 border-2 border-transparent active:bg-red-500 active:text-white transition-colors touch-manipulation">
+                      <Delete className="w-6 h-6" />
+                    </button>
                   </div>
-                  <div className={`flex-1 rounded-xl border-2 p-2.5 text-center cursor-pointer transition-all ${numpadField === "price" ? "border-primary bg-primary/10" : "border-border bg-background"}`}
-                    onClick={() => setNumpadField("price")}>
-                    <div className={`text-[10px] font-bold uppercase mb-0.5 ${numpadField === "price" ? "text-primary" : "text-muted-foreground"}`}>Precio Variable</div>
-                    <div className={`text-xl font-bold ${numpadField === "price" ? "text-primary" : "text-foreground"}`}>S/ {numpadPrice || "0.00"}</div>
-                  </div>
-                </div>
-              )}
-              {numpadProduct.is_service && (
-                <div className="flex gap-3">
-                  <div className={`flex-1 rounded-xl border-2 p-2.5 text-center cursor-pointer transition-all border-purple-500 bg-purple-500/10`}
-                    onClick={() => setNumpadField("price")}>
-                    <div className={`text-[10px] font-bold uppercase mb-0.5 text-purple-600`}>Precio del Servicio</div>
-                    <div className={`text-xl font-bold text-foreground`}>S/ {numpadPrice || "0.00"}</div>
-                  </div>
-                </div>
-              )}
-              {!numpadProduct.is_service && (
-                <div className={`w-full rounded-xl border-2 p-2.5 text-center cursor-pointer transition-all flex items-center justify-center gap-3 ${numpadField === "qty" ? "border-emerald-500 bg-emerald-500/10" : "border-border bg-background"}`}
-                  onClick={() => setNumpadField("qty")}>
-                  <div className={`text-xs font-bold uppercase ${numpadField === "qty" ? "text-emerald-600" : "text-muted-foreground"}`}>Cantidad:</div>
-                  <div className={`text-4xl font-black font-mono tracking-tighter ${numpadField === "qty" ? "text-emerald-500" : "text-foreground"}`}>{numpadQty || "0"}</div>
-                  <div className={`text-base font-bold uppercase ${numpadField === "qty" ? "text-emerald-600" : "text-muted-foreground"}`}>
-                    mts
-                  </div>
-                </div>
-              )}
-            </div>
 
-            {/* Teclado numérico — botones más pequeños para tablet */}
-            <div className="px-4 pt-3 pb-2 grid grid-cols-3 gap-1.5 bg-card">
-              {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((num) => (
-                <button key={num} onClick={() => handleNumpadKey(num)}
-                  className="h-10 text-2xl font-black rounded-xl bg-secondary/50 border-2 border-transparent hover:border-primary active:bg-primary active:text-white transition-colors touch-manipulation">
-                  {num}
-                </button>
-              ))}
-              <button onClick={() => numpadField === "price" && handleNumpadKey(".")}
-                className={`h-10 text-2xl font-black rounded-xl border-2 border-transparent transition-colors touch-manipulation ${numpadField === "price" ? "bg-secondary/50 hover:border-primary active:bg-primary active:text-white" : "bg-secondary/20 text-muted-foreground/30 cursor-not-allowed"}`}>
-                .
-              </button>
-              <button onClick={() => handleNumpadKey("0")} className="h-10 text-2xl font-black rounded-xl bg-secondary/50 border-2 border-transparent hover:border-primary active:bg-primary active:text-white transition-colors touch-manipulation">0</button>
-              <button onClick={() => handleNumpadKey("DEL")} className="h-10 flex items-center justify-center rounded-xl bg-red-500/10 text-red-500 border-2 border-transparent active:bg-red-500 active:text-white transition-colors touch-manipulation">
-                <Delete className="w-6 h-6" />
-              </button>
-            </div>
-
-            {/* Preview subtotal y botones de acción */}
-            <div className="px-4 pb-4 pt-2 flex flex-col gap-2.5">
-              <div className="bg-background border-2 border-border rounded-xl p-3 flex items-center justify-between gap-4">
-                <div className="text-sm font-mono font-bold text-muted-foreground">
-                  {numpadProduct.is_service ? `S/ ${previewPrice.toFixed(2)}` : `${previewQty} MTS × S/ ${previewPrice.toFixed(2)}`}
+                  {/* Preview subtotal y botones de acción */}
+                  <div className="px-4 pb-4 pt-2 flex flex-col gap-2.5">
+                    <div className="bg-background border-2 border-border rounded-xl p-3 flex items-center justify-between gap-4">
+                      <div className="text-sm font-mono font-bold text-muted-foreground">
+                        {numpadProduct.is_service ? `S/ ${previewPrice.toFixed(2)}` : `${previewQty} MTS × S/ ${previewPrice.toFixed(2)}`}
+                      </div>
+                      <div className="text-2xl font-black text-emerald-500 font-mono">S/ {previewSubtotal.toFixed(2)}</div>
+                    </div>
+                    <div className="flex gap-3">
+                      <Button variant="outline" className="h-14 flex-1 text-base font-bold uppercase rounded-2xl border-2" onClick={() => setNumpadProduct(null)}>Cancelar</Button>
+                      <Button className="h-14 flex-[2] text-xl font-black uppercase rounded-2xl shadow-xl" onClick={handleNumpadOk}
+                        disabled={(!numpadProduct.is_service && (!numpadQty || parseInt(numpadQty) <= 0)) || !numpadPrice}>
+                        {cart.find((c) => c.id === numpadProduct.id) ? "Actualizar" : "Agregar"}
+                      </Button>
+                    </div>
+                  </div>
                 </div>
-                <div className="text-2xl font-black text-emerald-500 font-mono">S/ {previewSubtotal.toFixed(2)}</div>
               </div>
-              <div className="flex gap-3">
-                <Button variant="outline" className="h-14 flex-1 text-base font-bold uppercase rounded-2xl border-2" onClick={() => setNumpadProduct(null)}>Cancelar</Button>
-                <Button className="h-14 flex-[2] text-xl font-black uppercase rounded-2xl shadow-xl" onClick={handleNumpadOk}
-                  disabled={(!numpadProduct.is_service && (!numpadQty || parseInt(numpadQty) <= 0)) || !numpadPrice}>
-                  {cart.find((c) => c.id === numpadProduct.id) ? "Actualizar" : "Agregar"}
-                </Button>
-              </div>
-            </div>
+            )}
           </div>
-        </div>
-      )}
-    </div>
-  )}
-</div>
+        )}
+      </div>
 
       {/* ════════════════════════════════════════
           RIGHT PANEL — Proforma + Emitir + Historial
@@ -1244,46 +1299,47 @@ export default function POSPage() {
                       openNumpad(item, item);
                     };
                     return (
-                    <div key={item.id}>
-                      <Card className="bg-background border-border shadow-sm rounded-2xl overflow-hidden cursor-pointer hover:border-primary/50 transition-colors active:scale-[0.98]"
-                        onClick={handleCardClick}>
-                        <CardContent className="px-2 py-1.5">
-                          <div className="flex items-start justify-between mb-0.5">
-                            <div className="text-xs font-bold text-foreground leading-tight flex items-start gap-1.5 flex-1 pr-2">
-                              {isService && (
-                                <Scissors className="w-3.5 h-3.5 text-purple-500 shrink-0 mt-0.5" />
+                      <div key={item.id}>
+                        <Card className="bg-background border-border shadow-sm rounded-2xl overflow-hidden cursor-pointer hover:border-primary/50 transition-colors active:scale-[0.98]"
+                          onClick={handleCardClick}>
+                          <CardContent className="px-2 py-1.5">
+                            <div className="flex items-start justify-between mb-0.5">
+                              <div className="text-xs font-bold text-foreground leading-tight flex items-start gap-1.5 flex-1 pr-2">
+                                {isService && (
+                                  <Scissors className="w-3.5 h-3.5 text-purple-500 shrink-0 mt-0.5" />
+                                )}
+                                <span className="font-mono text-primary shrink-0 mt-px">{item.code}</span>
+                                <span className="whitespace-normal text-left flex-1">{item.name} {!isService && <span className="text-[10px] text-muted-foreground ml-1 inline-block">(S/ {item.price.toFixed(2)})</span>}</span>
+                              </div>
+                              <button className="p-1.5 text-red-500 bg-red-500/10 hover:bg-red-500/20 rounded-md transition-colors shrink-0"
+                                onClick={(e) => removeFromCart(item.id, e)}>
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                            <div className="flex justify-between items-end">
+                              {isService ? (
+                                <div className="text-muted-foreground font-mono text-[10px] font-bold">
+                                  Precio: S/ {item.editedPrice.toFixed(2)}
+                                </div>
+                              ) : (
+                                <div className="text-muted-foreground font-mono text-[10px] font-bold">
+                                  {item.quantity} MTS × S/ {item.editedPrice.toFixed(2)}
+                                </div>
                               )}
-                              <span className="font-mono text-primary shrink-0 mt-px">{item.code}</span>
-                              <span className="whitespace-normal text-left flex-1">{item.name} {!isService && <span className="text-[10px] text-muted-foreground ml-1 inline-block">(S/ {item.price.toFixed(2)})</span>}</span>
-                            </div>
-                            <button className="p-1.5 text-red-500 bg-red-500/10 hover:bg-red-500/20 rounded-md transition-colors shrink-0"
-                              onClick={(e) => removeFromCart(item.id, e)}>
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                          <div className="flex justify-between items-end">
-                            {isService ? (
-                              <div className="text-muted-foreground font-mono text-[10px] font-bold">
-                                Precio: S/ {item.editedPrice.toFixed(2)}
+                              <div className="text-base font-black text-foreground leading-none">
+                                S/ {(item.editedPrice * item.quantity).toFixed(2)}
                               </div>
-                            ) : (
-                              <div className="text-muted-foreground font-mono text-[10px] font-bold">
-                                {item.quantity} MTS × S/ {item.editedPrice.toFixed(2)}
-                              </div>
-                            )}
-                            <div className="text-base font-black text-foreground leading-none">
-                              S/ {(item.editedPrice * item.quantity).toFixed(2)}
                             </div>
+                          </CardContent>
+                        </Card>
+                        {idx < cart.length - 1 && (
+                          <div className="text-center font-mono text-muted-foreground/25 text-[10px] tracking-widest select-none py-0.5">
+                            · · · · · · · · · · · · · · · ·
                           </div>
-                        </CardContent>
-                      </Card>
-                      {idx < cart.length - 1 && (
-                        <div className="text-center font-mono text-muted-foreground/25 text-[10px] tracking-widest select-none py-0.5">
-                          · · · · · · · · · · · · · · · ·
-                        </div>
-                      )}
-                    </div>
-                  )})}
+                        )}
+                      </div>
+                    )
+                  })}
                   <div className="text-center font-mono text-muted-foreground/40 text-xs tracking-widest select-none">
                     ───────────────────────────────
                   </div>
@@ -1301,13 +1357,12 @@ export default function POSPage() {
                     return (
                       <Button
                         key={svc.id}
-                        onClick={() => openNumpad({id: svc.id, familyId: 'SERVICE', name: svc.name, code: 'SVC', price: 0, is_service: true}, existing)}
+                        onClick={() => openNumpad({ id: svc.id, familyId: 'SERVICE', name: svc.name, code: 'SVC', price: 0, is_service: true }, existing)}
                         variant="outline"
-                        className={`flex-1 h-8 border-dashed border-2 font-bold text-[10px] flex items-center justify-center gap-2 transition-colors uppercase ${
-                          existing
+                        className={`flex-1 h-8 border-dashed border-2 font-bold text-[10px] flex items-center justify-center gap-2 transition-colors uppercase ${existing
                             ? (idx === 1 ? "border-orange-400 text-orange-600 bg-orange-50 hover:bg-orange-100" : "border-purple-400 text-purple-600 bg-purple-50 hover:bg-purple-100")
                             : "hover:bg-primary/5 hover:text-primary"
-                        }`}
+                          }`}
                       >
                         <Scissors className="w-3 h-3" />
                         {existing ? `EDITAR ${svc.name}` : `+ ${svc.name}`}
@@ -1335,8 +1390,8 @@ export default function POSPage() {
                   onClick={handleEmitTicket}
                   disabled={cart.length === 0 || isEmitting || !isCajaOpen}
                   className={`flex-1 h-12 rounded-xl text-sm font-black tracking-wide transition-all flex items-center justify-center gap-2 shadow-md ${cart.length === 0 || isEmitting || !isCajaOpen
-                      ? "bg-secondary text-muted-foreground cursor-not-allowed"
-                      : "bg-emerald-600 hover:bg-emerald-700 text-white hover:scale-[1.01] active:scale-[0.99]"
+                    ? "bg-secondary text-muted-foreground cursor-not-allowed"
+                    : "bg-emerald-600 hover:bg-emerald-700 text-white hover:scale-[1.01] active:scale-[0.99]"
                     }`}
                 >
                   {isEmitting ? (
@@ -1389,21 +1444,19 @@ export default function POSPage() {
                       </div>
                       <div className="flex justify-between items-center text-xs mt-0.5">
                         <span className="text-muted-foreground font-mono">{new Date(ticket.created_at).toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" })}</span>
-                        <span className={`font-black text-sm ${
-                          ticket.status === 'PENDING' ? 'text-orange-500' :
-                          ticket.status === 'COMPLETED' ? 'text-emerald-500' :
-                          'text-muted-foreground line-through'
-                        }`}>
+                        <span className={`font-black text-sm ${ticket.status === 'PENDING' ? 'text-orange-500' :
+                            ticket.status === 'COMPLETED' ? 'text-emerald-500' :
+                              'text-muted-foreground line-through'
+                          }`}>
                           S/ {ticket.total.toFixed(2)}
                         </span>
                       </div>
                       <div className="flex flex-col gap-0.5 mt-1">
                         {permissions?.view_cashier_name && (
-                          <div className={`text-[10px] font-bold uppercase ${
-                            ticket.status === 'PENDING' ? 'text-orange-600/90' :
-                            ticket.status === 'COMPLETED' ? 'text-emerald-600' :
-                            'text-muted-foreground'
-                          }`}>
+                          <div className={`text-[10px] font-bold uppercase ${ticket.status === 'PENDING' ? 'text-orange-600/90' :
+                              ticket.status === 'COMPLETED' ? 'text-emerald-600' :
+                                'text-muted-foreground'
+                            }`}>
                             ATENDIDO POR: {(ticket as any).seller?.username || 'ADMIN'}
                           </div>
                         )}
@@ -1455,7 +1508,7 @@ export default function POSPage() {
                                     }
                                   }
                                 }
-                              } catch (e) {}
+                              } catch (e) { }
                               return { code, name, price: basePrice, editedPrice, quantity };
                             });
 
@@ -1520,7 +1573,7 @@ export default function POSPage() {
           <DialogHeader>
             <DialogTitle className="text-xl font-black text-center mb-2">Resumen del Día</DialogTitle>
           </DialogHeader>
-          
+
           {closingCajaLoading || !cajaSummary ? (
             <div className="py-10 flex flex-col items-center justify-center gap-4 text-muted-foreground">
               <RefreshCw className="w-8 h-8 animate-spin" />
@@ -1550,7 +1603,7 @@ export default function POSPage() {
                   <span className="text-emerald-500">S/ {cajaSummary.total.toFixed(2)}</span>
                 </div>
               </div>
-              
+
               <div className="flex flex-col sm:flex-row gap-3 pt-4">
                 <Button variant="outline" className="flex-1 h-12 font-bold" onClick={() => setCajaSummaryOpen(false)}>
                   Cancelar
@@ -1577,9 +1630,9 @@ export default function POSPage() {
           </DialogHeader>
           <div className="py-2">
             {previewTicketData && (
-              <ReceiptPreview 
-                maxChars={activePrinter?.max_chars || 42} 
-                saleData={previewTicketData} 
+              <ReceiptPreview
+                maxChars={activePrinter?.max_chars || 42}
+                saleData={previewTicketData}
               />
             )}
           </div>

@@ -73,7 +73,7 @@ type SaleRow = {
 export default function HistorialProformasPage() {
   const router = useRouter();
   const { role, username, isHydrated, permissions } = useRole();
-  const { activeStoreId } = useStore();
+  const { activeStoreId, isAllStoresMode, availableStoreIds, getStoreIdsWithPermission } = useStore();
 
   // State
   const todayLima = limaToday();
@@ -115,9 +115,16 @@ export default function HistorialProformasPage() {
       if (statusFilter !== 'ALL') {
         query = query.eq('status', statusFilter);
       }
+      // ── BLINDAJE CAPA 2: Filtrado estricto por permiso contextual de módulo ──────
+      const permittedStoreIds = getStoreIdsWithPermission('access_proformas');
       if (activeStoreId) {
+        // Caso normal: tienda activa específica
         query = query.eq('store_id', activeStoreId);
+      } else if (isAllStoresMode && role !== 'ADMIN' && permittedStoreIds.length > 0) {
+        // Modo ALL para empleado multi-tienda: restringe a sus tiendas autorizadas CON PERMISO en este módulo
+        query = query.in('store_id', permittedStoreIds);
       }
+      // Si es ADMIN global en modo ALL: sin filtro (ve todo)
 
       const { data, error: err } = await query;
       if (err) throw err;

@@ -36,53 +36,57 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
   const fetchPermissions = useCallback(async (roleName: string) => {
     if (!roleName) return;
     try {
-      let query = supabase.from("roles").select("permissions").eq("name", roleName);
-      
-      const activeStoreId = localStorage.getItem("goltex_active_store_id") || localStorage.getItem("goltex_default_store_id");
-      
-      if (roleName !== 'ADMIN' && activeStoreId) {
-        query = query.eq("store_id", activeStoreId);
-      }
-      
-      const { data, error } = await query.limit(1).maybeSingle();
-
-      if (!error && data && data.permissions) {
-        let finalPerms = { ...data.permissions };
-        if (roleName === 'ADMIN') {
-          // El Admin siempre debe tener acceso a TODO
-          const adminPerms = {
-            access_pos: true,
-            access_caja: true,
-            access_contabilidad: true,
-            access_clientes: true,
-            access_proformas: true,
-            access_inventory: true,
-            access_personal: true,
-            access_dashboard: true,
-            access_settings: true
-          };
-          finalPerms = new Proxy(adminPerms, {
-            get(target: any, prop: string) {
-              return true;
-            }
-          }) as any;
-        }
-
-        console.log('⚡ [ROLE CONTEXT] Permisos actualizados en vivo para rol:', roleName, finalPerms);
+      if (roleName === 'ADMIN') {
+        const adminPerms = {
+          access_pos: true,
+          access_caja: true,
+          access_contabilidad: true,
+          access_clientes: true,
+          access_proformas: true,
+          access_inventory: true,
+          access_personal: true,
+          access_dashboard: true,
+          access_settings: true
+        };
+        const finalPerms = new Proxy(adminPerms, { get: () => true }) as any;
         setPermissions(finalPerms);
+        localStorage.setItem("goltex_permissions", JSON.stringify(adminPerms));
+        return;
+      }
 
-        const storagePerms = roleName === 'ADMIN'
-          ? { access_pos: true, access_caja: true, access_contabilidad: true, access_clientes: true, access_proformas: true, access_inventory: true, access_personal: true, access_dashboard: true, access_settings: true }
-          : { ...data.permissions };
+      // ── RESOLUCIÓN DE PERMISOS (LOCAL DE TIENDA VS PLANTILLA GLOBAL) ──
+      const { data: matchedRoles, error } = await supabase
+        .from("roles")
+        .select("id, name, permissions, store_id")
+        .eq("name", roleName);
 
-        localStorage.setItem("goltex_permissions", JSON.stringify(storagePerms));
-      } else {
-        const localPerms = localStorage.getItem("goltex_permissions");
-        if (localPerms) {
-          try {
-            setPermissions(JSON.parse(localPerms));
-          } catch (e) {}
+      if (!error && matchedRoles && matchedRoles.length > 0) {
+        const activeStoreId = localStorage.getItem("goltex_active_store_id") || localStorage.getItem("goltex_default_store_id");
+
+        // 1. Buscar rol local para la tienda activa
+        let selectedRole = matchedRoles.find(r => r.store_id === activeStoreId);
+        // 2. Si no existe rol local, usar plantilla global (store_id = null)
+        if (!selectedRole) {
+          selectedRole = matchedRoles.find(r => r.store_id === null || !r.store_id);
         }
+        // 3. Fallback: cualquier coincidencia
+        if (!selectedRole) {
+          selectedRole = matchedRoles[0];
+        }
+
+        if (selectedRole && selectedRole.permissions) {
+          console.log('⚡ [ROLE CONTEXT] Permisos cargados para:', roleName, selectedRole.permissions, '(Tienda:', selectedRole.store_id || 'GLOBAL', ')');
+          setPermissions(selectedRole.permissions);
+          localStorage.setItem("goltex_permissions", JSON.stringify(selectedRole.permissions));
+          return;
+        }
+      }
+
+      const localPerms = localStorage.getItem("goltex_permissions");
+      if (localPerms) {
+        try {
+          setPermissions(JSON.parse(localPerms));
+        } catch (e) {}
       }
     } catch (e) {
       const localPerms = localStorage.getItem("goltex_permissions");
@@ -119,15 +123,25 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // 🛡️ AUTH GUARD: Verificar si el usuario tiene al menos una tienda activa
+      // 🛡️ AUTH GUARD: Verificar si el usuario tiene al menos una tienda activa o rol plantilla global
       if (profile.role !== "ADMIN" && profile.employee_id) {
+        const { data: roleDef } = await supabase
+          .from("roles")
+          .select("store_id")
+          .eq("name", profile.role)
+          .maybeSingle();
+
+        const isGlobalTemplateRole = !roleDef || roleDef.store_id === null;
+
         const { data: activeStoresCount, error: countErr } = await supabase
           .from("employee_stores")
           .select("store_id, stores!inner(is_active)")
           .eq("employee_id", profile.employee_id)
           .eq("stores.is_active", true);
 
-        if (!countErr && (!activeStoresCount || activeStoresCount.length === 0)) {
+        const hasActiveEmpStores = !countErr && activeStoresCount && activeStoresCount.length > 0;
+
+        if (!isGlobalTemplateRole && !hasActiveEmpStores) {
           console.error("🚫 [AUTH GUARD] El usuario no tiene tiendas activas. Bloqueando sesión...");
           clearSession();
           if (typeof window !== "undefined") {
