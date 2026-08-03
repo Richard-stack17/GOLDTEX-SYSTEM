@@ -113,7 +113,7 @@ export default function POSPage() {
                 setBtDeviceObj(devices[0]);
               }
             } catch (e) {
-              console.log('No silent BT access in POS', e);
+              console.warn('No silent BT access in POS', e);
             }
           }
         }
@@ -177,7 +177,6 @@ export default function POSPage() {
     if (activeStoreId) {
       localStorage.setItem(`isCajaOpen_${activeStoreId}`, "false");
     }
-    localStorage.setItem("isCajaOpen", "false");
     setCajaSummaryOpen(false);
 
     try {
@@ -228,8 +227,6 @@ export default function POSPage() {
 
     const todayStr = getLimaTodayStr();
 
-    console.log(`🔍 [fetchHistory] Buscando proformas del día: ${todayStr} para tienda: ${activeStoreId}`);
-
     let query = supabase
       .from("sales")
       .select("*, transactions(payment_method, amount, surcharge_amount)")
@@ -240,14 +237,11 @@ export default function POSPage() {
 
     const { data, error } = await query;
 
-    console.log(`📡 [fetchHistory] Respuesta completa:`, { data, error });
-
     if (error) {
       console.error("❌ [fetchHistory] Error en la consulta:", error);
     }
 
     if (data) {
-      console.log(`✅ [fetchHistory] Proformas encontradas: ${data.length}`);
 
       try {
         // Enriquecer el ticket con el username del vendedor desde Dexie local (ya que quitamos el JOIN)
@@ -269,6 +263,7 @@ export default function POSPage() {
   }, [activeStoreId]);
 
   const [isCajaOpen, setIsCajaOpen] = useState(false);
+  const [isClearCartModalOpen, setIsClearCartModalOpen] = useState(false);
 
   useEffect(() => {
     if (!activeStoreId) return;
@@ -306,12 +301,9 @@ export default function POSPage() {
           setIsCajaOpen(true);
           localStorage.setItem(`isCajaOpen_${activeStoreId}`, 'true');
           localStorage.setItem(`cajaOpenDate_${activeStoreId}`, today);
-          localStorage.setItem('isCajaOpen', 'true');
-          localStorage.setItem('cajaOpenDate', today);
         } else {
           setIsCajaOpen(false);
           localStorage.setItem(`isCajaOpen_${activeStoreId}`, 'false');
-          localStorage.setItem('isCajaOpen', 'false');
         }
       } catch (e) {
         console.warn('Error sincronizando caja:', e);
@@ -344,7 +336,6 @@ export default function POSPage() {
           table: 'sales'
         },
         (payload) => {
-          console.log('⚡ [REALTIME - POS] Cambio en proformas de tienda detectado:', payload);
           fetchHistory();
           fetchTodayTicketNumber();
         }
@@ -353,7 +344,6 @@ export default function POSPage() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'transactions' },
         (payload) => {
-          console.log('⚡ [REALTIME - POS] Evento recibido en tabla transactions:', payload);
           fetchHistory();
         }
       )
@@ -367,7 +357,7 @@ export default function POSPage() {
     }, 5000);
 
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === `isCajaOpen_${activeStoreId}` || e.key === 'isCajaOpen') {
+      if (e.key === `isCajaOpen_${activeStoreId}`) {
         setIsCajaOpen(e.newValue === 'true');
       }
     };
@@ -400,8 +390,6 @@ export default function POSPage() {
       localStorage.setItem(`isCajaOpen_${activeStoreId}`, "true");
       localStorage.setItem(`cajaOpenDate_${activeStoreId}`, today);
     }
-    localStorage.setItem("isCajaOpen", "true");
-    localStorage.setItem("cajaOpenDate", today);
 
     try {
       const channel = new BroadcastChannel("goltex_caja_channel");
@@ -659,11 +647,7 @@ export default function POSPage() {
     setCart((prev) => prev.filter((i) => i.id !== id));
   };
 
-  const deleteDraftTicket = () => {
-    if (window.confirm("¿Eliminar este borrador? No quedará ningún registro.")) {
-      setCart([]);
-    }
-  };
+  const deleteDraftTicket = () => setIsClearCartModalOpen(true);
 
   const total = cart.reduce((acc, item) => acc + item.editedPrice * item.quantity, 0);
   const totalServices = cart.filter(i => i.is_service).reduce((acc, item) => acc + item.editedPrice * item.quantity, 0);
@@ -754,7 +738,6 @@ export default function POSPage() {
           items: cartSnapshot,
           total: total
         };
-        console.log('Iniciando auto-impresión POS (Doble Copia)...');
         silentPrintSaleReceipt(saleDataForPrint, true)
           .catch((e: any) => console.error('Error impresión POS:', e));
       }, 50);
@@ -832,7 +815,6 @@ export default function POSPage() {
         items: reconstructedItems,
         total: ticket.total
       };
-      console.log('Iniciando reimpresión POS (Simple)...');
       await silentPrintSaleReceipt(saleDataForPrint, false);
     } catch (e: any) {
       console.error('Error reimpresión POS:', e);
@@ -1639,6 +1621,42 @@ export default function POSPage() {
           <div className="pt-2">
             <Button variant="outline" className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium py-2.5 rounded-lg transition-colors border-0" onClick={() => setPreviewTicketData(null)}>
               Cerrar
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* MODAL CLEAR CART */}
+      <Dialog open={isClearCartModalOpen} onOpenChange={setIsClearCartModalOpen}>
+        <DialogContent className="max-w-md p-6 bg-white rounded-2xl shadow-xl border-0">
+          <DialogHeader className="mb-4">
+            <DialogTitle className="text-xl font-black text-slate-800 flex items-center gap-2">
+              <span className="text-red-500">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+              </span>
+              ¿Vaciar proforma actual?
+            </DialogTitle>
+          </DialogHeader>
+          <div className="text-slate-600 mb-6">
+            Esta acción eliminará todos los productos del carrito actual. No quedará ningún registro de este borrador.
+          </div>
+          <div className="flex justify-end gap-3">
+            <Button
+              variant="outline"
+              className="rounded-xl font-semibold px-6 border-slate-200 hover:bg-slate-50 text-slate-700"
+              onClick={() => setIsClearCartModalOpen(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="default"
+              className="rounded-xl font-bold px-6 bg-red-600 hover:bg-red-700 text-white shadow-sm hover:shadow"
+              onClick={() => {
+                setCart([]);
+                setIsClearCartModalOpen(false);
+              }}
+            >
+              Vaciar Proforma
             </Button>
           </div>
         </DialogContent>

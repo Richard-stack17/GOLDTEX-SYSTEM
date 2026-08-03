@@ -58,7 +58,8 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
       const { data: matchedRoles, error } = await supabase
         .from("roles")
         .select("id, name, permissions, store_id")
-        .eq("name", roleName);
+        .eq("name", roleName)
+        .eq("is_active", true);
 
       if (!error && matchedRoles && matchedRoles.length > 0) {
         const activeStoreId = localStorage.getItem("goltex_active_store_id") || localStorage.getItem("goltex_default_store_id");
@@ -75,7 +76,6 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
         }
 
         if (selectedRole && selectedRole.permissions) {
-          console.log('⚡ [ROLE CONTEXT] Permisos cargados para:', roleName, selectedRole.permissions, '(Tienda:', selectedRole.store_id || 'GLOBAL', ')');
           setPermissions(selectedRole.permissions);
           localStorage.setItem("goltex_permissions", JSON.stringify(selectedRole.permissions));
           return;
@@ -105,11 +105,9 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     try {
       const { data: profile, error } = await supabase
         .from("profiles")
-        .select("id, role, employee_id, default_store_id")
+        .select("id, role, role_id, employee_id, default_store_id")
         .eq("username", currentUsername)
         .single();
-
-      console.log('🔄 [ROLE CONTEXT] Perfil recargado. Nuevo default_store_id:', profile?.default_store_id);
 
       if (error || !profile) {
         return;
@@ -125,29 +123,37 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
 
       // 🛡️ AUTH GUARD: Verificar si el usuario tiene al menos una tienda activa o rol plantilla global
       if (profile.role !== "ADMIN" && profile.employee_id) {
-        const { data: roleDef } = await supabase
+        const { data: roleDefs } = await supabase
           .from("roles")
-          .select("store_id")
+          .select("store_id, is_system")
           .eq("name", profile.role)
-          .maybeSingle();
+          .eq("is_active", true);
 
-        const isGlobalTemplateRole = !roleDef || roleDef.store_id === null;
+        const isGlobalTemplateRole = !roleDefs || roleDefs.length === 0 || roleDefs.some((r: any) => r.store_id === null || r.is_system);
+        const isNoStoreAssigned = profile.default_store_id === null;
 
-        const { data: activeStoresCount, error: countErr } = await supabase
+        const { data: totalEmpStores } = await supabase
           .from("employee_stores")
-          .select("store_id, stores!inner(is_active)")
-          .eq("employee_id", profile.employee_id)
-          .eq("stores.is_active", true);
+          .select("store_id")
+          .eq("employee_id", profile.employee_id);
 
-        const hasActiveEmpStores = !countErr && activeStoresCount && activeStoresCount.length > 0;
+        if (totalEmpStores && totalEmpStores.length > 0 && (!isGlobalTemplateRole || !isNoStoreAssigned)) {
+          const { data: activeStoresCount, error: countErr } = await supabase
+            .from("employee_stores")
+            .select("store_id, stores!inner(is_active)")
+            .eq("employee_id", profile.employee_id)
+            .eq("stores.is_active", true);
 
-        if (!isGlobalTemplateRole && !hasActiveEmpStores) {
-          console.error("🚫 [AUTH GUARD] El usuario no tiene tiendas activas. Bloqueando sesión...");
-          clearSession();
-          if (typeof window !== "undefined") {
-            window.location.href = "/login?inactive_store=true";
+          const hasActiveEmpStores = !countErr && activeStoresCount && activeStoresCount.length > 0;
+
+          if (!hasActiveEmpStores) {
+            console.error("🚫 [AUTH GUARD] El usuario no tiene tiendas activas. Bloqueando sesión...");
+            clearSession();
+            if (typeof window !== "undefined") {
+              window.location.href = "/login?inactive_store=true";
+            }
+            return;
           }
-          return;
         }
       }
 
@@ -175,6 +181,21 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
         else localStorage.removeItem("goltex_default_store_id");
       }
 
+      if (profile.role_id) {
+        // Lookup directo por ID — sin colisión de nombres posible
+        const { data: roleDef } = await supabase
+          .from("roles")
+          .select("permissions")
+          .eq("id", profile.role_id)
+          .single();
+        if (roleDef?.permissions) {
+          setPermissions(roleDef.permissions);
+          localStorage.setItem("goltex_permissions", JSON.stringify(roleDef.permissions));
+          return;
+        }
+      }
+      
+      // Fallback al sistema actual por nombre (para ADMIN y perfiles sin role_id)
       await fetchPermissions(freshRole);
     } catch (e) {
       console.warn("Error al refrescar sesión:", e);
@@ -226,10 +247,8 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
         "postgres_changes",
         { event: "*", schema: "public", table: "profiles", filter: `id=eq.${profileId}` },
         (payload) => {
-          console.log('⚡ [REALTIME - PROFILES] Evento recibido en BD:', payload);
           if (payload.new && (payload.new as any).role) {
             const newRole = (payload.new as any).role;
-            console.log('⚡ [REALTIME - ROLE] Actualizando rol e impulsando permisos:', newRole);
             setRoleState(newRole);
             localStorage.setItem("goltex_role", newRole);
             void fetchPermissions(newRole);
@@ -246,7 +265,6 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
             "postgres_changes",
             { event: "*", schema: "public", table: "employee_stores", filter: `employee_id=eq.${employeeId}` },
             (payload) => {
-              console.log('⚡ [REALTIME - ROLE] Recibido evento de cambio en BD:', payload);
               refreshUserSession();
             }
           )
@@ -259,7 +277,6 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
         "postgres_changes",
         { event: "*", schema: "public", table: "roles" },
         (payload) => {
-          console.log('⚡ [REALTIME - ROLE] Recibido evento de cambio en BD:', payload);
           refreshUserSession();
         }
       )

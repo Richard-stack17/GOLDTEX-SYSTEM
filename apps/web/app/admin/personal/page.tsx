@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -25,14 +25,16 @@ type Employee = {
   full_name: string;
   dni: string;
   phone?: string;
+  is_active?: boolean;
   created_at: string;
-  employee_stores?: { store_id: string; role?: string; stores: { name: string } }[];
+  employee_stores?: { store_id: string; role?: string; role_id?: string | null; stores: { name: string } }[];
 };
 
 type Profile = {
   id: string;
   username: string;
   role: string;
+  role_id?: string | null;
   employee_id: string | null;
   email: string | null;
   default_store_id?: string | null;
@@ -179,11 +181,10 @@ const PERMISSION_GROUPS = [
 // ─── Toast helper ─────────────────────────────────────────────────────────────
 function Toast({ message, type }: { message: string; type: 'success' | 'error' }) {
   return (
-    <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 px-5 py-3.5 rounded-2xl border shadow-2xl font-bold text-sm opacity-100 animate-in fade-in slide-in-from-bottom-4 ${
-      type === 'success'
-        ? 'bg-emerald-600 text-white border-emerald-700'
-        : 'bg-red-600 text-white border-red-700'
-    }`}>
+    <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 px-5 py-3.5 rounded-2xl border shadow-2xl font-bold text-sm opacity-100 animate-in fade-in slide-in-from-bottom-4 ${type === 'success'
+      ? 'bg-emerald-600 text-white border-emerald-700'
+      : 'bg-red-600 text-white border-red-700'
+      }`}>
       {type === 'success'
         ? <CheckCircle2 className="w-5 h-5 shrink-0 text-white" />
         : <ShieldAlert className="w-5 h-5 shrink-0 text-white" />}
@@ -199,6 +200,7 @@ export default function PersonalPage() {
   const router = useRouter();
 
   const isAdmin = role === 'ADMIN';
+  const isUserGlobalAdmin = isAdmin || isGlobalUser;
 
   const [activeTab, setActiveTab] = useState<Tab>('empleados');
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -208,10 +210,36 @@ export default function PersonalPage() {
   const storeMap = useMemo(() => {
     return new Map(availableStores.map(s => [s.id, s.name]));
   }, [availableStores]);
+
+  const checkCanManageTarget = useCallback((targetProfile?: Profile | null, targetEmp?: Employee | null): boolean => {
+    if (isAdmin) return true;
+
+    const isTargetAdmin = targetProfile?.role === 'ADMIN';
+    const targetStoreCount = (targetProfile?.employee_stores?.length || 0) + (targetEmp?.employee_stores?.length || 0);
+    const hasSpecificStore = Boolean(targetProfile?.default_store_id || targetStoreCount > 0);
+    const isTargetGlobalScope = !hasSpecificStore;
+    const isTargetProtected = isTargetAdmin || isTargetGlobalScope;
+
+    if (isTargetProtected) return false;
+
+    const isSameStoreTarget = activeStoreId
+      ? (targetProfile?.default_store_id === activeStoreId || 
+         targetProfile?.employee_stores?.some((es: any) => es.store_id === activeStoreId) ||
+         targetEmp?.employee_stores?.some(es => es.store_id === activeStoreId))
+      : Boolean(
+          (targetProfile?.default_store_id && availableStoreIds.includes(targetProfile.default_store_id)) ||
+          targetProfile?.employee_stores?.some((es: any) => availableStoreIds.includes(es.store_id)) ||
+          targetEmp?.employee_stores?.some(es => availableStoreIds.includes(es.store_id))
+        );
+
+    return Boolean(isSameStoreTarget);
+  }, [isAdmin, activeStoreId, availableStoreIds]);
   const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [allRoles, setAllRoles] = useState<Role[]>([]);  // includes inactive
   const [showInactiveRoles, setShowInactiveRoles] = useState(false);
+  const [showInactiveEmployees, setShowInactiveEmployees] = useState(false);
+  const [showInactiveUsers, setShowInactiveUsers] = useState(false);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
@@ -230,8 +258,12 @@ export default function PersonalPage() {
   const [empEmail, setEmpEmail] = useState('');
   const [empStoreIds, setEmpStoreIds] = useState<string[]>([]);
   const [empStoreRoles, setEmpStoreRoles] = useState<Record<string, string>>({});
+  const [empStoreRoleIds, setEmpStoreRoleIds] = useState<Record<string, string>>({});
   const [showEmpPassword, setShowEmpPassword] = useState(false);
   const [showUserPassword, setShowUserPassword] = useState(false);
+  const [selectedModalStoreId, setSelectedModalStoreId] = useState<string>('');
+
+  const targetModalStoreId = activeStoreId || selectedModalStoreId || availableStores[0]?.id || '';
 
   // ── Usuarios form state (Crear / Editar)
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
@@ -242,6 +274,7 @@ export default function PersonalPage() {
   const [email, setEmail] = useState('');
   const [selectedStoreIds, setSelectedStoreIds] = useState<string[]>([]);
   const [userStoreRoles, setUserStoreRoles] = useState<Record<string, string>>({});
+  const [userStoreRoleIds, setUserStoreRoleIds] = useState<Record<string, string>>({});
   const [savingUser, setSavingUser] = useState(false);
   const [modalResetToken, setModalResetToken] = useState(0);
 
@@ -264,7 +297,8 @@ export default function PersonalPage() {
   const getValidStoreRole = (roleName: string | null | undefined, storeId: string) => {
     if (roleName && roleName !== 'ADMIN') return roleName;
     const storeAvailableRoles = roles.filter(r => r.name !== 'ADMIN' && (r.store_id === storeId || !r.store_id));
-    return storeAvailableRoles[0]?.name || 'CAJERO';
+    const mostradorOrCajero = storeAvailableRoles.find(r => r.name === 'MOSTRADOR') || storeAvailableRoles.find(r => r.name === 'CAJERO');
+    return mostradorOrCajero?.name || storeAvailableRoles[0]?.name || 'MOSTRADOR';
   };
 
   // ── Soft-delete user state
@@ -276,6 +310,7 @@ export default function PersonalPage() {
   const [linkingEmployee, setLinkingEmployee] = useState<Employee | null>(null);
   const [linkMode, setLinkMode] = useState<'new' | 'existing'>('new');
   const [linkExistingUserId, setLinkExistingUserId] = useState('');
+  const [linkRoleId, setLinkRoleId] = useState<string>('');
   const [isLinking, setIsLinking] = useState(false);
 
   // Auto-complete and block selectedStoreIds and userStoreRoles when selectedEmpId changes
@@ -290,11 +325,21 @@ export default function PersonalPage() {
         setUserAccessScope('stores');
         const ids = emp.employee_stores.map(es => es.store_id);
         const rolesMap: Record<string, string> = {};
+        const roleIdsMap: Record<string, string> = {};
         emp.employee_stores.forEach(es => {
-          rolesMap[es.store_id] = getValidStoreRole((es as any).role, es.store_id);
+          const rawRole = (es as any).role;
+          rolesMap[es.store_id] = getValidStoreRole(rawRole, es.store_id);
+          if ((es as any).role_id) {
+            roleIdsMap[es.store_id] = (es as any).role_id;
+          } else {
+            const matchedRole = roles.find(r => r.name === rawRole && r.store_id === es.store_id)
+              || roles.find(r => r.name === rawRole && !r.store_id);
+            if (matchedRole) roleIdsMap[es.store_id] = matchedRole.id;
+          }
         });
         setSelectedStoreIds(ids);
         setUserStoreRoles(rolesMap);
+        setUserStoreRoleIds(roleIdsMap);
       }
     }
   }, [selectedEmpId, employeeById, allProfiles, roles]);
@@ -332,22 +377,71 @@ export default function PersonalPage() {
 
   const handleDeleteUser = async () => {
     if (!deletingUserId) return;
+    const targetProfile = allProfiles.find(p => p.id === deletingUserId);
+    const targetEmp = targetProfile?.employee_id ? employeeById[targetProfile.employee_id] : null;
+    if (!checkCanManageTarget(targetProfile, targetEmp)) {
+      showToast('Solo puedes modificar personal asignado a tu misma sucursal local', 'error');
+      return;
+    }
     setIsDeletingUser(true);
     try {
+      // 1. Marcar como DELETED y desvincular del empleado atómicamente
       const { error } = await supabase
         .from('profiles')
-        .update({ role: 'DELETED' })
+        .update({
+          role: 'DELETED',
+          role_id: null,
+          employee_id: null,
+          default_store_id: null
+        })
         .eq('id', deletingUserId);
 
       if (error) throw error;
 
-      showToast('Acceso eliminado correctamente', 'success');
+      // 2. Eliminar tiendas asignadas del perfil eliminado
+      await supabase.from('employee_stores').delete().eq('profile_id', deletingUserId);
+
+      showToast('Acceso deshabilitado correctamente', 'success');
       loadData();
     } catch (err: any) {
-      showToast(err.message || 'Error al eliminar acceso', 'error');
+      showToast(formatFriendlyErrorMessage(err, 'Error al deshabilitar acceso'), 'error');
     } finally {
       setIsDeletingUser(false);
       setDeletingUserId(null);
+    }
+  };
+
+  const handleRestoreUser = async (profileId: string) => {
+    const targetProfile = allProfiles.find(p => p.id === profileId);
+    const targetEmp = targetProfile?.employee_id ? employeeById[targetProfile.employee_id] : null;
+    if (!checkCanManageTarget(targetProfile, targetEmp)) {
+      showToast('Solo puedes modificar personal asignado a tu misma sucursal local', 'error');
+      return;
+    }
+    try {
+      const { error } = await supabase.from('profiles').update({ role: 'CAJERO' }).eq('id', profileId);
+      if (error) throw error;
+      showToast('Acceso reactivado correctamente. Puedes asignarle un rol específico desde Editar.', 'success');
+      loadData();
+    } catch (err: any) {
+      showToast(formatFriendlyErrorMessage(err, 'Error al reactivar el usuario'), 'error');
+    }
+  };
+
+  const handleRestoreEmployee = async (empId: string) => {
+    const targetEmp = employeeById[empId] || employees.find(e => e.id === empId);
+    const targetProfile = allProfiles.find(p => p.employee_id === empId);
+    if (!checkCanManageTarget(targetProfile, targetEmp)) {
+      showToast('Solo puedes modificar personal asignado a tu misma sucursal local', 'error');
+      return;
+    }
+    try {
+      const { error } = await supabase.from('employees').update({ is_active: true }).eq('id', empId);
+      if (error) throw error;
+      showToast('Empleado reactivado correctamente', 'success');
+      loadData();
+    } catch (err: any) {
+      showToast(formatFriendlyErrorMessage(err, 'Error al reactivar el empleado'), 'error');
     }
   };
 
@@ -383,18 +477,51 @@ export default function PersonalPage() {
     }
   };
 
+  const formatFriendlyErrorMessage = (err: any, defaultMsg: string = 'Ocurrió un error en el sistema'): string => {
+    if (!err) return defaultMsg;
+    const msg = typeof err === 'string' ? err : (err.message || '');
+    const code = err.code || '';
+    if (
+      code === '23505' ||
+      msg.includes('23505') ||
+      msg.includes('unique constraint') ||
+      msg.includes('roles_name_store_id_key') ||
+      msg.includes('duplicate key value')
+    ) {
+      if (msg.includes('roles') || msg.includes('roles_name_store_id_key') || msg.includes('rol')) {
+        return 'Ya existe un rol activo con este nombre en el ámbito seleccionado.';
+      }
+      if (msg.includes('profiles') || msg.includes('username')) {
+        return 'El nombre de usuario ya está registrado en el sistema.';
+      }
+      return 'Ya existe un registro activo con este nombre en el ámbito seleccionado.';
+    }
+    return msg || defaultMsg;
+  };
+
   const handleCreateRole = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newRoleName.trim()) return;
     setSavingRole(true);
     try {
       const name = newRoleName.trim().toUpperCase();
+      let scopeId = newRoleScopeStoreId ? newRoleScopeStoreId : null;
+      if (!isUserGlobalAdmin) {
+        if (!scopeId) scopeId = activeStoreId || null;
+        if (scopeId === null) {
+          throw new Error("No tienes permisos para crear roles globales.");
+        }
+      }
+      const duplicate = roles.find(r => r.name === name && r.store_id === scopeId && r.is_active !== false);
+      if (duplicate) {
+        throw new Error(`Ya existe un rol activo con el nombre "${name}" en este ámbito.`);
+      }
       const { error } = await supabase.from('roles').insert({
         name,
         description: newRoleDesc.trim(),
         permissions: {},
         is_system: false,
-        store_id: newRoleScopeStoreId ? newRoleScopeStoreId : null
+        store_id: scopeId
       });
       if (error) throw error;
       showToast('Rol creado correctamente', 'success');
@@ -404,7 +531,7 @@ export default function PersonalPage() {
       setNewRoleScopeStoreId('');
       loadData();
     } catch (err: any) {
-      showToast(err.message, 'error');
+      showToast(formatFriendlyErrorMessage(err, 'Error al crear el rol'), 'error');
     } finally {
       setSavingRole(false);
     }
@@ -422,6 +549,13 @@ export default function PersonalPage() {
       const newName = editRoleName.trim().toUpperCase();
       const oldName = editingRole.name;
       const newDesc = editRoleDesc.trim();
+
+      if (newName !== oldName) {
+        const duplicate = roles.find(r => r.name === newName && r.store_id === editingRole.store_id && r.is_active !== false);
+        if (duplicate) {
+          throw new Error(`Ya existe un rol activo con el nombre "${newName}" en este ámbito.`);
+        }
+      }
 
       // 1. Actualizar en Supabase la tabla roles
       const { error: roleErr } = await supabase
@@ -444,7 +578,7 @@ export default function PersonalPage() {
       setEditingRole(null);
       loadData();
     } catch (err: any) {
-      showToast(err.message || 'Error al actualizar rol', 'error');
+      showToast(formatFriendlyErrorMessage(err, 'Error al actualizar el rol'), 'error');
     } finally {
       setSavingEditRole(false);
     }
@@ -456,8 +590,26 @@ export default function PersonalPage() {
       return;
     }
 
-    // 1. Obtener usuarios asignados
-    const assigned = allProfiles.filter(p => p.role === roleToDelete.name);
+    // 1. Obtener usuarios asignados por role_id (UUID) o por nombre/tienda
+    const assigned = allProfiles.filter(p => {
+      const profileMatchesId = p.role_id === roleToDelete.id;
+      const empStoresMatchId = p.employee_stores?.some(es => es.role_id === roleToDelete.id);
+
+      if (profileMatchesId || empStoresMatchId) return true;
+
+      if (roleToDelete.store_id) {
+        // Rol Local por coincidencia de texto
+        const hasAsDefault = p.role === roleToDelete.name && p.default_store_id === roleToDelete.store_id;
+        const hasInStores = p.employee_stores?.some(es =>
+          es.store_id === roleToDelete.store_id &&
+          (es.role === roleToDelete.name || (!es.role && p.role === roleToDelete.name))
+        );
+        return hasAsDefault || hasInStores;
+      } else {
+        // Rol Global por coincidencia de texto
+        return p.role === roleToDelete.name || p.employee_stores?.some(es => es.role === roleToDelete.name);
+      }
+    });
     setDeletingRole(roleToDelete);
 
     // 2. Si tiene usuarios asignados, abrir modal de advertencia detallado
@@ -489,12 +641,20 @@ export default function PersonalPage() {
 
   const handleRestoreRole = async (roleId: string, roleName: string) => {
     try {
+      const roleToRestore = roles.find(r => r.id === roleId);
+      if (roleToRestore) {
+        const duplicate = roles.find(r => r.name === roleName && r.store_id === roleToRestore.store_id && r.is_active !== false && r.id !== roleId);
+        if (duplicate) {
+          throw new Error(`No se puede reactivar. Ya existe otro rol activo con el nombre "${roleName}" en este ámbito.`);
+        }
+      }
+
       const { error } = await supabase.from('roles').update({ is_active: true }).eq('id', roleId);
       if (error) throw error;
       showToast(`Rol "${roleName}" reactivado correctamente`, 'success');
       loadData();
     } catch (err: any) {
-      showToast(err.message || 'Error al reactivar el rol', 'error');
+      showToast(formatFriendlyErrorMessage(err, 'Error al reactivar el rol'), 'error');
     }
   };
 
@@ -563,14 +723,22 @@ export default function PersonalPage() {
 
   const syncEmployeeStoreAssignment = async (
     employeeId: string,
-    storeAssignments: { store_id: string; role: string }[]
+    storeAssignments: { store_id: string; role: string; role_id?: string | null }[]
   ) => {
-    console.log('🔴 [ADMIN - PERSONAL] Actualizando asignaciones multi-rol:', { employeeId, storeAssignments });
+    const linkedProfile = allProfiles.find(p => p.employee_id === employeeId && p.role !== 'DELETED');
+    const profileId = linkedProfile?.id || null;
 
     const defaultStoreId = storeAssignments.length > 0 ? storeAssignments[0]?.store_id || null : null;
+    const primaryRole = storeAssignments.length > 0 ? storeAssignments[0]?.role || 'CAJERO' : 'CAJERO';
+    const primaryRoleId = storeAssignments.length > 0 ? storeAssignments[0]?.role_id || null : null;
+
     const { error: profileError } = await supabase
       .from('profiles')
-      .update({ default_store_id: defaultStoreId })
+      .update({
+        default_store_id: defaultStoreId,
+        role: primaryRole,
+        role_id: primaryRoleId
+      })
       .eq('employee_id', employeeId);
 
     if (profileError) throw profileError;
@@ -581,11 +749,83 @@ export default function PersonalPage() {
     if (storeAssignments.length > 0) {
       const inserts = storeAssignments.map(sa => ({
         employee_id: employeeId,
+        profile_id: profileId,
         store_id: sa.store_id,
-        role: sa.role
+        role: sa.role,
+        role_id: sa.role_id || null
       }));
       const { error: storeError } = await supabase.from('employee_stores').insert(inserts);
       if (storeError) throw storeError;
+    }
+  };
+
+  // ── Username restoration & conflict helpers
+  const [pendingRestoration, setPendingRestoration] = useState<{
+    existingProfileId: string;
+    username: string;
+    payload: any;
+    storeAssignments: any[];
+    onSuccess: () => void;
+  } | null>(null);
+  const [isRestoringUser, setIsRestoringUser] = useState(false);
+
+  const checkUsernameState = (targetUsername: string) => {
+    const cleanUsername = targetUsername.trim();
+    const existing = allProfiles.find(
+      p => p.username.toLowerCase() === cleanUsername.toLowerCase()
+    );
+    if (!existing) return { exists: false, isDeleted: false, profile: null };
+    if (existing.role === 'DELETED') return { exists: true, isDeleted: true, profile: existing };
+    return { exists: true, isDeleted: false, profile: existing };
+  };
+
+  const handleExecuteRestoration = async () => {
+    if (!pendingRestoration) return;
+    setIsRestoringUser(true);
+    try {
+      const { existingProfileId, username, payload, storeAssignments, onSuccess } = pendingRestoration;
+      const cleanUsername = username.trim();
+
+      const updates: any = {
+        username: cleanUsername,
+        role: payload.role,
+        role_id: payload.role_id,
+        employee_id: payload.employee_id,
+        email: payload.email,
+        default_store_id: payload.default_store_id,
+      };
+      if (payload.password_hash) {
+        updates.password_hash = payload.password_hash;
+      }
+
+      const { error: updateErr } = await supabase
+        .from('profiles')
+        .update(updates)
+        .eq('id', existingProfileId);
+
+      if (updateErr) throw updateErr;
+
+      await supabase.from('employee_stores').delete().eq('profile_id', existingProfileId);
+      if (storeAssignments.length > 0) {
+        const inserts = storeAssignments.map(sa => ({
+          profile_id: existingProfileId,
+          employee_id: payload.employee_id,
+          store_id: sa.store_id,
+          role: sa.role,
+          role_id: sa.role_id || null
+        }));
+        const { error: insErr } = await supabase.from('employee_stores').insert(inserts);
+        if (insErr) throw insErr;
+      }
+
+      showToast(`El usuario '@${cleanUsername}' ha sido restaurado y actualizado correctamente con la nueva configuración.`, 'success');
+      onSuccess();
+      setPendingRestoration(null);
+      loadData();
+    } catch (err: any) {
+      showToast(formatFriendlyErrorMessage(err, 'Error al restaurar cuenta'), 'error');
+    } finally {
+      setIsRestoringUser(false);
     }
   };
 
@@ -612,10 +852,11 @@ export default function PersonalPage() {
 
     setSavingEmployee(true);
     try {
-      const assignedStoreIds = isAdmin ? empStoreIds : (activeStoreId ? [activeStoreId] : []);
+      const assignedStoreIds = isAdmin ? empStoreIds : (targetModalStoreId ? [targetModalStoreId] : []);
       const storeAssignments = assignedStoreIds.map(sId => ({
         store_id: sId,
-        role: empStoreRoles[sId] || getValidStoreRole(null, sId)
+        role: empStoreRoles[sId] || getValidStoreRole(null, sId),
+        role_id: empStoreRoleIds[sId] || null
       }));
 
       if (editingEmployee) {
@@ -632,13 +873,13 @@ export default function PersonalPage() {
           await syncEmployeeStoreAssignment(editingEmployee.id, []);
           const existingProf = profileByEmployeeId[editingEmployee.id];
           if (existingProf) {
-            await supabase.from('profiles').update({ role: empGlobalRole, default_store_id: null }).eq('id', existingProf.id);
+            await supabase.from('profiles').update({ role: empGlobalRole, role_id: null, default_store_id: null }).eq('id', existingProf.id);
           }
         } else {
           await syncEmployeeStoreAssignment(editingEmployee.id, storeAssignments);
           const existingProf = profileByEmployeeId[editingEmployee.id];
           if (existingProf && storeAssignments.length > 0) {
-            await supabase.from('profiles').update({ role: storeAssignments[0]?.role || 'CAJERO', default_store_id: storeAssignments[0]?.store_id || null }).eq('id', existingProf.id);
+            await supabase.from('profiles').update({ role: storeAssignments[0]?.role || 'CAJERO', role_id: storeAssignments[0]?.role_id || null, default_store_id: storeAssignments[0]?.store_id || null }).eq('id', existingProf.id);
           }
         }
 
@@ -664,28 +905,49 @@ export default function PersonalPage() {
         // 2. Insert Profile (if toggled)
         if (createAccess && newEmp) {
           const hash = bcrypt.hashSync(empPassword, 8);
-          if (empAccessScope === 'global') {
-            const { error: profErr } = await supabase.from('profiles').insert({
-              username: empUsername.trim(),
-              role: empGlobalRole,
-              password_hash: hash,
-              employee_id: newEmp.id,
-              email: empEmail.trim() || null,
-              default_store_id: null
-            });
-            if (profErr) throw profErr;
-          } else {
-            const primaryRole = storeAssignments[0]?.role || 'CAJERO';
-            const { error: profErr } = await supabase.from('profiles').insert({
-              username: empUsername.trim(),
-              role: primaryRole,
-              password_hash: hash,
-              employee_id: newEmp.id,
-              email: empEmail.trim() || null,
-              default_store_id: storeAssignments.length > 0 ? storeAssignments[0]?.store_id || null : null
-            });
-            if (profErr) throw profErr;
+          const isGlobalScope = empAccessScope === 'global';
+          const primaryRole = isGlobalScope ? empGlobalRole : (storeAssignments[0]?.role || 'CAJERO');
+          const primaryRoleId = isGlobalScope ? null : (storeAssignments[0]?.role_id || null);
+
+          const targetPayload = {
+            role: primaryRole,
+            role_id: primaryRoleId,
+            password_hash: hash,
+            employee_id: newEmp.id,
+            email: empEmail.trim() || null,
+            default_store_id: isGlobalScope ? null : (storeAssignments[0]?.store_id || null)
+          };
+
+          const check = checkUsernameState(empUsername);
+          if (check.exists) {
+            if (!check.isDeleted || !check.profile) {
+              showToast(`Ya existe una cuenta activa con el nombre de usuario '@${empUsername.trim()}'. Por favor elige un nombre diferente.`, 'error');
+              setSavingEmployee(false);
+              return;
+            } else {
+              setPendingRestoration({
+                existingProfileId: check.profile.id,
+                username: empUsername.trim(),
+                payload: targetPayload,
+                storeAssignments: isGlobalScope ? [] : storeAssignments,
+                onSuccess: () => {
+                  setIsEmployeeModalOpen(false);
+                  setEditingEmployee(null);
+                  setFullName(''); setDni(''); setPhone('');
+                  setCreateAccess(false); setEmpUsername(''); setEmpPassword(''); setEmpEmail(''); setEmpStoreIds([]); setEmpStoreRoles({}); setEmpStoreRoleIds({});
+                  setEmpAccessScope('stores'); setEmpGlobalRole('ADMIN');
+                }
+              });
+              setSavingEmployee(false);
+              return;
+            }
           }
+
+          const { error: profErr } = await supabase.from('profiles').insert({
+            username: empUsername.trim(),
+            ...targetPayload
+          });
+          if (profErr) throw profErr;
         }
 
         showToast(createAccess ? 'Empleado y acceso creados correctamente' : 'Empleado registrado correctamente', 'success');
@@ -695,18 +957,25 @@ export default function PersonalPage() {
       setIsEmployeeModalOpen(false);
       setEditingEmployee(null);
       setFullName(''); setDni(''); setPhone('');
-      setCreateAccess(false); setEmpUsername(''); setEmpPassword(''); setEmpEmail(''); setEmpStoreIds([]); setEmpStoreRoles({});
+      setCreateAccess(false); setEmpUsername(''); setEmpPassword(''); setEmpEmail(''); setEmpStoreIds([]); setEmpStoreRoles({}); setEmpStoreRoleIds({});
       setEmpAccessScope('stores'); setEmpGlobalRole('ADMIN');
 
       loadData();
     } catch (err: any) {
-      showToast(err.message || 'Error al guardar empleado', 'error');
+      showToast(formatFriendlyErrorMessage(err, 'Error al guardar empleado'), 'error');
     } finally {
       setSavingEmployee(false);
     }
   };
 
   const handleEditEmployeeClick = (emp: Employee) => {
+    const targetProfile = profileByEmployeeId[emp.id];
+    if (!checkCanManageTarget(targetProfile, emp)) {
+      showToast('Solo puedes modificar personal asignado a tu misma sucursal local', 'error');
+      return;
+    }
+    const initialStoreId = activeStoreId || (emp.employee_stores && emp.employee_stores.length > 0 ? emp.employee_stores[0]?.store_id : availableStores[0]?.id) || '';
+    setSelectedModalStoreId(initialStoreId);
     setEditingEmployee(emp);
     setFullName(emp.full_name);
     setDni(emp.dni);
@@ -714,19 +983,29 @@ export default function PersonalPage() {
     if (emp.employee_stores && emp.employee_stores.length > 0) {
       const ids = emp.employee_stores.map(es => es.store_id);
       const rolesMap: Record<string, string> = {};
+      const roleIdsMap: Record<string, string> = {};
       emp.employee_stores.forEach(es => {
-        rolesMap[es.store_id] = (es as any).role || getValidStoreRole(null, es.store_id);
+        const rawRole = (es as any).role;
+        rolesMap[es.store_id] = rawRole || getValidStoreRole(null, es.store_id);
+        if ((es as any).role_id) {
+          roleIdsMap[es.store_id] = (es as any).role_id;
+        } else {
+          const matchedRole = roles.find(r => r.name === rawRole && r.store_id === es.store_id)
+            || roles.find(r => r.name === rawRole && !r.store_id);
+          if (matchedRole) roleIdsMap[es.store_id] = matchedRole.id;
+        }
       });
       setEmpStoreIds(ids);
       setEmpStoreRoles(rolesMap);
+      setEmpStoreRoleIds(roleIdsMap);
     } else {
       setEmpStoreIds([]);
       setEmpStoreRoles({});
+      setEmpStoreRoleIds({});
     }
-    const prof = profileByEmployeeId[emp.id];
-    if (prof?.role === 'ADMIN' || (prof && !prof.default_store_id && (!emp.employee_stores || emp.employee_stores.length === 0))) {
+    if (targetProfile?.role === 'ADMIN' || (targetProfile && !targetProfile.default_store_id && (!emp.employee_stores || emp.employee_stores.length === 0))) {
       setEmpAccessScope('global');
-      setEmpGlobalRole(prof.role || 'ADMIN');
+      setEmpGlobalRole(targetProfile.role || 'ADMIN');
     } else {
       setEmpAccessScope('stores');
       setEmpGlobalRole('ADMIN');
@@ -736,6 +1015,12 @@ export default function PersonalPage() {
   };
 
   const handleDeleteEmployeeClick = (empId: string, empName: string) => {
+    const targetEmp = employeeById[empId] || employees.find(e => e.id === empId);
+    const targetProfile = profileByEmployeeId[empId];
+    if (!checkCanManageTarget(targetProfile, targetEmp)) {
+      showToast('Solo puedes modificar personal asignado a tu misma sucursal local', 'error');
+      return;
+    }
     setDeletingEmployee({ id: empId, name: empName });
   };
 
@@ -744,11 +1029,15 @@ export default function PersonalPage() {
     try {
       const { error } = await supabase.from('employees').update({ is_active: false }).eq('id', deletingEmployee.id);
       if (error) throw error;
+
+      // Desvincular perfiles asociados para que no queden referencias fantasma
+      await supabase.from('profiles').update({ employee_id: null }).eq('employee_id', deletingEmployee.id);
+
       showToast('Empleado deshabilitado correctamente', 'success');
       setDeletingEmployee(null);
       loadData();
     } catch (err: any) {
-      showToast(err.message || 'Error al deshabilitar empleado', 'error');
+      showToast(formatFriendlyErrorMessage(err, 'Error al deshabilitar empleado'), 'error');
     }
   };
 
@@ -782,15 +1071,10 @@ export default function PersonalPage() {
           return;
         }
 
-        console.log('🔍 [SAVE ACCESOS] User ID:', editingUserId);
-        console.log('🔍 [SAVE ACCESOS] Access Mode:', userAccessScope);
-        console.log('🔍 [SAVE ACCESOS] Selected Stores:', selectedStoreIds);
-        console.log('🔍 [SAVE ACCESOS] Store Roles Map:', userStoreRoles);
-        console.log('🔍 [SAVE ACCESOS] Primary Role calculado:', userGlobalRole || 'ADMIN');
-
         const updates: any = {
           username: username.trim(),
           role: userGlobalRole || 'ADMIN',
+          role_id: null,
           employee_id: selectedEmpId || null,
           email: email.trim() || null,
           default_store_id: null
@@ -798,21 +1082,44 @@ export default function PersonalPage() {
         if (hash) updates.password_hash = hash;
 
         if (editingUserId) {
-          console.log('📤 [SUPABASE UPDATE profiles] Payload:', updates);
           const { data: profileResult, error: profileErr } = await supabase.from('profiles').update(updates).eq('id', editingUserId).select('*');
-          console.log('📥 [SUPABASE UPDATE profiles] Result:', profileResult, 'Error:', profileErr);
+          if (profileErr) throw profileErr;
 
           await supabase.from('employee_stores').delete().eq('profile_id', editingUserId);
 
           showToast('Acceso actualizado a Global correctamente', 'success');
         } else {
-          console.log('📤 [SUPABASE INSERT profiles] Payload:', updates);
+          const check = checkUsernameState(username);
+          if (check.exists) {
+            if (!check.isDeleted || !check.profile) {
+              showToast(`Ya existe una cuenta activa con el nombre de usuario '@${username.trim()}'. Por favor elige un nombre diferente.`, 'error');
+              setSavingUser(false);
+              return;
+            } else {
+              setPendingRestoration({
+                existingProfileId: check.profile.id,
+                username: username.trim(),
+                payload: updates,
+                storeAssignments: [],
+                onSuccess: () => {
+                  setIsUserModalOpen(false);
+                  setEditingUserId(null);
+                  setUserAccessScope('stores');
+                  setUserGlobalRole('ADMIN');
+                  setUsername(''); setPassword(''); setEmail(''); setSelectedEmpId(''); setSelectedStoreIds([]); setUserStoreRoles({}); setUserStoreRoleIds({});
+                }
+              });
+              setSavingUser(false);
+              return;
+            }
+          }
+
           const { data: profileResult, error: profileErr } = await supabase.from('profiles').insert(updates).select('*');
-          console.log('📥 [SUPABASE INSERT profiles] Result:', profileResult, 'Error:', profileErr);
+          if (profileErr) throw profileErr;
           showToast('Acceso creado correctamente', 'success');
         }
       } else {
-        const assignedStoreIds = isAdmin ? selectedStoreIds : (activeStoreId ? [activeStoreId] : []);
+        const assignedStoreIds = isAdmin ? selectedStoreIds : (targetModalStoreId ? [targetModalStoreId] : []);
         if (assignedStoreIds.length === 0) {
           showToast('Debes seleccionar al menos una tienda', 'error');
           setSavingUser(false);
@@ -821,31 +1128,26 @@ export default function PersonalPage() {
 
         const storeAssignments = assignedStoreIds.map(sId => ({
           store_id: sId,
-          role: userStoreRoles[sId] || getValidStoreRole(null, sId)
+          role: userStoreRoles[sId] || getValidStoreRole(null, sId),
+          role_id: userStoreRoleIds[sId] || null
         }));
 
         const defaultStoreId = storeAssignments.length > 0 ? storeAssignments[0]?.store_id || null : null;
         const primaryRole = storeAssignments[0]?.role || 'CAJERO';
 
-        console.log('🔍 [SAVE ACCESOS] User ID:', editingUserId);
-        console.log('🔍 [SAVE ACCESOS] Access Mode:', userAccessScope);
-        console.log('🔍 [SAVE ACCESOS] Selected Stores:', selectedStoreIds);
-        console.log('🔍 [SAVE ACCESOS] Store Roles Map:', userStoreRoles);
-        console.log('🔍 [SAVE ACCESOS] Primary Role calculado:', primaryRole);
-
         if (editingUserId) {
           const updates: any = {
             username: username.trim(),
             role: primaryRole,
+            role_id: storeAssignments[0]?.role_id || null,
             employee_id: selectedEmpId || null,
             email: email.trim() || null,
             default_store_id: defaultStoreId
           };
           if (hash) updates.password_hash = hash;
 
-          console.log('📤 [SUPABASE UPDATE profiles] Payload:', { role: primaryRole, default_store_id: defaultStoreId, ...updates });
           const { data: profileResult, error: profileErr } = await supabase.from('profiles').update(updates).eq('id', editingUserId).select('*');
-          console.log('📥 [SUPABASE UPDATE profiles] Result:', profileResult, 'Error:', profileErr);
+          if (profileErr) throw profileErr;
 
           await supabase.from('employee_stores').delete().eq('profile_id', editingUserId);
           if (storeAssignments.length > 0) {
@@ -853,27 +1155,54 @@ export default function PersonalPage() {
               profile_id: editingUserId,
               employee_id: selectedEmpId || null,
               store_id: sa.store_id,
-              role: sa.role
+              role: sa.role,
+              role_id: sa.role_id || null
             }));
-            console.log('📤 [SUPABASE INSERT employee_stores] Payload:', inserts);
             const { data: empStoreRes, error: empStoreErr } = await supabase.from('employee_stores').insert(inserts).select('*');
-            console.log('📥 [SUPABASE INSERT employee_stores] Error:', empStoreErr, 'Result:', empStoreRes);
+            if (empStoreErr) throw empStoreErr;
           }
 
           showToast('Acceso actualizado a Por Sucursales correctamente', 'success');
         } else {
           // CREATE
           const payload = {
-            username: username.trim(),
             role: primaryRole,
+            role_id: storeAssignments[0]?.role_id || null,
             password_hash: hash,
             employee_id: selectedEmpId || null,
             email: email.trim() || null,
             default_store_id: defaultStoreId
           };
-          console.log('📤 [SUPABASE INSERT profiles] Payload:', payload);
-          const { data: newProfile, error: profileErr } = await supabase.from('profiles').insert(payload).select('*').single();
-          console.log('📥 [SUPABASE INSERT profiles] Result:', newProfile, 'Error:', profileErr);
+
+          const check = checkUsernameState(username);
+          if (check.exists) {
+            if (!check.isDeleted || !check.profile) {
+              showToast(`Ya existe una cuenta activa con el nombre de usuario '@${username.trim()}'. Por favor elige un nombre diferente.`, 'error');
+              setSavingUser(false);
+              return;
+            } else {
+              setPendingRestoration({
+                existingProfileId: check.profile.id,
+                username: username.trim(),
+                payload,
+                storeAssignments,
+                onSuccess: () => {
+                  setIsUserModalOpen(false);
+                  setEditingUserId(null);
+                  setUserAccessScope('stores');
+                  setUserGlobalRole('ADMIN');
+                  setUsername(''); setPassword(''); setEmail(''); setSelectedEmpId(''); setSelectedStoreIds([]); setUserStoreRoles({}); setUserStoreRoleIds({});
+                }
+              });
+              setSavingUser(false);
+              return;
+            }
+          }
+
+          const { data: newProfile, error: profileErr } = await supabase.from('profiles').insert({
+            username: username.trim(),
+            ...payload
+          }).select('*').single();
           if (profileErr) throw profileErr;
 
           if (storeAssignments.length > 0 && newProfile) {
@@ -881,11 +1210,10 @@ export default function PersonalPage() {
               profile_id: newProfile.id,
               employee_id: selectedEmpId || null,
               store_id: sa.store_id,
-              role: sa.role
+              role: sa.role,
+              role_id: sa.role_id || null
             }));
-            console.log('📤 [SUPABASE INSERT employee_stores] Payload:', inserts);
-            const { data: empStoreRes, error: empStoreErr } = await supabase.from('employee_stores').insert(inserts).select('*');
-            console.log('📥 [SUPABASE INSERT employee_stores] Error:', empStoreErr, 'Result:', empStoreRes);
+            await supabase.from('employee_stores').insert(inserts);
           }
           showToast('Acceso creado correctamente', 'success');
         }
@@ -899,7 +1227,7 @@ export default function PersonalPage() {
       setUsername(''); setPassword(''); setEmail(''); setSelectedEmpId(''); setSelectedStoreIds([]); setUserStoreRoles({});
       await loadData();
     } catch (err: any) {
-      showToast(err.message || 'Error al guardar acceso', 'error');
+      showToast(formatFriendlyErrorMessage(err, 'Error al guardar acceso'), 'error');
     } finally {
       setSavingUser(false);
     }
@@ -909,32 +1237,61 @@ export default function PersonalPage() {
   const handleLinkNewUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!linkingEmployee || !empUsername.trim() || !empPassword) return;
+    if (!checkCanManageTarget(null, linkingEmployee)) {
+      showToast('Solo puedes gestionar personal asignado a tu misma sucursal local', 'error');
+      return;
+    }
+    if (!linkRoleId) {
+      showToast('Por favor selecciona un rol de acceso para el usuario', 'error');
+      return;
+    }
     setIsLinking(true);
     try {
+      const selectedRoleObj = roles.find(r => r.id === linkRoleId);
+      const selectedRoleName = selectedRoleObj?.name || 'MOSTRADOR';
+      const selectedRoleId = selectedRoleObj?.id || null;
+
       const storeAssignments = (linkingEmployee.employee_stores || []).map(es => ({
         store_id: es.store_id,
-        role: (es as any).role || getValidStoreRole(null, es.store_id)
+        role: selectedRoleName,
+        role_id: selectedRoleId
       }));
 
-      const primaryRole = storeAssignments[0]?.role || 'CAJERO';
-      const defaultStoreId = storeAssignments[0]?.store_id || null;
+      const primaryRole = selectedRoleName;
+      const primaryRoleId = selectedRoleId;
+      const defaultStoreId = storeAssignments[0]?.store_id || selectedRoleObj?.store_id || null;
 
       const hash = bcrypt.hashSync(empPassword, 8);
       const { error } = await supabase.from('profiles').insert({
         username: empUsername.trim(),
         role: primaryRole,
+        role_id: primaryRoleId,
         password_hash: hash,
         employee_id: linkingEmployee.id,
         email: empEmail.trim() || null,
         default_store_id: defaultStoreId
       });
       if (error) throw error;
+
+      // Si el empleado tiene tiendas físicas asignadas, actualizar los roles en employee_stores también
+      if (storeAssignments.length > 0) {
+        await supabase.from('employee_stores').delete().eq('employee_id', linkingEmployee.id);
+        await supabase.from('employee_stores').insert(
+          storeAssignments.map(sa => ({
+            employee_id: linkingEmployee.id,
+            store_id: sa.store_id,
+            role: sa.role,
+            role_id: sa.role_id
+          }))
+        );
+      }
+
       showToast('Acceso creado y vinculado correctamente', 'success');
       setLinkingEmployee(null);
-      setEmpUsername(''); setEmpPassword(''); setEmpEmail('');
+      setEmpUsername(''); setEmpPassword(''); setEmpEmail(''); setLinkRoleId('');
       loadData();
     } catch (err: any) {
-      showToast(err.message || 'Error al crear acceso', 'error');
+      showToast(formatFriendlyErrorMessage(err, 'Error al crear acceso'), 'error');
     } finally {
       setIsLinking(false);
     }
@@ -943,24 +1300,81 @@ export default function PersonalPage() {
   const handleLinkExistingUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!linkingEmployee || !linkExistingUserId) return;
+    const selectedUser = allProfiles.find(p => p.id === linkExistingUserId);
+    if (!checkCanManageTarget(selectedUser, linkingEmployee)) {
+      showToast('Solo puedes gestionar personal asignado a tu misma sucursal local', 'error');
+      return;
+    }
     setIsLinking(true);
     try {
-      const { error } = await supabase.from('profiles').update({
-        employee_id: linkingEmployee.id
-      }).eq('id', linkExistingUserId);
+      const selectedUser = allProfiles.find(p => p.id === linkExistingUserId);
+      if (selectedUser) {
+        const empStoreIds = (linkingEmployee.employee_stores || []).map(es => es.store_id);
+
+        let userStoreIds: string[] = [];
+        if (selectedUser.employee_stores && selectedUser.employee_stores.length > 0) {
+          userStoreIds = selectedUser.employee_stores.map(es => es.store_id);
+        } else if (selectedUser.default_store_id) {
+          userStoreIds = [selectedUser.default_store_id];
+        }
+
+        const isUserGlobalAdmin = selectedUser.role === 'ADMIN' || selectedUser.role_id === null;
+
+        const empStoresSorted = [...empStoreIds].sort().join(',');
+        const userStoresSorted = [...userStoreIds].sort().join(',');
+        const isStrictMatch = empStoresSorted === userStoresSorted;
+
+        if (!isUserGlobalAdmin && !isStrictMatch) {
+          showToast('El empleado está asignado a unas tiendas, pero el usuario pertenece a otra distinta. Por favor, asegúrate de que el empleado y el usuario pertenezcan a las mismas tiendas antes de vincularlos.', 'error');
+          setIsLinking(false);
+          return;
+        }
+      }
+
+      const defaultStoreId = linkingEmployee.employee_stores?.[0]?.store_id || null;
+      const updates: any = { employee_id: linkingEmployee.id };
+      if (defaultStoreId) updates.default_store_id = defaultStoreId;
+
+      const { error } = await supabase.from('profiles').update(updates).eq('id', linkExistingUserId);
       if (error) throw error;
+
+      // Sincronizar tiendas del empleado con employee_stores del perfil vinculado
+      if (linkingEmployee.employee_stores && linkingEmployee.employee_stores.length > 0) {
+        const existingProf = allProfiles.find(p => p.id === linkExistingUserId);
+        const roleName = existingProf?.role || 'CAJERO';
+        const roleId = existingProf?.role_id || null;
+
+        await supabase.from('employee_stores').delete().eq('profile_id', linkExistingUserId);
+        await supabase.from('employee_stores').insert(
+          linkingEmployee.employee_stores.map(es => ({
+            profile_id: linkExistingUserId,
+            employee_id: linkingEmployee.id,
+            store_id: es.store_id,
+            role: roleName,
+            role_id: roleId
+          }))
+        );
+      }
+
       showToast('Usuario vinculado correctamente', 'success');
       setLinkingEmployee(null);
       setLinkExistingUserId('');
       loadData();
     } catch (err: any) {
-      showToast(err.message || 'Error al vincular usuario', 'error');
+      showToast(formatFriendlyErrorMessage(err, 'Error al vincular usuario'), 'error');
     } finally {
       setIsLinking(false);
     }
   };
 
   const handleEditClick = (profile: Profile) => {
+    const targetEmp = profile.employee_id ? employeeById[profile.employee_id] : null;
+    if (!checkCanManageTarget(profile, targetEmp)) {
+      showToast('Solo puedes modificar personal asignado a tu misma sucursal local', 'error');
+      return;
+    }
+    const initialStoreId = activeStoreId || (profile.default_store_id ? profile.default_store_id : availableStores[0]?.id) || '';
+    setSelectedModalStoreId(initialStoreId);
     setEditingUserId(profile.id);
     setUsername(profile.username);
     setEmail(profile.email || '');
@@ -982,18 +1396,32 @@ export default function PersonalPage() {
     if (profileStores && profileStores.length > 0) {
       const ids = profileStores.map((es: any) => es.store_id);
       const rolesMap: Record<string, string> = {};
+      const roleIdsMap: Record<string, string> = {};
       profileStores.forEach((es: any) => {
         const rawRole = es.role || profile.role;
         rolesMap[es.store_id] = getValidStoreRole(rawRole, es.store_id);
+        if (es.role_id) {
+          roleIdsMap[es.store_id] = es.role_id;
+        } else {
+          const matchedRole = roles.find(r => r.name === rawRole && r.store_id === es.store_id)
+            || roles.find(r => r.name === rawRole && !r.store_id);
+          if (matchedRole) roleIdsMap[es.store_id] = matchedRole.id;
+        }
       });
       setSelectedStoreIds(ids);
       setUserStoreRoles(rolesMap);
+      setUserStoreRoleIds(roleIdsMap);
     } else if (profile.default_store_id) {
       setSelectedStoreIds([profile.default_store_id]);
       setUserStoreRoles({ [profile.default_store_id]: getValidStoreRole(profile.role, profile.default_store_id) });
+      const matchedRole = profile.role_id
+        ? roles.find(r => r.id === profile.role_id)
+        : (roles.find(r => r.name === profile.role && r.store_id === profile.default_store_id) || roles.find(r => r.name === profile.role && !r.store_id));
+      setUserStoreRoleIds(matchedRole ? { [profile.default_store_id]: matchedRole.id } : {});
     } else {
       setSelectedStoreIds([]);
       setUserStoreRoles({});
+      setUserStoreRoleIds({});
     }
 
     setPassword(''); // Leave empty so it doesn't get updated unless typed
@@ -1002,7 +1430,7 @@ export default function PersonalPage() {
   };
 
   const handleCancelEdit = () => {
-    setUsername(''); setPassword(''); setEmail(''); setSelectedEmpId(''); setSelectedStoreIds([]); setUserStoreRoles({});
+    setUsername(''); setPassword(''); setEmail(''); setSelectedEmpId(''); setSelectedStoreIds([]); setUserStoreRoles({}); setUserStoreRoleIds({});
     setUserAccessScope('stores'); setUserGlobalRole('ADMIN'); setConfirmGlobalAccess(false);
     setEditingUserId(null);
     setIsUserModalOpen(false);
@@ -1011,15 +1439,19 @@ export default function PersonalPage() {
   const renderStoreRoleList = ({
     storeIds,
     storeRoles,
+    storeRoleIds,
     onToggleStore,
     onRoleChange,
     isDisabled = false,
+    isStoreToggleDisabled = false,
   }: {
     storeIds: string[];
     storeRoles: Record<string, string>;
+    storeRoleIds?: Record<string, string>;
     onToggleStore: (storeId: string, checked: boolean) => void;
-    onRoleChange: (storeId: string, roleName: string) => void;
+    onRoleChange: (storeId: string, roleName: string, roleId: string) => void;
     isDisabled?: boolean;
+    isStoreToggleDisabled?: boolean;
   }) => {
     return (
       <div className="space-y-2 mt-2">
@@ -1028,16 +1460,19 @@ export default function PersonalPage() {
           const storeAvailableRoles = roles.filter(
             (r) => r.name !== 'ADMIN' && (r.store_id === store.id || !r.store_id)
           );
-          const currentRole = getValidStoreRole(storeRoles[store.id], store.id);
+          const currentRoleName = getValidStoreRole(storeRoles[store.id], store.id);
+          const currentRoleId = storeRoleIds?.[store.id] || storeAvailableRoles.find(r => r.name === currentRoleName)?.id || storeAvailableRoles[0]?.id || '';
+          const selectedValue = storeAvailableRoles.some(r => r.id === currentRoleId)
+            ? currentRoleId
+            : (storeAvailableRoles.find(r => r.name === currentRoleName)?.id || storeAvailableRoles[0]?.id || '');
 
           return (
             <div
               key={store.id}
-              className={`p-3 rounded-2xl border transition-all ${
-                isChecked
-                  ? 'bg-indigo-50/80 border-indigo-200 shadow-sm'
-                  : 'bg-background border-border hover:bg-secondary/40'
-              } ${isDisabled ? 'opacity-80' : ''}`}
+              className={`p-3 rounded-2xl border transition-all ${isChecked
+                ? 'bg-indigo-50/80 border-indigo-200 shadow-sm'
+                : 'bg-background border-border hover:bg-secondary/40'
+                } ${isDisabled ? 'opacity-80' : ''}`}
             >
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <label className="flex items-center gap-3 cursor-pointer select-none font-semibold text-sm text-foreground">
@@ -1045,7 +1480,7 @@ export default function PersonalPage() {
                     type="checkbox"
                     className="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer"
                     checked={isChecked}
-                    disabled={isDisabled}
+                    disabled={isDisabled || isStoreToggleDisabled}
                     onChange={(e) => onToggleStore(store.id, e.target.checked)}
                   />
                   <span>{store.name}</span>
@@ -1055,14 +1490,24 @@ export default function PersonalPage() {
                   <div className="flex items-center gap-2 pl-7 sm:pl-0">
                     <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Rol:</span>
                     <select
-                      value={currentRole}
+                      value={selectedValue}
                       disabled={isDisabled}
-                      onChange={(e) => onRoleChange(store.id, e.target.value)}
-                      className="h-9 px-3 text-xs font-bold rounded-xl border border-indigo-200 bg-white text-indigo-950 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
+                      onChange={(e) => {
+                        const selectedRole = storeAvailableRoles.find(r => r.id === e.target.value);
+                        if (selectedRole) {
+                          onRoleChange(store.id, selectedRole.name, selectedRole.id);
+                        }
+                      }}
+                      className="h-9 px-3 text-xs font-bold rounded-xl border border-indigo-200 bg-white text-indigo-950 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm cursor-pointer"
                     >
-                      {storeAvailableRoles.map(r => (
-                        <option key={r.id} value={r.name}>{r.name}</option>
-                      ))}
+                      {storeAvailableRoles.map(r => {
+                        const scopeLabel = r.store_id ? ` (${storeMap.get(r.store_id) || r.stores?.name || 'Sucursal'})` : ' (Global)';
+                        return (
+                          <option key={r.id} value={r.id}>
+                            {r.name}{scopeLabel}
+                          </option>
+                        );
+                      })}
                     </select>
                   </div>
                 )}
@@ -1075,7 +1520,9 @@ export default function PersonalPage() {
   };
 
   const getRoleBadgeStyle = (roleName: string) => {
-    if (roleName === 'ADMIN') return 'bg-purple-500/10 border-purple-500/30 text-purple-500';
+    if (roleName === 'ADMIN' || roles.some(r => r.name === roleName && (!r.store_id || r.is_system))) {
+      return 'bg-purple-500/10 border-purple-500/30 text-purple-500';
+    }
     if (roleName === 'CAJERA' || roleName === 'CAJERO') return 'bg-cyan-500/10 border-cyan-500/30 text-cyan-500';
     if (roleName === 'MOSTRADOR') return 'bg-amber-500/10 border-amber-500/30 text-amber-600';
     return 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500';
@@ -1086,14 +1533,11 @@ export default function PersonalPage() {
     profileRole?: string | null,
     isNoProfile: boolean = false
   ) => {
-    console.log(`🏷️ [RENDER BADGES] profileRole: ${profileRole} | empStores:`, empStores, `| isNoProfile: ${isNoProfile}`);
-    const hasSpecificStores = empStores && empStores.length > 0;
-    const isRoleGlobalTemplate = profileRole === 'ADMIN' || roles.some(r => r.name === profileRole && (!r.store_id || r.is_system));
-    
-    // REGLA ESTRICTA: "Acceso Global" SOLO si es ADMIN
-    const isTrulyGlobalAccess = profileRole === 'ADMIN';
+    const isGlobalRole = profileRole === 'ADMIN' || (!!profileRole && roles.some(r => r.name === profileRole && (!r.store_id || r.is_system)));
+    const hasNoSpecificStores = !empStores || empStores.length === 0;
 
-    if (isTrulyGlobalAccess) {
+    // Caso 1: Acceso Global (Rol Global sin tiendas específicas asignadas)
+    if (isGlobalRole && hasNoSpecificStores && !isNoProfile) {
       return {
         storeElement: (
           <span className="text-xs font-bold text-purple-600 bg-purple-50 px-2.5 py-0.5 rounded-full border border-purple-200">
@@ -1108,14 +1552,39 @@ export default function PersonalPage() {
       };
     }
 
-    if (!empStores || empStores.length === 0) {
+    // Caso 2: Empleado Físico Sin Usuario / Cuenta de Sistema
+    if (isNoProfile) {
+      const storeElement = empStores && empStores.length > 0 ? (
+        <div className="flex flex-wrap gap-1 items-center">
+          {empStores.map((es) => {
+            const storeName = es.stores?.name || storeMap.get(es.store_id) || 'Tienda';
+            return (
+              <span key={es.store_id} className="text-xs font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200 whitespace-nowrap">
+                {storeName}
+              </span>
+            );
+          })}
+        </div>
+      ) : (
+        <span className="text-xs font-bold text-purple-600 bg-purple-50 px-2.5 py-0.5 rounded-full border border-purple-200">
+          Acceso Global
+        </span>
+      );
+
+      const roleElement = (
+        <span className="text-xs font-bold px-2.5 py-0.5 rounded-full border bg-amber-500/10 border-amber-500/30 text-amber-600">
+          Sin acceso
+        </span>
+      );
+
+      return { storeElement, roleElement };
+    }
+
+    // Caso 3: Usuario Sin Tiendas Asignadas
+    if (hasNoSpecificStores) {
       return {
         storeElement: <span className="text-xs text-muted-foreground italic">—</span>,
-        roleElement: isNoProfile ? (
-          <span className="text-xs font-bold px-2.5 py-0.5 rounded-full border bg-amber-500/10 border-amber-500/30 text-amber-500">
-            Sin acceso
-          </span>
-        ) : profileRole ? (
+        roleElement: profileRole ? (
           <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full border ${getRoleBadgeStyle(profileRole)}`}>
             {profileRole}
           </span>
@@ -1125,10 +1594,7 @@ export default function PersonalPage() {
       };
     }
 
-    const storeRoles = empStores.map(es => es.role || profileRole || 'CAJERO');
-    const uniqueRoles = Array.from(new Set(storeRoles));
-    const hasVaryingRoles = uniqueRoles.length > 1;
-
+    // Caso 4: Con Tiendas Asignadas
     const storeElement = (
       <div className="flex flex-wrap gap-1 items-center">
         {empStores.map((es) => {
@@ -1168,44 +1634,67 @@ export default function PersonalPage() {
   );
 
   const visibleEmployees = useMemo(() => {
-    if (!activeStoreId) {
-      if (isGlobalUser) return employees;
-      return employees.filter(emp =>
-        emp.employee_stores?.some(es => availableStoreIds.includes(es.store_id))
-      );
+    const baseEmployees = showInactiveEmployees
+      ? employees
+      : employees.filter(e => e.is_active !== false);
+
+    if (isGlobalUser) {
+      if (!activeStoreId) return baseEmployees;
+      return baseEmployees.filter(emp => {
+        const profile = profileByEmployeeId[emp.id];
+        const isGlobalAccount = profile?.role === 'ADMIN' || 
+          (!profile?.default_store_id && (!profile?.employee_stores || profile.employee_stores.length === 0) && (!emp.employee_stores || emp.employee_stores.length === 0));
+        if (isGlobalAccount) return true;
+        return emp.employee_stores?.some(es => es.store_id === activeStoreId);
+      });
+    } else {
+      const targetStoreIds = activeStoreId ? [activeStoreId] : availableStoreIds;
+      return baseEmployees.filter(emp => {
+        const profile = profileByEmployeeId[emp.id];
+        const isGlobalAccount = profile?.role === 'ADMIN' || 
+          (!profile?.default_store_id && (!profile?.employee_stores || profile.employee_stores.length === 0) && (!emp.employee_stores || emp.employee_stores.length === 0));
+        if (isGlobalAccount) return false;
+
+        return emp.employee_stores?.some(es => targetStoreIds.includes(es.store_id));
+      });
     }
-    return employees.filter(emp => {
-      const profile = profileByEmployeeId[emp.id];
-      if (profile?.role === 'ADMIN') return true;
-      return emp.employee_stores?.some(es => es.store_id === activeStoreId);
-    });
-  }, [employees, activeStoreId, profileByEmployeeId, isGlobalUser, availableStoreIds]);
+  }, [employees, showInactiveEmployees, activeStoreId, profileByEmployeeId, isGlobalUser, availableStoreIds]);
 
   const activeProfiles = useMemo(() => {
-    let profiles = allProfiles.filter(p => p.role !== 'DELETED');
-    if (activeStoreId) {
-      profiles = profiles.filter(p => {
-        if (p.role === 'ADMIN') return true;
-        if (p.default_store_id === activeStoreId) return true;
+    const baseProfiles = showInactiveUsers ? allProfiles : allProfiles.filter(p => p.role !== 'DELETED');
+
+    if (isGlobalUser) {
+      if (!activeStoreId) return baseProfiles;
+      return baseProfiles.filter(p => {
         const linkedEmp = p.employee_id ? employeeById[p.employee_id] : null;
-        if (linkedEmp?.employee_stores?.some(es => es.store_id === activeStoreId)) return true;
+        const isGlobalAccount = p.role === 'ADMIN' || 
+          (!p.default_store_id && (!p.employee_stores || p.employee_stores.length === 0) && (!linkedEmp?.employee_stores || linkedEmp.employee_stores.length === 0));
+        if (isGlobalAccount) return true;
+        if (p.default_store_id === activeStoreId) return true;
         if (p.employee_stores?.some(es => es.store_id === activeStoreId)) return true;
+        if (linkedEmp?.employee_stores?.some(es => es.store_id === activeStoreId)) return true;
         return false;
       });
-    } else if (!isGlobalUser) {
-      profiles = profiles.filter(p => {
-        if (p.role === 'ADMIN') return true;
-        if (p.default_store_id && availableStoreIds.includes(p.default_store_id)) return true;
+    } else {
+      const targetStoreIds = activeStoreId ? [activeStoreId] : availableStoreIds;
+      return baseProfiles.filter(p => {
         const linkedEmp = p.employee_id ? employeeById[p.employee_id] : null;
-        if (linkedEmp?.employee_stores?.some(es => availableStoreIds.includes(es.store_id))) return true;
-        if (p.employee_stores?.some(es => availableStoreIds.includes(es.store_id))) return true;
+        const isGlobalAccount = p.role === 'ADMIN' || 
+          (!p.default_store_id && (!p.employee_stores || p.employee_stores.length === 0) && (!linkedEmp?.employee_stores || linkedEmp.employee_stores.length === 0));
+        if (isGlobalAccount) return false;
+
+        if (p.default_store_id && targetStoreIds.includes(p.default_store_id)) return true;
+        if (p.employee_stores?.some(es => targetStoreIds.includes(es.store_id))) return true;
+        if (linkedEmp?.employee_stores?.some(es => targetStoreIds.includes(es.store_id))) return true;
         return false;
       });
     }
-    return profiles;
-  }, [allProfiles, activeStoreId, employeeById, isGlobalUser, availableStoreIds]);
+  }, [allProfiles, showInactiveUsers, activeStoreId, employeeById, isGlobalUser, availableStoreIds]);
 
-  const unlinkedEmployees = visibleEmployees.filter(emp => !profileByEmployeeId[emp.id] || profileByEmployeeId[emp.id]?.id === editingUserId);
+  const unlinkedEmployees = (isGlobalUser ? employees : visibleEmployees).filter((emp: Employee) => 
+    emp.is_active !== false && 
+    (!profileByEmployeeId[emp.id] || profileByEmployeeId[emp.id]?.id === editingUserId)
+  );
 
   const visibleRoles = useMemo(() => {
     const baseRoles = showInactiveRoles ? allRoles : roles;
@@ -1218,28 +1707,28 @@ export default function PersonalPage() {
     if (role !== 'ADMIN') {
       currentRoles = currentRoles.filter(r => r.name !== 'ADMIN');
     }
-    
+
     // Sort roles: ADMIN first, then group by store_id, then alphabetical by name
     currentRoles.sort((a, b) => {
       if (a.name === 'ADMIN') return -1;
       if (b.name === 'ADMIN') return 1;
-      
+
       const storeA = a.store_id ? storeMap.get(a.store_id) || '' : '';
       const storeB = b.store_id ? storeMap.get(b.store_id) || '' : '';
-      
+
       if (storeA !== storeB) {
         return storeA.localeCompare(storeB);
       }
       return a.name.localeCompare(b.name);
     });
-    
+
     return currentRoles;
   }, [roles, allRoles, showInactiveRoles, activeStoreId, role, storeMap, isGlobalUser, availableStoreIds]);
 
   const renderRoleOptions = () => {
     const adminRoles = visibleRoles.filter(r => r.name === 'ADMIN');
     const storeRoles = visibleRoles.filter(r => r.name !== 'ADMIN');
-    
+
     const grouped = storeRoles.reduce((acc, role) => {
       const storeName = role.store_id ? storeMap.get(role.store_id) || 'Otras Tiendas' : 'Global';
       if (!acc[storeName]) acc[storeName] = [];
@@ -1303,7 +1792,7 @@ export default function PersonalPage() {
             {[
               { id: 'empleados' as Tab, label: 'Empleados' },
               { id: 'usuarios' as Tab, label: 'Usuarios (Perfiles)' },
-              ...(role === 'ADMIN' || permissions?.personal_manage_roles !== false ? [{ id: 'roles' as Tab, label: 'Roles y Permisos' }] : [])
+              ...(role === 'ADMIN' || Boolean(permissions?.personal_manage_roles) ? [{ id: 'roles' as Tab, label: 'Roles y Permisos' }] : [])
             ].map(({ id, label }) => (
               <button
                 key={id}
@@ -1337,18 +1826,43 @@ export default function PersonalPage() {
                     {visibleEmployees.length} empleado{visibleEmployees.length !== 1 ? 's' : ''}
                   </span>
                 </div>
-                {permissions?.personal_create_user !== false && (
-                  <button
-                    onClick={() => {
-                      setEditingEmployee(null);
-                      setFullName(''); setDni(''); setPhone(''); setCreateAccess(false);
-                      setIsEmployeeModalOpen(true);
-                    }}
-                    className="h-9 px-4 flex items-center justify-center gap-2 rounded-lg font-bold text-xs bg-indigo-600 hover:bg-indigo-700 text-white transition-colors shadow-sm"
-                  >
-                    <Plus className="w-3.5 h-3.5" /> Nuevo Empleado
-                  </button>
-                )}
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-2 cursor-pointer select-none border border-border bg-background px-3 py-1.5 rounded-xl hover:bg-secondary/40 transition-colors">
+                    <input
+                      type="checkbox"
+                      className="peer sr-only"
+                      checked={showInactiveEmployees}
+                      onChange={(e) => setShowInactiveEmployees(e.target.checked)}
+                    />
+                    <div className={`h-5 w-9 rounded-full transition-colors relative ${showInactiveEmployees ? 'bg-amber-500' : 'bg-muted'}`}>
+                      <div className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white transition-transform shadow ${showInactiveEmployees ? 'translate-x-4' : 'translate-x-0'}`} />
+                    </div>
+                    <span className="text-xs font-bold text-muted-foreground">Ver Inactivos</span>
+                  </label>
+
+                  {Boolean(permissions?.personal_create_user) && (
+                    <button
+                      onClick={() => {
+                        setEditingEmployee(null);
+                        setFullName(''); setDni(''); setPhone(''); setCreateAccess(false);
+                        const initialStoreId = activeStoreId || availableStores[0]?.id || '';
+                        setSelectedModalStoreId(initialStoreId);
+                        if (initialStoreId) {
+                          setEmpStoreIds([initialStoreId]);
+                          const defaultRoleName = getValidStoreRole(null, initialStoreId);
+                          const storeAvailableRoles = roles.filter(r => r.name !== 'ADMIN' && (r.store_id === initialStoreId || !r.store_id));
+                          const defaultRoleId = storeAvailableRoles.find(r => r.name === defaultRoleName)?.id || storeAvailableRoles[0]?.id || '';
+                          setEmpStoreRoles({ [initialStoreId]: defaultRoleName });
+                          setEmpStoreRoleIds({ [initialStoreId]: defaultRoleId });
+                        }
+                        setIsEmployeeModalOpen(true);
+                      }}
+                      className="h-9 px-4 flex items-center justify-center gap-2 rounded-lg font-bold text-xs bg-indigo-600 hover:bg-indigo-700 text-white transition-colors shadow-sm"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Nuevo Empleado
+                    </button>
+                  )}
+                </div>
               </div>
               {loading ? (
                 <div className="p-10 flex items-center justify-center gap-3 text-muted-foreground">
@@ -1377,6 +1891,8 @@ export default function PersonalPage() {
                     <tbody className="divide-y divide-border">
                       {visibleEmployees.map(emp => {
                         const profile = profileByEmployeeId[emp.id];
+                        const isInactive = emp.is_active === false;
+                        const canManageEmp = checkCanManageTarget(profile, emp);
                         const { storeElement, roleElement } = renderStoreAndRoleBadges(
                           emp.employee_stores || [],
                           profile?.role,
@@ -1384,8 +1900,15 @@ export default function PersonalPage() {
                         );
 
                         return (
-                          <tr key={emp.id} className="hover:bg-secondary/20 transition-colors">
-                            <td className="px-5 py-3.5 font-bold">{emp.full_name}</td>
+                          <tr key={emp.id} className={isInactive ? "bg-muted/40 opacity-60 hover:opacity-100 transition-all" : "hover:bg-secondary/20 transition-colors"}>
+                            <td className="px-5 py-3.5 font-bold flex items-center gap-2">
+                              <span>{emp.full_name}</span>
+                              {isInactive && (
+                                <span className="text-[10px] font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded-full border border-red-200">
+                                  Inactivo
+                                </span>
+                              )}
+                            </td>
                             <td className="px-5 py-3.5 font-mono text-xs text-muted-foreground font-bold">{emp.dni}</td>
                             <td className="px-5 py-3.5">{storeElement}</td>
                             <td className="px-5 py-3.5">{roleElement}</td>
@@ -1398,32 +1921,55 @@ export default function PersonalPage() {
                             </td>
                             <td className="px-5 py-3.5 text-center">
                               <div className="flex items-center justify-center gap-1.5">
-                                {!profile && permissions?.personal_create_user !== false && (
-                                  <button
-                                    onClick={() => setLinkingEmployee(emp)}
-                                    className="p-1.5 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors inline-flex"
-                                    title="Vincular a un Acceso"
-                                  >
-                                    <KeyRound className="w-4 h-4" />
-                                  </button>
-                                )}
-                                {permissions?.personal_edit_user !== false && (
-                                  <button
-                                    onClick={() => handleEditEmployeeClick(emp)}
-                                    className="p-1.5 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors inline-flex"
-                                    title="Editar datos de empleado"
-                                  >
-                                    <Edit2 className="w-4 h-4" />
-                                  </button>
-                                )}
-                                {permissions?.personal_delete_user !== false && (
-                                  <button
-                                    onClick={() => handleDeleteEmployeeClick(emp.id, emp.full_name)}
-                                    className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors inline-flex"
-                                    title="Eliminar empleado"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
+                                {isInactive ? (
+                                  !canManageEmp ? null : (
+                                    <button
+                                      onClick={() => handleRestoreEmployee(emp.id)}
+                                      className="p-1.5 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors inline-flex items-center gap-1 text-xs font-bold"
+                                      title="Reactivar empleado"
+                                    >
+                                      <RotateCcw className="w-4 h-4" />
+                                      <span>Reactivar</span>
+                                    </button>
+                                  )
+                                ) : (
+                                  <>
+                                    {!profile && Boolean(permissions?.personal_create_user) && (!canManageEmp ? null : (
+                                      <button
+                                        onClick={() => {
+                                          if (!checkCanManageTarget(null, emp)) {
+                                            showToast('Solo puedes gestionar personal asignado a tu misma sucursal local', 'error');
+                                            return;
+                                          }
+                                          setLinkingEmployee(emp);
+                                          const defaultRole = roles.find(r => r.name === 'MOSTRADOR') || roles.find(r => r.name !== 'ADMIN') || roles[0];
+                                          setLinkRoleId(defaultRole?.id || '');
+                                        }}
+                                        className="p-1.5 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors inline-flex"
+                                        title="Vincular a un Acceso"
+                                      >
+                                        <KeyRound className="w-4 h-4" />
+                                      </button>
+                                    ))}
+                                    {Boolean(permissions?.personal_edit_user) && (!canManageEmp ? null : (
+                                      <button
+                                        onClick={() => handleEditEmployeeClick(emp)}
+                                        className="p-1.5 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors inline-flex"
+                                        title="Editar datos de empleado"
+                                      >
+                                        <Edit2 className="w-4 h-4" />
+                                      </button>
+                                    ))}
+                                    {Boolean(permissions?.personal_delete_user) && (!canManageEmp ? null : (
+                                      <button
+                                        onClick={() => handleDeleteEmployeeClick(emp.id, emp.full_name)}
+                                        className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors inline-flex"
+                                        title="Deshabilitar empleado"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    ))}
+                                  </>
                                 )}
                               </div>
                             </td>
@@ -1450,25 +1996,50 @@ export default function PersonalPage() {
                     {activeProfiles.length} usuario{activeProfiles.length !== 1 ? 's' : ''}
                   </span>
                 </div>
-                {permissions?.personal_create_user !== false && (
-                  <button
-                    onClick={() => {
-                      setUsername('');
-                      setPassword('');
-                      setEmail('');
-                      setSelectedEmpId('');
-                      setUserStoreRoles({});
-                      setSelectedStoreIds([]);
-                      setEditingUserId(null);
-                      setConfirmGlobalAccess(false);
-                      setModalResetToken(prev => prev + 1);
-                      setIsUserModalOpen(true);
-                    }}
-                    className="h-9 px-4 flex items-center justify-center gap-2 rounded-lg font-bold text-xs bg-indigo-600 hover:bg-indigo-700 text-white transition-colors shadow-sm"
-                  >
-                    <Plus className="w-3.5 h-3.5" /> Nuevo Acceso
-                  </button>
-                )}
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-2 cursor-pointer select-none border border-border bg-background px-3 py-1.5 rounded-xl hover:bg-secondary/40 transition-colors">
+                    <input
+                      type="checkbox"
+                      className="peer sr-only"
+                      checked={showInactiveUsers}
+                      onChange={(e) => setShowInactiveUsers(e.target.checked)}
+                    />
+                    <div className={`h-5 w-9 rounded-full transition-colors relative ${showInactiveUsers ? 'bg-amber-500' : 'bg-muted'}`}>
+                      <div className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white transition-transform shadow ${showInactiveUsers ? 'translate-x-4' : 'translate-x-0'}`} />
+                    </div>
+                    <span className="text-xs font-bold text-muted-foreground">Ver Inactivos</span>
+                  </label>
+
+                  {Boolean(permissions?.personal_create_user) && (
+                    <button
+                      onClick={() => {
+                        setUsername('');
+                        setPassword('');
+                        setEmail('');
+                        setSelectedEmpId('');
+                        setUserStoreRoles({});
+                        setUserStoreRoleIds({});
+                        setSelectedStoreIds([]);
+                        setEditingUserId(null);
+                        setConfirmGlobalAccess(false);
+                        setModalResetToken(prev => prev + 1);
+                        const initialStoreId = activeStoreId || availableStores[0]?.id || '';
+                        setSelectedModalStoreId(initialStoreId);
+                        if (initialStoreId) {
+                          const defaultRoleName = getValidStoreRole(null, initialStoreId);
+                          const storeAvailableRoles = roles.filter(r => r.name !== 'ADMIN' && (r.store_id === initialStoreId || !r.store_id));
+                          const defaultRoleId = storeAvailableRoles.find(r => r.name === defaultRoleName)?.id || storeAvailableRoles[0]?.id || '';
+                          setUserStoreRoles({ [initialStoreId]: defaultRoleName });
+                          setUserStoreRoleIds({ [initialStoreId]: defaultRoleId });
+                        }
+                        setIsUserModalOpen(true);
+                      }}
+                      className="h-9 px-4 flex items-center justify-center gap-2 rounded-lg font-bold text-xs bg-indigo-600 hover:bg-indigo-700 text-white transition-colors shadow-sm"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Nuevo Acceso
+                    </button>
+                  )}
+                </div>
               </div>
               {loading ? (
                 <div className="p-10 flex items-center justify-center gap-3 text-muted-foreground">
@@ -1496,8 +2067,9 @@ export default function PersonalPage() {
                     </thead>
                     <tbody className="divide-y divide-border">
                       {activeProfiles.map(profile => {
+                        const isDeleted = profile.role === 'DELETED';
                         const linkedEmp = profile.employee_id ? employeeById[profile.employee_id] : null;
-                        
+
                         let empStores = profile.employee_stores && profile.employee_stores.length > 0
                           ? profile.employee_stores
                           : (linkedEmp?.employee_stores || []);
@@ -1513,10 +2085,17 @@ export default function PersonalPage() {
                           false
                         );
 
+                        const canManageUser = checkCanManageTarget(profile, linkedEmp);
+
                         return (
-                          <tr key={profile.id} className="hover:bg-secondary/20 transition-colors">
-                            <td className="px-5 py-3.5 font-mono text-xs font-bold text-indigo-500">
-                              @{profile.username}
+                          <tr key={profile.id} className={isDeleted ? "bg-muted/40 opacity-60 hover:opacity-100 transition-all" : "hover:bg-secondary/20 transition-colors"}>
+                            <td className="px-5 py-3.5 font-mono text-xs font-bold text-indigo-500 flex items-center gap-2">
+                              <span>@{profile.username}</span>
+                              {isDeleted && (
+                                <span className="text-[10px] font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded-full border border-red-200">
+                                  Inactivo
+                                </span>
+                              )}
                             </td>
                             <td className="px-5 py-3.5">{roleElement}</td>
                             <td className="px-5 py-3.5">{storeElement}</td>
@@ -1528,26 +2107,41 @@ export default function PersonalPage() {
                             </td>
                             <td className="px-5 py-3.5 text-center">
                               <div className="flex items-center justify-center gap-2">
-                                {permissions?.personal_edit_user !== false && (
-                                  <button
-                                    onClick={() => handleEditClick(profile)}
-                                    className="p-1.5 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors"
-                                    title="Editar usuario"
-                                  >
-                                    <Edit2 className="w-4 h-4" />
-                                  </button>
-                                )}
-                                {permissions?.personal_delete_user !== false && (
-                                  <button
-                                    onClick={() => {
-                                      setDeletingUserId(profile.id);
-                                      setDeletingUsername(profile.username);
-                                    }}
-                                    className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
-                                    title="Desactivar usuario"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
+                                {isDeleted ? (
+                                  !canManageUser ? null : (
+                                    <button
+                                      onClick={() => handleRestoreUser(profile.id)}
+                                      className="p-1.5 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors inline-flex items-center gap-1 text-xs font-bold"
+                                      title="Reactivar acceso de usuario"
+                                    >
+                                      <RotateCcw className="w-4 h-4" />
+                                      <span>Reactivar</span>
+                                    </button>
+                                  )
+                                ) : (
+                                  <>
+                                    {Boolean(permissions?.personal_edit_user) && (!canManageUser ? null : (
+                                      <button
+                                        onClick={() => handleEditClick(profile)}
+                                        className="p-1.5 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors inline-flex"
+                                        title="Editar usuario"
+                                      >
+                                        <Edit2 className="w-4 h-4" />
+                                      </button>
+                                    ))}
+                                    {Boolean(permissions?.personal_delete_user) && (!canManageUser ? null : (
+                                      <button
+                                        onClick={() => {
+                                          setDeletingUserId(profile.id);
+                                          setDeletingUsername(profile.username);
+                                        }}
+                                        className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors inline-flex"
+                                        title="Desactivar usuario"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    ))}
+                                  </>
                                 )}
                               </div>
                             </td>
@@ -1603,7 +2197,7 @@ export default function PersonalPage() {
                   onClick={() => {
                     setNewRoleName('');
                     setNewRoleDesc('');
-                    setNewRoleScopeStoreId(activeStoreId || '');
+                    setNewRoleScopeStoreId(isUserGlobalAdmin ? '' : (activeStoreId || ''));
                     setIsRoleModalOpen(true);
                   }}
                   className="h-9 px-4 flex items-center justify-center gap-2 rounded-lg font-bold text-xs bg-indigo-600 hover:bg-indigo-700 text-white transition-colors shadow-sm ml-2"
@@ -1619,6 +2213,8 @@ export default function PersonalPage() {
                     <th className="px-6 py-4 text-left text-xs font-bold uppercase text-muted-foreground tracking-wider w-1/4">Permiso / Módulo</th>
                     {visibleRoles.map(r => {
                       const isInactive = r.is_active === false;
+                      const isGlobalRole = !r.store_id || r.is_system;
+                      const isReadOnly = isGlobalRole && role !== 'ADMIN';
                       return (
                         <th
                           key={r.id}
@@ -1631,6 +2227,10 @@ export default function PersonalPage() {
                               {r.name === 'ADMIN' ? (
                                 <span title="Rol del sistema protegido" className="inline-block align-middle">
                                   <Lock className="w-3.5 h-3.5 text-purple-500" />
+                                </span>
+                              ) : isReadOnly ? (
+                                <span title="Rol global protegido" className="inline-block align-middle">
+                                  <Lock className="w-3.5 h-3.5 text-purple-400" />
                                 </span>
                               ) : null}
                             </div>
@@ -1648,7 +2248,7 @@ export default function PersonalPage() {
                               </span>
                             ) : null}
 
-                            {r.name !== 'ADMIN' && (
+                            {r.name !== 'ADMIN' && !isReadOnly && (
                               <div className="flex items-center gap-1 ml-1 opacity-70 hover:opacity-100 transition-opacity">
                                 {isInactive ? (
                                   <button
@@ -1720,22 +2320,26 @@ export default function PersonalPage() {
                               </div>
                             </div>
                           </td>
-                          {visibleRoles.map(r => (
-                            <td key={r.id} className="px-6 py-4 text-center">
-                              <div className="flex justify-center">
-                                <label className={`relative inline-flex items-center cursor-pointer ${r.is_system ? 'opacity-50 cursor-not-allowed' : ''}`}>
-                                  <input
-                                    type="checkbox"
-                                    className="sr-only peer"
-                                    checked={Boolean(r.name === 'ADMIN' || (r.permissions && r.permissions[group.mainKey]))}
-                                    disabled={r.is_system}
-                                    onChange={(e) => handleTogglePermission(r.id, r.permissions || {}, group.mainKey, e.target.checked)}
-                                  />
-                                  <div className="w-9 h-5 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-border after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-500"></div>
-                                </label>
-                              </div>
-                            </td>
-                          ))}
+                          {visibleRoles.map(r => {
+                            const isGlobalRole = !r.store_id || r.is_system;
+                            const isReadOnly = isGlobalRole && role !== 'ADMIN';
+                            return (
+                              <td key={r.id} className="px-6 py-4 text-center">
+                                <div className="flex justify-center">
+                                  <label className={`relative inline-flex items-center cursor-pointer ${r.is_system || isReadOnly ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                                    <input
+                                      type="checkbox"
+                                      className="sr-only peer"
+                                      checked={Boolean(r.name === 'ADMIN' || (r.permissions && r.permissions[group.mainKey]))}
+                                      disabled={r.is_system || isReadOnly}
+                                      onChange={(e) => handleTogglePermission(r.id, r.permissions || {}, group.mainKey, e.target.checked)}
+                                    />
+                                    <div className="w-9 h-5 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-border after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-500"></div>
+                                  </label>
+                                </div>
+                              </td>
+                            );
+                          })}
                         </tr>
                         {/* Filas de Sub-permisos */}
                         {group.subPermissions.map(sub => (
@@ -1747,9 +2351,11 @@ export default function PersonalPage() {
                               </div>
                             </td>
                             {visibleRoles.map(r => {
+                              const isGlobalRole = !r.store_id || r.is_system;
+                              const isReadOnly = isGlobalRole && role !== 'ADMIN';
                               const isMainEnabled = Boolean(r.name === 'ADMIN' || (r.permissions && r.permissions[group.mainKey]));
                               const isSubEnabled = Boolean(r.name === 'ADMIN' || (r.permissions && r.permissions[sub.key]));
-                              const isDisabled = r.is_system || !isMainEnabled;
+                              const isDisabled = r.is_system || isReadOnly || !isMainEnabled;
                               return (
                                 <td key={r.id} className="px-6 py-3 text-center">
                                   <div className={`flex justify-center transition-opacity ${!isMainEnabled ? 'opacity-30' : ''}`}>
@@ -1797,6 +2403,55 @@ export default function PersonalPage() {
         isLoading={isDeletingUser}
         isDestructive={true}
       />
+
+      {/* ── Pending Restoration Warning Modal ── */}
+      {pendingRestoration && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="w-full max-w-md bg-card rounded-2xl shadow-xl border border-border overflow-hidden p-6 space-y-4 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-3 text-amber-500">
+              <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                <ShieldAlert className="w-6 h-6 text-amber-500" />
+              </div>
+              <div>
+                <h3 className="font-bold text-base text-foreground">Cuenta Inactiva Detectada</h3>
+                <p className="text-xs text-muted-foreground font-mono">@{pendingRestoration.username}</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              El nombre de usuario <strong className="text-foreground font-mono">@{pendingRestoration.username}</strong> pertenecía a una cuenta anteriormente deshabilitada en el sistema.
+            </p>
+
+            <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-900 font-medium">
+              Al confirmar, <strong className="font-bold">se reactivará la cuenta antigua y se reemplazará su configuración</strong> asignándole la nueva contraseña, rol, sucursales y vinculaciones que acabas de definir.
+            </div>
+
+            <p className="text-xs font-bold text-foreground">
+              ¿Deseas restaurar y reactivar este usuario?
+            </p>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isRestoringUser}
+                onClick={() => setPendingRestoration(null)}
+                className="px-4 py-2.5 bg-secondary hover:bg-secondary/80 text-foreground rounded-xl text-xs font-bold transition-colors disabled:opacity-60"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isRestoringUser}
+                onClick={handleExecuteRestoration}
+                className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-2 shadow-md disabled:opacity-60"
+              >
+                {isRestoringUser ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                <span>Restaurar y Reemplazar</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Unsaved Changes Exit Warning Modal ── */}
       {showRoleExitConfirm && (
@@ -1879,10 +2534,13 @@ export default function PersonalPage() {
                 </label>
                 <select
                   value={newRoleScopeStoreId}
+                  disabled={!isUserGlobalAdmin}
                   onChange={e => setNewRoleScopeStoreId(e.target.value)}
-                  className="w-full h-10 bg-background border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors"
+                  className="w-full h-10 bg-background border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors disabled:opacity-80 disabled:cursor-not-allowed"
                 >
-                  <option value="">Acceso Global (Todas las tiendas)</option>
+                  {isUserGlobalAdmin && (
+                    <option value="">Acceso Global (Todas las tiendas)</option>
+                  )}
                   {availableStores.map(s => (
                     <option key={s.id} value={s.id}>{s.name}</option>
                   ))}
@@ -1940,7 +2598,7 @@ export default function PersonalPage() {
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <form onSubmit={handleCreateEmployee} className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
+            <form onSubmit={handleCreateEmployee} className="p-5 space-y-4 max-h-[75vh] overflow-y-auto" autoComplete="off">
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
                   Nombre Completo
@@ -1982,32 +2640,35 @@ export default function PersonalPage() {
                   />
                 </div>
               </div>
-              {/* Modo de Acceso Toggle */}
+              {/* Ámbito de Trabajo Toggle */}
               {isAdmin && (
                 <div className="space-y-1.5 mt-2">
                   <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                    Modo de Acceso
+                    Ámbito de Trabajo
                   </label>
                   <div className="grid grid-cols-2 gap-1 p-1 bg-muted rounded-xl">
                     <button
                       type="button"
                       onClick={() => setEmpAccessScope('stores')}
-                      className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
-                        empAccessScope === 'stores'
-                          ? 'bg-background text-foreground shadow-sm'
-                          : 'text-muted-foreground hover:text-foreground'
-                      }`}
+                      className={`py-1.5 text-xs font-bold rounded-lg transition-all ${empAccessScope === 'stores'
+                        ? 'bg-background text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground'
+                        }`}
                     >
                       Por Sucursales
                     </button>
                     <button
                       type="button"
-                      onClick={() => setEmpAccessScope('global')}
-                      className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
-                        empAccessScope === 'global'
-                          ? 'bg-purple-600 text-white shadow-sm'
-                          : 'text-muted-foreground hover:text-foreground'
-                      }`}
+                      onClick={() => {
+                        setEmpAccessScope('global');
+                        setEmpStoreIds([]);
+                        setEmpStoreRoles({});
+                        setEmpStoreRoleIds({});
+                      }}
+                      className={`py-1.5 text-xs font-bold rounded-lg transition-all ${empAccessScope === 'global'
+                        ? 'bg-purple-600 text-white shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground'
+                        }`}
                     >
                       Acceso Global (Admin)
                     </button>
@@ -2015,70 +2676,189 @@ export default function PersonalPage() {
                 </div>
               )}
 
+              {/* Asignación de Sucursales y Roles de Trabajo */}
               {empAccessScope === 'global' ? (
                 <div className="space-y-1.5 mt-3 p-3.5 bg-purple-500/10 border border-purple-500/20 rounded-2xl">
                   <label className="text-xs font-bold text-purple-600 uppercase tracking-wider flex items-center gap-1.5">
                     <ShieldCheck className="w-4 h-4 text-purple-500" />
-                    Rol Global de Sistema
+                    Ámbito de Trabajo Global (Todas las tiendas)
                   </label>
-                  <select
-                    value={empGlobalRole}
-                    onChange={(e) => setEmpGlobalRole(e.target.value)}
-                    className="w-full h-10 px-3 text-xs font-bold rounded-xl border border-purple-200 bg-white text-purple-950 focus:outline-none focus:ring-2 focus:ring-purple-500 shadow-sm"
-                  >
-                    {globalRoles.map(r => (
-                      <option key={r.id} value={r.name}>{r.name}</option>
-                    ))}
-                  </select>
                   <span className="text-[11px] text-purple-600/80 font-medium block mt-1">
-                    Este usuario tendrá acceso administrativo global en todas las tiendas del sistema.
+                    Este empleado labora a nivel corporativo en todas las tiendas y es compatible para vinculación con cuentas de Acceso Global.
                   </span>
                 </div>
               ) : (
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Tiendas y Roles Asignados</label>
+                  <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                    {(editingEmployee && profileByEmployeeId[editingEmployee.id]) || createAccess
+                      ? 'Sucursales de Trabajo y Roles Asignados'
+                      : 'Sucursales de Trabajo Asignadas'}
+                  </label>
                   {isAdmin ? (
-                    renderStoreRoleList({
-                      storeIds: empStoreIds,
-                      storeRoles: empStoreRoles,
-                      onToggleStore: (storeId, checked) => {
-                        if (checked) {
-                          setEmpStoreIds(prev => [...prev, storeId]);
-                          setEmpStoreRoles(prev => ({ ...prev, [storeId]: prev[storeId] || getValidStoreRole(null, storeId) }));
-                        } else {
-                          setEmpStoreIds(prev => prev.filter(id => id !== storeId));
-                          setEmpStoreRoles(prev => {
-                            const next = { ...prev };
-                            delete next[storeId];
-                            return next;
-                          });
-                        }
-                      },
-                      onRoleChange: (storeId, roleName) => {
-                        setEmpStoreRoles(prev => ({ ...prev, [storeId]: roleName }));
-                      }
-                    })
+                    (editingEmployee && profileByEmployeeId[editingEmployee.id]) || createAccess ? (
+                      renderStoreRoleList({
+                        storeIds: empStoreIds,
+                        storeRoles: empStoreRoles,
+                        storeRoleIds: empStoreRoleIds,
+                        onToggleStore: (storeId, checked) => {
+                          if (checked) {
+                            setEmpStoreIds(prev => [...prev, storeId]);
+                            const defaultRoleName = getValidStoreRole(null, storeId);
+                            const storeAvailableRoles = roles.filter(r => r.name !== 'ADMIN' && (r.store_id === storeId || !r.store_id));
+                            const defaultRoleId = storeAvailableRoles.find(r => r.name === defaultRoleName)?.id || storeAvailableRoles[0]?.id || '';
+                            setEmpStoreRoles(prev => ({ ...prev, [storeId]: prev[storeId] || defaultRoleName }));
+                            setEmpStoreRoleIds(prev => ({ ...prev, [storeId]: prev[storeId] || defaultRoleId }));
+                          } else {
+                            setEmpStoreIds(prev => prev.filter(id => id !== storeId));
+                            setEmpStoreRoles(prev => {
+                              const next = { ...prev };
+                              delete next[storeId];
+                              return next;
+                            });
+                            setEmpStoreRoleIds(prev => {
+                              const next = { ...prev };
+                              delete next[storeId];
+                              return next;
+                            });
+                          }
+                        },
+                        onRoleChange: (storeId, roleName, roleId) => {
+                          setEmpStoreRoles(prev => ({ ...prev, [storeId]: roleName }));
+                          setEmpStoreRoleIds(prev => ({ ...prev, [storeId]: roleId }));
+                        },
+                        isDisabled: false,
+                      })
+                    ) : (
+                      <div className="space-y-2 mt-2">
+                        {availableStores.map(store => {
+                          const isChecked = empStoreIds.includes(store.id);
+                          return (
+                            <div
+                              key={store.id}
+                              className={`p-3 rounded-2xl border transition-all ${isChecked
+                                ? 'bg-indigo-50/80 border-indigo-200 shadow-sm'
+                                : 'bg-background border-border hover:bg-secondary/40'
+                                }`}
+                            >
+                              <label className="flex items-center gap-3 cursor-pointer select-none font-semibold text-sm text-foreground">
+                                <input
+                                  type="checkbox"
+                                  className="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer"
+                                  checked={isChecked}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setEmpStoreIds(prev => [...prev, store.id]);
+                                      const defaultRoleName = getValidStoreRole(null, store.id);
+                                      const storeAvailableRoles = roles.filter(r => r.name !== 'ADMIN' && (r.store_id === store.id || !r.store_id));
+                                      const defaultRoleId = storeAvailableRoles.find(r => r.name === defaultRoleName)?.id || storeAvailableRoles[0]?.id || '';
+                                      setEmpStoreRoles(prev => ({ ...prev, [store.id]: prev[store.id] || defaultRoleName }));
+                                      setEmpStoreRoleIds(prev => ({ ...prev, [store.id]: prev[store.id] || defaultRoleId }));
+                                    } else {
+                                      setEmpStoreIds(prev => prev.filter(id => id !== store.id));
+                                      setEmpStoreRoles(prev => {
+                                        const next = { ...prev };
+                                        delete next[store.id];
+                                        return next;
+                                      });
+                                      setEmpStoreRoleIds(prev => {
+                                        const next = { ...prev };
+                                        delete next[store.id];
+                                        return next;
+                                      });
+                                    }
+                                  }}
+                                />
+                                <span>{store.name}</span>
+                              </label>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )
                   ) : (
                     <div className="bg-secondary/50 border border-border rounded-xl p-3 flex items-center justify-between text-sm font-medium text-muted-foreground">
                       <div className="flex items-center gap-2">
                         <Info className="w-4 h-4 text-indigo-500 shrink-0" />
-                        <span>Tienda asignada automáticamente: <span className="font-bold text-foreground">{storeMap.get(activeStoreId || '') || '—'}</span></span>
+                        {activeStoreId ? (
+                          <span>Sucursal asignada automáticamente: <span className="font-bold text-foreground">{storeMap.get(activeStoreId) || '—'}</span></span>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <span>Sucursal asignada:</span>
+                            <select
+                              value={targetModalStoreId}
+                              onChange={(e) => {
+                                const newStoreId = e.target.value;
+                                setSelectedModalStoreId(newStoreId);
+                                const defaultRoleName = getValidStoreRole(null, newStoreId);
+                                const storeAvailableRoles = roles.filter(r => r.name !== 'ADMIN' && (r.store_id === newStoreId || !r.store_id));
+                                const defaultRoleId = storeAvailableRoles.find(r => r.name === defaultRoleName)?.id || storeAvailableRoles[0]?.id || '';
+                                setEmpStoreIds([newStoreId]);
+                                setEmpStoreRoles({ [newStoreId]: defaultRoleName });
+                                setEmpStoreRoleIds({ [newStoreId]: defaultRoleId });
+                              }}
+                              className="h-8 px-2 text-xs font-bold rounded-lg border border-border bg-background cursor-pointer text-foreground"
+                            >
+                              {availableStores.map(s => (
+                                <option key={s.id} value={s.id}>
+                                  {s.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
                       </div>
-                      {activeStoreId && (() => {
+                      {((editingEmployee && profileByEmployeeId[editingEmployee.id]) || createAccess) && targetModalStoreId && (() => {
                         const storeAvailableRoles = roles.filter(
-                          r => r.name !== 'ADMIN' && (r.store_id === activeStoreId || !r.store_id)
+                          r => r.name !== 'ADMIN' && (r.store_id === targetModalStoreId || !r.store_id)
                         );
-                        const currentRole = empStoreRoles[activeStoreId] || (storeAvailableRoles[0]?.name || 'CAJERO');
+                        const currentRoleName = empStoreRoles[targetModalStoreId] || (storeAvailableRoles[0]?.name || 'CAJERO');
+                        const currentRoleId = empStoreRoleIds[targetModalStoreId] || storeAvailableRoles.find(r => r.name === currentRoleName)?.id || storeAvailableRoles[0]?.id || '';
+                        const selectedValue = storeAvailableRoles.some(r => r.id === currentRoleId)
+                          ? currentRoleId
+                          : (storeAvailableRoles.find(r => r.name === currentRoleName)?.id || storeAvailableRoles[0]?.id || '');
                         return (
                           <select
-                            value={currentRole}
-                            onChange={(e) => setEmpStoreRoles({ [activeStoreId]: e.target.value })}
-                            className="h-8 px-2 text-xs font-bold rounded-lg border border-border bg-background"
+                            value={selectedValue}
+                            onChange={(e) => {
+                              const selectedRole = storeAvailableRoles.find(r => r.id === e.target.value);
+                              if (selectedRole) {
+                                setEmpStoreRoles({ [targetModalStoreId]: selectedRole.name });
+                                setEmpStoreRoleIds({ [targetModalStoreId]: selectedRole.id });
+                              }
+                            }}
+                            className="h-8 px-2 text-xs font-bold rounded-lg border border-border bg-background cursor-pointer"
                           >
-                            {storeAvailableRoles.map(r => <option key={r.id} value={r.name}>{r.name}</option>)}
+                            {storeAvailableRoles.map(r => {
+                              const scopeLabel = r.store_id ? ` (${storeMap.get(r.store_id) || r.stores?.name || 'Sucursal'})` : ' (Global)';
+                              return (
+                                <option key={r.id} value={r.id}>
+                                  {r.name}{scopeLabel}
+                                </option>
+                              );
+                            })}
                           </select>
                         );
                       })()}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Estado de Cuenta de Usuario al Editar Empleado */}
+              {editingEmployee && (
+                <div className="pt-2 border-t border-border mt-3">
+                  {profileByEmployeeId[editingEmployee.id] ? (
+                    <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-xl p-3.5 flex items-center justify-between text-xs text-foreground font-medium">
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="w-4 h-4 text-indigo-500 shrink-0" />
+                        <span>Cuenta de acceso: <strong className="font-mono text-indigo-600">@{profileByEmployeeId[editingEmployee.id]?.username}</strong></span>
+                      </div>
+                      <span className="text-[11px] text-muted-foreground font-medium italic">Permisos en 'Cuentas de Usuario'</span>
+                    </div>
+                  ) : (
+                    <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3.5 flex items-center gap-2 text-xs text-amber-900 font-medium">
+                      <Info className="w-4 h-4 text-amber-500 shrink-0" />
+                      <span>Sin cuenta de usuario (Puedes otorgarle acceso desde la lista de empleados usando la llave).</span>
                     </div>
                   )}
                 </div>
@@ -2114,6 +2894,7 @@ export default function PersonalPage() {
                             placeholder="Ej: yuriko"
                             value={empUsername}
                             onChange={e => setEmpUsername(e.target.value)}
+                            autoComplete="off"
                             required
                             className="w-full h-10 bg-secondary/30 border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors font-mono"
                           />
@@ -2126,6 +2907,7 @@ export default function PersonalPage() {
                               placeholder="Mín. 4 caracteres"
                               value={empPassword}
                               onChange={e => setEmpPassword(e.target.value)}
+                              autoComplete="new-password"
                               required
                               className="w-full h-10 bg-secondary/30 border border-border rounded-xl pl-3 pr-10 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors"
                             />
@@ -2158,11 +2940,10 @@ export default function PersonalPage() {
               <button
                 type="submit"
                 disabled={savingEmployee}
-                className={`w-full h-11 flex items-center justify-center gap-2 rounded-xl font-bold text-sm text-white transition-colors disabled:opacity-60 disabled:cursor-not-allowed shadow-md mt-4 ${
-                  editingEmployee
-                    ? 'bg-amber-600 hover:bg-amber-700'
-                    : 'bg-indigo-600 hover:bg-indigo-700'
-                }`}
+                className={`w-full h-11 flex items-center justify-center gap-2 rounded-xl font-bold text-sm text-white transition-colors disabled:opacity-60 disabled:cursor-not-allowed shadow-md mt-4 ${editingEmployee
+                  ? 'bg-amber-600 hover:bg-amber-700'
+                  : 'bg-indigo-600 hover:bg-indigo-700'
+                  }`}
               >
                 {savingEmployee ? (
                   <><RefreshCw className="w-4 h-4 animate-spin" /> Guardando...</>
@@ -2217,10 +2998,10 @@ export default function PersonalPage() {
               </div>
 
               {linkMode === 'new' ? (
-                <form onSubmit={handleLinkNewUser} className="space-y-4">
+                <form onSubmit={handleLinkNewUser} className="space-y-4" autoComplete="off">
                   <div className="space-y-1.5">
                     <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Usuario</label>
-                    <input type="text" placeholder="Ej: admin1" required value={empUsername} onChange={e => setEmpUsername(e.target.value)} className="w-full h-10 bg-background border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors font-mono" />
+                    <input type="text" placeholder="Ej: admin1" required autoComplete="off" value={empUsername} onChange={e => setEmpUsername(e.target.value)} className="w-full h-10 bg-background border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors font-mono" />
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Contraseña / PIN</label>
@@ -2229,6 +3010,7 @@ export default function PersonalPage() {
                         type={showEmpPassword ? "text" : "password"}
                         required
                         minLength={4}
+                        autoComplete="new-password"
                         value={empPassword}
                         onChange={e => setEmpPassword(e.target.value)}
                         className="w-full h-10 bg-background border border-border rounded-xl pl-3 pr-10 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors"
@@ -2242,6 +3024,25 @@ export default function PersonalPage() {
                         {showEmpPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Rol de Acceso al Sistema</label>
+                    <select
+                      required
+                      value={linkRoleId}
+                      onChange={e => setLinkRoleId(e.target.value)}
+                      className="w-full h-10 bg-background border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors"
+                    >
+                      <option value="">— Seleccionar Rol de Acceso —</option>
+                      {roles.filter(r => r.name !== 'ADMIN').map(r => {
+                        const scopeLabel = r.store_id ? ` (${storeMap.get(r.store_id) || r.stores?.name || 'Sucursal'})` : ' (Global)';
+                        return (
+                          <option key={r.id} value={r.id}>
+                            {r.name}{scopeLabel}
+                          </option>
+                        );
+                      })}
+                    </select>
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Correo Gmail <span className="normal-case font-normal">(Opcional)</span></label>
@@ -2258,16 +3059,29 @@ export default function PersonalPage() {
                     <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Seleccionar Usuario Libre</label>
                     <select required value={linkExistingUserId} onChange={e => setLinkExistingUserId(e.target.value)} className="w-full h-10 bg-background border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors">
                       <option value="">— Ninguno seleccionado —</option>
-                      {activeProfiles.filter(p => !p.employee_id).length === 0 ? (
+                      {allProfiles.filter(p => p.role !== 'DELETED' && !p.employee_id).length === 0 ? (
                         <option value="" disabled>No hay usuarios libres disponibles</option>
                       ) : (
-                        activeProfiles.filter(p => !p.employee_id).map(p => (
-                          <option key={p.id} value={p.id}>@{p.username} ({p.role})</option>
-                        ))
+                        allProfiles.filter(p => p.role !== 'DELETED' && !p.employee_id).map(p => {
+                          const isProfileGlobalRole = p.role === 'ADMIN' || roles.some(r => (r.id === p.role_id || r.name === p.role) && (!r.store_id || r.is_system));
+                          const pStoreIds = p.employee_stores?.map(es => es.store_id) || (p.default_store_id ? [p.default_store_id] : []);
+                          const pStoreNames = pStoreIds.length > 0
+                            ? pStoreIds.map(id => storeMap.get(id) || 'Tienda').join(', ')
+                            : (isProfileGlobalRole ? 'Global' : 'Sin tienda');
+                          const empStoresSorted = (linkingEmployee?.employee_stores || []).map(es => es.store_id).sort().join(',');
+                          const pStoresSorted = [...pStoreIds].sort().join(',');
+                          const isMismatch = !isProfileGlobalRole && empStoresSorted !== pStoresSorted;
+
+                          return (
+                            <option key={p.id} value={p.id}>
+                              @{p.username} ({p.role}) — Tiendas: {pStoreNames}{isMismatch ? ' [Tiendas distintas]' : ''}
+                            </option>
+                          );
+                        })
                       )}
                     </select>
                   </div>
-                  <button type="submit" disabled={isLinking || activeProfiles.filter(p => !p.employee_id).length === 0} className="w-full h-11 mt-2 flex items-center justify-center gap-2 rounded-xl font-bold text-sm bg-indigo-600 hover:bg-indigo-700 text-white transition-colors disabled:opacity-60 disabled:cursor-not-allowed shadow-md">
+                  <button type="submit" disabled={isLinking || allProfiles.filter(p => p.role !== 'DELETED' && !p.employee_id).length === 0} className="w-full h-11 mt-2 flex items-center justify-center gap-2 rounded-xl font-bold text-sm bg-indigo-600 hover:bg-indigo-700 text-white transition-colors disabled:opacity-60 disabled:cursor-not-allowed shadow-md">
                     {isLinking ? <RefreshCw className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
                     Vincular Usuario
                   </button>
@@ -2348,25 +3162,21 @@ export default function PersonalPage() {
                   <div className="grid grid-cols-2 gap-1 p-1 bg-muted rounded-xl">
                     <button
                       type="button"
-                      disabled={!!selectedEmpId}
                       onClick={() => setUserAccessScope('stores')}
-                      className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
-                        userAccessScope === 'stores'
-                          ? 'bg-background text-foreground shadow-sm'
-                          : 'text-muted-foreground hover:text-foreground'
-                      } disabled:opacity-70`}
+                      className={`py-1.5 text-xs font-bold rounded-lg transition-all ${userAccessScope === 'stores'
+                        ? 'bg-background text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground'
+                        }`}
                     >
                       Por Sucursales
                     </button>
                     <button
                       type="button"
-                      disabled={!!selectedEmpId}
                       onClick={() => setUserAccessScope('global')}
-                      className={`py-1.5 text-xs font-bold rounded-lg transition-all ${
-                        userAccessScope === 'global'
-                          ? 'bg-purple-600 text-white shadow-sm'
-                          : 'text-muted-foreground hover:text-foreground'
-                      } disabled:opacity-70`}
+                      className={`py-1.5 text-xs font-bold rounded-lg transition-all ${userAccessScope === 'global'
+                        ? 'bg-purple-600 text-white shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground'
+                        }`}
                     >
                       Acceso Global (Admin)
                     </button>
@@ -2382,16 +3192,17 @@ export default function PersonalPage() {
                   </label>
                   <select
                     value={userGlobalRole}
-                    disabled={!!selectedEmpId}
                     onChange={(e) => setUserGlobalRole(e.target.value)}
-                    className="w-full h-10 px-3 text-xs font-bold rounded-xl border border-purple-200 bg-white text-purple-950 focus:outline-none focus:ring-2 focus:ring-purple-500 shadow-sm disabled:opacity-80"
+                    className="w-full h-10 px-3 text-xs font-bold rounded-xl border border-purple-200 bg-white text-purple-950 focus:outline-none focus:ring-2 focus:ring-purple-500 shadow-sm"
                   >
                     {globalRoles.map(r => (
                       <option key={r.id} value={r.name}>{r.name}</option>
                     ))}
                   </select>
                   <span className="text-[11px] text-purple-600/80 font-medium block mt-1">
-                    Este usuario tendrá acceso administrativo global en todas las tiendas del sistema.
+                    {userGlobalRole === 'ADMIN'
+                      ? 'Este usuario tendrá acceso total e irrestricto a todos los módulos y sucursales de la empresa.'
+                      : `Este usuario tendrá acceso a todas las sucursales del sistema, aplicando únicamente los permisos definidos para el rol "${userGlobalRole}".`}
                   </span>
                   <label className="flex items-center gap-2.5 mt-3 pt-3 border-t border-purple-200/60 cursor-pointer select-none">
                     <input
@@ -2412,11 +3223,16 @@ export default function PersonalPage() {
                     renderStoreRoleList({
                       storeIds: selectedStoreIds,
                       storeRoles: userStoreRoles,
+                      storeRoleIds: userStoreRoleIds,
                       onToggleStore: (storeId, checked) => {
                         if (!selectedEmpId) {
                           if (checked) {
                             setSelectedStoreIds(prev => [...prev, storeId]);
-                            setUserStoreRoles(prev => ({ ...prev, [storeId]: prev[storeId] || getValidStoreRole(null, storeId) }));
+                            const defaultRoleName = getValidStoreRole(null, storeId);
+                            const storeAvailableRoles = roles.filter(r => r.name !== 'ADMIN' && (r.store_id === storeId || !r.store_id));
+                            const defaultRoleId = storeAvailableRoles.find(r => r.name === defaultRoleName)?.id || storeAvailableRoles[0]?.id || '';
+                            setUserStoreRoles(prev => ({ ...prev, [storeId]: prev[storeId] || defaultRoleName }));
+                            setUserStoreRoleIds(prev => ({ ...prev, [storeId]: prev[storeId] || defaultRoleId }));
                           } else {
                             setSelectedStoreIds(prev => prev.filter(id => id !== storeId));
                             setUserStoreRoles(prev => {
@@ -2424,43 +3240,93 @@ export default function PersonalPage() {
                               delete next[storeId];
                               return next;
                             });
+                            setUserStoreRoleIds(prev => {
+                              const next = { ...prev };
+                              delete next[storeId];
+                              return next;
+                            });
                           }
                         }
                       },
-                      onRoleChange: (storeId, roleName) => {
+                      onRoleChange: (storeId, roleName, roleId) => {
                         setUserStoreRoles(prev => ({ ...prev, [storeId]: roleName }));
+                        setUserStoreRoleIds(prev => ({ ...prev, [storeId]: roleId }));
                       },
-                      isDisabled: !!selectedEmpId,
+                      isDisabled: false,
+                      isStoreToggleDisabled: !!selectedEmpId,
                     })
                   ) : (
                     <div className="bg-secondary/50 border border-border rounded-xl p-3 flex items-center justify-between text-sm font-medium text-muted-foreground">
                       <div className="flex items-center gap-2">
                         <Info className="w-4 h-4 text-indigo-500 shrink-0" />
-                        <span>Tienda asignada automáticamente: <span className="font-bold text-foreground">{storeMap.get(activeStoreId || '') || '—'}</span></span>
+                        {activeStoreId ? (
+                          <span>Tienda asignada automáticamente: <span className="font-bold text-foreground">{storeMap.get(activeStoreId) || '—'}</span></span>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <span>Tienda asignada:</span>
+                            <select
+                              value={targetModalStoreId}
+                              onChange={(e) => {
+                                const newStoreId = e.target.value;
+                                setSelectedModalStoreId(newStoreId);
+                                const defaultRoleName = getValidStoreRole(null, newStoreId);
+                                const storeAvailableRoles = roles.filter(r => r.name !== 'ADMIN' && (r.store_id === newStoreId || !r.store_id));
+                                const defaultRoleId = storeAvailableRoles.find(r => r.name === defaultRoleName)?.id || storeAvailableRoles[0]?.id || '';
+                                setUserStoreRoles({ [newStoreId]: defaultRoleName });
+                                setUserStoreRoleIds({ [newStoreId]: defaultRoleId });
+                              }}
+                              className="h-8 px-2 text-xs font-bold rounded-lg border border-border bg-background cursor-pointer text-foreground"
+                            >
+                              {availableStores.map(s => (
+                                <option key={s.id} value={s.id}>
+                                  {s.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
                       </div>
-                      {activeStoreId && (() => {
+                      {targetModalStoreId && (() => {
                         const storeAvailableRoles = roles.filter(
-                          r => r.name !== 'ADMIN' && (r.store_id === activeStoreId || !r.store_id)
+                          r => r.name !== 'ADMIN' && (r.store_id === targetModalStoreId || !r.store_id)
                         );
-                        const currentRole = userStoreRoles[activeStoreId] || (storeAvailableRoles[0]?.name || 'CAJERO');
+                        const currentRoleName = userStoreRoles[targetModalStoreId] || (storeAvailableRoles[0]?.name || 'CAJERO');
+                        const currentRoleId = userStoreRoleIds[targetModalStoreId] || storeAvailableRoles.find(r => r.name === currentRoleName)?.id || storeAvailableRoles[0]?.id || '';
+                        const selectedValue = storeAvailableRoles.some(r => r.id === currentRoleId)
+                          ? currentRoleId
+                          : (storeAvailableRoles.find(r => r.name === currentRoleName)?.id || storeAvailableRoles[0]?.id || '');
                         return (
                           <select
-                            value={currentRole}
-                            disabled={!!selectedEmpId}
-                            onChange={(e) => setUserStoreRoles({ [activeStoreId]: e.target.value })}
-                            className="h-8 px-2 text-xs font-bold rounded-lg border border-border bg-background"
+                            value={selectedValue}
+                            onChange={(e) => {
+                              const selectedRole = storeAvailableRoles.find(r => r.id === e.target.value);
+                              if (selectedRole) {
+                                setUserStoreRoles({ [targetModalStoreId]: selectedRole.name });
+                                setUserStoreRoleIds({ [targetModalStoreId]: selectedRole.id });
+                              }
+                            }}
+                            className="h-8 px-2 text-xs font-bold rounded-lg border border-border bg-background cursor-pointer"
                           >
-                            {storeAvailableRoles.map(r => <option key={r.id} value={r.name}>{r.name}</option>)}
+                            {storeAvailableRoles.map(r => {
+                              const scopeLabel = r.store_id ? ` (${storeMap.get(r.store_id) || r.stores?.name || 'Sucursal'})` : ' (Global)';
+                              return (
+                                <option key={r.id} value={r.id}>
+                                  {r.name}{scopeLabel}
+                                </option>
+                              );
+                            })}
                           </select>
                         );
                       })()}
                     </div>
                   )}
                   {selectedEmpId && (
-                    <span className="text-[11px] text-muted-foreground flex items-center gap-1 mt-1.5 font-medium">
-                      <Info className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                      Tiendas y roles heredados automáticamente del empleado.
-                    </span>
+                    <div className="flex items-start gap-2 mt-2.5 p-2.5 rounded-xl bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/40 text-[11px] text-muted-foreground font-medium leading-tight">
+                      <Info className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
+                      <span>
+                        <strong className="text-foreground font-bold">Sucursales heredadas del empleado.</strong> Puedes modificar los roles de acceso para las tiendas vinculadas. Para agregar o quitar sucursales, edita al perfil en la pestaña <strong className="text-indigo-600 dark:text-indigo-400">Empleados</strong>.
+                      </span>
+                    </div>
                   )}
                 </div>
               )}
@@ -2488,7 +3354,7 @@ export default function PersonalPage() {
                   className="w-full h-10 bg-background border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors"
                 >
                   <option value="">— Sin vincular —</option>
-                  {unlinkedEmployees.map(emp => (
+                  {unlinkedEmployees.map((emp: Employee) => (
                     <option key={emp.id} value={emp.id}>
                       {emp.full_name} · {emp.dni}
                     </option>
@@ -2505,9 +3371,8 @@ export default function PersonalPage() {
               <button
                 type="submit"
                 disabled={savingUser}
-                className={`w-full h-11 mt-2 flex items-center justify-center gap-2 rounded-xl font-bold text-sm text-white transition-colors disabled:opacity-60 disabled:cursor-not-allowed shadow-md ${
-                  editingUserId ? 'bg-amber-500 hover:bg-amber-600' : 'bg-indigo-600 hover:bg-indigo-700'
-                }`}
+                className={`w-full h-11 mt-2 flex items-center justify-center gap-2 rounded-xl font-bold text-sm text-white transition-colors disabled:opacity-60 disabled:cursor-not-allowed shadow-md ${editingUserId ? 'bg-amber-500 hover:bg-amber-600' : 'bg-indigo-600 hover:bg-indigo-700'
+                  }`}
               >
                 {savingUser ? (
                   <><RefreshCw className="w-4 h-4 animate-spin" /> Guardando...</>

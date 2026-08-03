@@ -41,7 +41,7 @@ function Toast({ message, type }: { message: string; type: 'success' | 'error' }
 
 export default function ClientesPage() {
   const { role, isHydrated, permissions } = useRole();
-  const { activeStoreId, isAllStoresMode, availableStoreIds, availableStores, getStoreIdsWithPermission } = useStore();
+  const { activeStoreId, isAllStoresMode, availableStoreIds, availableStores } = useStore();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,13 +83,12 @@ export default function ClientesPage() {
     let query = supabase.from("customers").select("*").order("created_at", { ascending: false });
 
     // ── BLINDAJE CAPA 2: Filtrado estricto por permiso contextual de módulo ──────
-    const permittedStoreIds = getStoreIdsWithPermission('access_clientes');
     if (activeStoreId) {
       // Caso normal: tienda activa específica
       query = query.or(`store_id.eq.${activeStoreId},store_id.is.null`);
-    } else if (isAllStoresMode && role !== 'ADMIN' && permittedStoreIds.length > 0) {
+    } else if (isAllStoresMode && role !== 'ADMIN' && availableStoreIds.length > 0) {
       // Modo ALL para empleado multi-tienda: restringe a sus tiendas autorizadas CON PERMISO en este módulo
-      query = query.or(`store_id.in.(${permittedStoreIds.join(',')}),store_id.is.null`);
+      query = query.or(`store_id.in.(${availableStoreIds.join(',')}),store_id.is.null`);
     }
     // Si es ADMIN global en modo ALL: sin filtro (ve todos los clientes)
     const { data, error } = await query;

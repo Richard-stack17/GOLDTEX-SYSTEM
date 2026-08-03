@@ -102,7 +102,7 @@ function Toast({ message, type }: { message: string; type: 'success' | 'error' }
 
 export default function ContabilidadPage() {
   const { isHydrated, permissions, role } = useRole();
-  const { activeStoreId, isAllStoresMode, availableStoreIds, getStoreIdsWithPermission } = useStore();
+  const { activeStoreId, isAllStoresMode, availableStoreIds } = useStore();
 
   const [dateFilter, setDateFilter] = useState<'TODAY' | 'MONTH' | 'CUSTOM'>('TODAY');
   const [customStart, setCustomStart] = useState(limaToday());
@@ -140,13 +140,12 @@ export default function ContabilidadPage() {
       .order('issue_date', { ascending: true });
       
     // ── BLINDAJE CAPA 2: Filtrado estricto por permiso contextual de módulo ──────
-    const permittedStoreIds = getStoreIdsWithPermission('access_contabilidad');
     if (activeStoreId) {
       // Caso normal: tienda activa específica
       query = query.eq('store_id', activeStoreId);
-    } else if (isAllStoresMode && role !== 'ADMIN' && permittedStoreIds.length > 0) {
+    } else if (isAllStoresMode && role !== 'ADMIN' && availableStoreIds.length > 0) {
       // Modo ALL para empleado multi-tienda: restringe a sus tiendas autorizadas CON PERMISO en este módulo
-      query = query.in('store_id', permittedStoreIds);
+      query = query.in('store_id', availableStoreIds);
     }
     // Si es ADMIN global en modo ALL: sin filtro (ve todo)
     

@@ -12,6 +12,7 @@ export interface Store {
   address?: string | null;
   phone?: string | null;
   role?: string;
+  role_id?: string | null;
 }
 
 interface StoreContextProps {
@@ -63,8 +64,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       .filter(s => {
         const storeRole = s.role || role;
         if (storeRole === 'ADMIN') return true;
-        const perms = rolesMap[storeRole];
-        return perms ? Boolean(perms[requiredPermission!]) : true;
+        const perms = s.role_id ? rolesMap[s.role_id] : (rolesMap[`${s.id}_${storeRole}`] || rolesMap[`GLOBAL_${storeRole}`]);
+        return perms ? Boolean(perms[requiredPermission!]) : false;
       })
       .map(s => s.id);
   }, [availableStores, pathname, role, rolesMap]);
@@ -113,8 +114,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const currentStoreId = activeStore?.id || localStorage.getItem("goltex_active_store_id");
     if (currentStoreId === targetStoreId && activeStore?.id === targetStoreId && !isAllStoresMode) return;
 
-    console.log("🔄 [STORE CONTEXT] Forzando re-render visual a tienda única:", targetStore.name, "(", targetStoreId, ")");
-
     await clearDexieCache();
     setIsAllStoresModeState(false);
     setActiveStoreState(targetStore);
@@ -143,12 +142,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Cargar mapa de roles y permisos
-      const { data: rolesData } = await supabase.from("roles").select("name, permissions");
+      const { data: rolesData } = await supabase.from("roles").select("id, name, permissions, store_id").eq("is_active", true);
       if (rolesData) {
         const map: Record<string, Record<string, boolean>> = {};
         rolesData.forEach((r: any) => {
-          if (r.name && r.permissions) {
-            map[r.name] = r.permissions;
+          if (r.id && r.permissions) {
+            map[r.id] = r.permissions;
+            // Fallback key for backward compatibility or global roles
+            const key = r.store_id ? `${r.store_id}_${r.name}` : `GLOBAL_${r.name}`;
+            map[key] = r.permissions;
           }
         });
         setRolesMap(map);
@@ -161,7 +163,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (profileId) {
         const { data: esData } = await supabase
           .from("employee_stores")
-          .select("store_id, role, stores (*)")
+          .select("store_id, role, role_id, stores (*)")
           .eq("profile_id", profileId);
         if (esData) {
           empStores = esData.filter((es: any) => es.stores && es.stores.is_active === true);
@@ -170,18 +172,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
       let isGlobalRoleTemplate = false;
       if (role && role !== 'ADMIN') {
-        const { data: roleDef } = await supabase
+        const { data: roleDefs } = await supabase
           .from("roles")
-          .select("store_id")
+          .select("store_id, is_system")
           .eq("name", role)
-          .maybeSingle();
-        if (roleDef && (roleDef.store_id === null || !roleDef.store_id)) {
+          .eq("is_active", true);
+        if (roleDefs && roleDefs.some((r: any) => r.store_id === null || r.is_system)) {
           isGlobalRoleTemplate = true;
         }
       }
 
       const hasSpecificStoreAssignments = empStores.length > 0 || Boolean(defaultStoreId);
-      const isTrulyGlobalUser = role === 'ADMIN' || (isGlobalRoleTemplate && !hasSpecificStoreAssignments);
+      const isTrulyGlobalUser = role === 'ADMIN' || (isGlobalRoleTemplate && !hasSpecificStoreAssignments) || (!defaultStoreId && empStores.length === 0);
       
       setIsGlobalUser(isTrulyGlobalUser);
 
@@ -196,7 +198,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             name: es.stores.name,
             address: es.stores.address,
             phone: es.stores.phone,
-            role: es.role || role
+            role: es.role || role,
+            role_id: es.role_id || null
           }));
         } else if (defaultStoreId) {
           const matched = allStores.find(s => s.id === defaultStoreId);
@@ -248,7 +251,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
          // Si la tienda guardada no es válida para sus permisos, resetearla
          const isSavedValid = savedStoreId && storesForUser.some(s => s.id === savedStoreId);
          if (!isSavedValid && preferredStartId) {
-            console.log("🔒 [STORE CONTEXT] Reset de seguridad: LocalStorage o defaultStoreId inválido. Forzando a:", preferredStartId);
             savedStoreId = preferredStartId;
          }
       }
@@ -299,15 +301,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setIsAllStoresModeState(false);
         debugMode = "SIN TIENDAS ASIGNADAS (storesForUser vacío)";
       }
-
-      console.log("🏪 StoreContext Debug:", { 
-        roleContextual: role, 
-        storesEnBaseDeDatos: allStores.length,
-        availableStores: storesForUser, 
-        isAllStoresMode: savedMode === "ALL" || storesForUser.length > 1 && !savedMode,
-        resultadoModo: debugMode,
-        rawLocalStorage: { mode: localStorage.getItem("goltex_store_mode"), id: localStorage.getItem("goltex_active_store_id") }
-      });
 
     } catch (e) {
       console.error("Excepción al cargar tiendas del usuario:", e);
@@ -379,7 +372,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       await db.services.clear();
       await db.sales.clear();
       await db.transactions.clear();
-      console.log("🧹 Caché Dexie limpiado por cambio de tienda.");
     } catch (err) {
       console.error("Error limpiando caché Dexie:", err);
     }
@@ -393,12 +385,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (role === 'ADMIN') {
       return availableStores.map(s => s.id);
     }
-    return availableStores
-      .filter(s => {
+    return availableStores.filter(s => {
         const storeRole = s.role || role;
-        if (storeRole === 'ADMIN') return true;
-        const perms = rolesMap[storeRole];
-        return perms ? Boolean(perms[permissionKey]) : true;
+      if (storeRole === 'ADMIN') return true;
+      const perms = s.role_id ? rolesMap[s.role_id] : (rolesMap[`${s.id}_${storeRole}`] || rolesMap[`GLOBAL_${storeRole}`]);
+      return perms ? Boolean(perms[permissionKey]) : false;
       })
       .map(s => s.id);
   };

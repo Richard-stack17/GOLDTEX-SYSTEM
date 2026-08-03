@@ -60,20 +60,39 @@ export default function LoginPage() {
         throw new Error("Contraseña incorrecta.");
       }
 
-      // 🛡️ AUTH GUARD: Verificar que el usuario tenga al menos una tienda activa
+      // 🛡️ AUTH GUARD: Verificar si la cuenta es de Ámbito Global o si sus tiendas asignadas están activas
       if (profileData.role !== "ADMIN" && profileData.employee_id) {
-        const { data: activeStoresCount, error: countErr } = await supabase
-          .from("employee_stores")
-          .select("store_id, stores!inner(is_active)")
-          .eq("employee_id", profileData.employee_id)
-          .eq("stores.is_active", true);
-          
-        if (countErr) {
-          throw new Error("Error al verificar los permisos de acceso.");
-        }
-        
-        if (!activeStoresCount || activeStoresCount.length === 0) {
-          throw new Error("Acceso Restringido: La sucursal asignada a tu cuenta ha sido desactivada. Contacta al administrador.");
+        const { data: roleDefs } = await supabase
+          .from("roles")
+          .select("store_id, is_system")
+          .eq("name", profileData.role)
+          .eq("is_active", true);
+
+        const isGlobalTemplateRole = !roleDefs || roleDefs.length === 0 || roleDefs.some((r: any) => r.store_id === null || r.is_system);
+        const isNoStoreAssigned = profileData.default_store_id === null;
+
+        // Si NO es una cuenta de Ámbito Global, verificar que las tiendas asignadas estén activas
+        if (!isGlobalTemplateRole || !isNoStoreAssigned) {
+          const { data: totalEmpStores } = await supabase
+            .from("employee_stores")
+            .select("store_id")
+            .eq("employee_id", profileData.employee_id);
+
+          if (totalEmpStores && totalEmpStores.length > 0) {
+            const { data: activeStoresCount, error: countErr } = await supabase
+              .from("employee_stores")
+              .select("store_id, stores!inner(is_active)")
+              .eq("employee_id", profileData.employee_id)
+              .eq("stores.is_active", true);
+
+            if (countErr) {
+              throw new Error("Error al verificar los permisos de acceso.");
+            }
+
+            if (!activeStoresCount || activeStoresCount.length === 0) {
+              throw new Error("Acceso Restringido: La sucursal asignada a tu cuenta ha sido desactivada. Contacta al administrador.");
+            }
+          }
         }
       }
 

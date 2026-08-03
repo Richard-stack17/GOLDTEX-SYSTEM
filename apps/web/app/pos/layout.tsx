@@ -26,7 +26,6 @@ export default function PosLayout({ children }: { children: React.ReactNode }) {
   // Sincronización en segundo plano
   useEffect(() => {
     const handleOnline = async () => {
-      console.log("Conexión recuperada. Sincronizando catálogo y ventas pendientes...");
       
       await syncCatalog();
 

@@ -391,7 +391,7 @@ export default function CajaPage() {
                 setBtDeviceObj(devices[0]);
               }
             } catch (e) {
-              console.log('No silent BT access', e);
+              console.warn('No silent BT access', e);
             }
           }
         }
@@ -593,7 +593,6 @@ export default function CajaPage() {
           table: "sales"
         },
         (payload) => {
-          console.log('⚡ [REALTIME - CAJA] Evento detectado en sales:', payload);
           fetchTickets();
         }
       )
@@ -605,7 +604,6 @@ export default function CajaPage() {
           table: "transactions"
         },
         (payload) => {
-          console.log('⚡ [REALTIME - CAJA] Evento detectado en transactions:', payload);
           fetchTickets();
         }
       )

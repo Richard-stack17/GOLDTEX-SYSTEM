@@ -12,7 +12,7 @@ import StoreSwitcher from '../components/StoreSwitcher';
 
 export default function ConfiguracionPage() {
   const { role, isHydrated, permissions } = useRole();
-  const { activeStoreId, activeStore, reloadStores } = useStore();
+  const { activeStoreId, activeStore, reloadStores, isLoadingStores } = useStore();
   const router = useRouter();
 
   // Permissions
@@ -60,6 +60,7 @@ export default function ConfiguracionPage() {
   };
 
   useEffect(() => {
+    if (!isHydrated || isLoadingStores) return;
     if (activeTab === 'PRINTERS') {
       fetchPrinters();
     } else if (activeTab === 'FINANCE') {
@@ -67,7 +68,7 @@ export default function ConfiguracionPage() {
     } else if (activeTab === 'STORES') {
       fetchStores();
     }
-  }, [activeTab, activeStoreId, showInactive]);
+  }, [activeTab, activeStoreId, showInactive, isHydrated, isLoadingStores]);
 
   const fetchStores = async () => {
     setIsLoading(true);
