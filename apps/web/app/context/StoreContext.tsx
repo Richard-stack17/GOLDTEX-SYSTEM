@@ -62,9 +62,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
     return availableStores
       .filter(s => {
+        if (!s) return false;
         const storeRole = s.role || role;
         if (storeRole === 'ADMIN') return true;
-        const perms = s.role_id ? rolesMap[s.role_id] : (rolesMap[`${s.id}_${storeRole}`] || rolesMap[`GLOBAL_${storeRole}`]);
+        const perms = s.role_id ? (rolesMap?.[s.role_id]) : (rolesMap?.[`${s.id}_${storeRole}`] || rolesMap?.[`GLOBAL_${storeRole}`]);
         return perms ? Boolean(perms[requiredPermission!]) : false;
       })
       .map(s => s.id);

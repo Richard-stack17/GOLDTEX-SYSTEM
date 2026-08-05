@@ -377,28 +377,37 @@ export default function CajaPage() {
 
   useEffect(() => {
     async function loadPrinter() {
-      let query = supabase.from('printers').select('*').order('auto_print', { ascending: false }).limit(1);
-      if (activeStoreId) query = query.eq('store_id', activeStoreId);
-      const { data } = await query.maybeSingle();
-      if (data) {
-        setActivePrinter(data);
-        if (data.type === 'bluetooth') {
-          const nav = navigator as any;
-          if (nav.bluetooth && nav.bluetooth.getDevices) {
-            try {
-              const devices = await nav.bluetooth.getDevices();
-              if (devices.length > 0) {
-                setBtDeviceObj(devices[0]);
+      try {
+        let query = supabase.from('printers').select('*').order('auto_print', { ascending: false }).limit(1);
+        if (activeStoreId) query = query.eq('store_id', activeStoreId);
+        const { data } = await query.maybeSingle();
+        if (data) {
+          setActivePrinter(data);
+          try { localStorage.setItem('cached_printer_config', JSON.stringify(data)); } catch (_) {}
+          if (data.type === 'bluetooth') {
+            const nav = navigator as any;
+            if (nav.bluetooth && nav.bluetooth.getDevices) {
+              try {
+                const devices = await nav.bluetooth.getDevices();
+                if (devices.length > 0) {
+                  setBtDeviceObj(devices[0]);
+                }
+              } catch (e) {
+                console.warn('No silent BT access', e);
               }
-            } catch (e) {
-              console.warn('No silent BT access', e);
             }
           }
         }
+      } catch (e) {
+        console.warn('📌 [Modo Avión / Offline] No se pudo cargar impresora de Supabase en Caja, usando caché:', e);
+        try {
+          const cached = localStorage.getItem('cached_printer_config');
+          if (cached) setActivePrinter(JSON.parse(cached));
+        } catch (_) {}
       }
     }
     loadPrinter();
-  }, []);
+  }, [activeStoreId]);
 
   const spinnerOff = '[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none';
   const inlineCellCls = 'h-7 px-1.5 border-2 border-transparent hover:border-indigo-200 focus:border-indigo-500 rounded bg-transparent focus:bg-white text-xs font-bold w-full focus:outline-none transition-colors';
@@ -993,25 +1002,25 @@ export default function CajaPage() {
     <div className="min-h-screen bg-background text-foreground flex flex-col">
 
       {/* ── Header ── */}
-      <header className="bg-card border-b border-border px-6 h-16 flex items-center justify-between shadow-sm">
-        <div className="flex items-center gap-4">
-          <Link href="/hub" className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-secondary">
-            <ArrowLeft className="w-5 h-5" />
-          </Link>
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center">
+      <header className="bg-card border-b border-border px-4 sm:px-6 py-3 sm:py-0 min-h-[4rem] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm">
+        <div className="flex items-center gap-3 sm:gap-4 w-full sm:w-auto justify-between sm:justify-start">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <Link href="/hub" className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-secondary shrink-0">
+              <ArrowLeft className="w-5 h-5" />
+            </Link>
+            <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center shrink-0">
               <Receipt className="w-4 h-4 text-white" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-base font-bold leading-none">Módulo de Caja</h1>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-sm sm:text-base font-bold leading-none truncate">Módulo de Caja</h1>
                 {activeStore && (
-                  <span className="text-[10px] font-bold text-amber-700 bg-amber-100 border border-amber-200 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                  <span className="text-[10px] font-bold text-amber-700 bg-amber-100 border border-amber-200 px-2 py-0.5 rounded-full uppercase tracking-wider truncate max-w-[120px]">
                     {activeStore.name}
                   </span>
                 )}
               </div>
-              <p className="text-xs text-muted-foreground mt-0.5">Cobro de Tickets Pendientes</p>
+              <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 truncate">Cobro de Tickets Pendientes</p>
             </div>
           </div>
         </div>
@@ -1194,7 +1203,7 @@ export default function CajaPage() {
             })}
           </div>
         ) : (
-          <div className="max-w-screen-xl mx-auto overflow-hidden rounded-xl border border-border bg-card">
+          <div className="max-w-screen-xl mx-auto overflow-x-auto rounded-xl border border-border bg-card">
             <table className="w-full text-left text-sm">
               <thead className="bg-background text-muted-foreground border-b border-border select-none">
                 <tr>

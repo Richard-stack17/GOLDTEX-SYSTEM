@@ -272,79 +272,79 @@ export default function ConfiguracionPage() {
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
       {/* ── Header ── */}
-      <header className="bg-card border-b border-border px-6 h-16 flex items-center justify-between shadow-sm shrink-0">
-        <div className="flex items-center gap-4">
-          <Link href="/hub" className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-secondary">
-            <ArrowLeft className="w-5 h-5" />
-          </Link>
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-slate-500 rounded-lg flex items-center justify-center">
+      <header className="bg-card border-b border-border px-4 sm:px-6 py-3 sm:py-0 min-h-[4rem] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm shrink-0">
+        <div className="flex items-center gap-3 sm:gap-4 w-full sm:w-auto justify-between sm:justify-start">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <Link href="/hub" className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-secondary shrink-0">
+              <ArrowLeft className="w-5 h-5" />
+            </Link>
+            <div className="w-8 h-8 bg-slate-500 rounded-lg flex items-center justify-center shrink-0">
               <Settings className="w-4 h-4 text-white" />
             </div>
-            <div>
-              <h1 className="text-base font-bold leading-none">Módulo de Configuración</h1>
-              <p className="text-xs text-muted-foreground mt-0.5">Ajustes globales del sistema</p>
+            <div className="min-w-0">
+              <h1 className="text-sm sm:text-base font-bold leading-none truncate">Módulo de Configuración</h1>
+              <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 truncate">Ajustes globales del sistema</p>
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 sm:gap-4 w-full sm:w-auto justify-between sm:justify-end">
           <StoreSwitcher />
           {activeTab === 'PRINTERS' && Boolean(permissions?.settings_printers_manage) && (
-            <Link href="/configuracion/impresoras/nueva" className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold transition-colors shadow-sm hover:bg-primary/90">
-              <Plus className="w-3.5 h-3.5" /> Nueva Impresora
+            <Link href="/configuracion/impresoras/nueva" className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold transition-colors shadow-sm hover:bg-primary/90 whitespace-nowrap shrink-0">
+              <Plus className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Nueva Impresora</span><span className="sm:hidden">Impresora</span>
             </Link>
           )}
           {activeTab === 'STORES' && canManageStores && (
             <button 
               onClick={() => { setEditingStore(null); setStoreForm({name: '', address: '', phone: ''}); setIsStoreModalOpen(true); }}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold transition-colors shadow-sm hover:bg-primary/90"
+              className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold transition-colors shadow-sm hover:bg-primary/90 whitespace-nowrap shrink-0"
             >
-              <Plus className="w-3.5 h-3.5" /> Nueva Tienda
+              <Plus className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Nueva Tienda</span><span className="sm:hidden">Tienda</span>
             </button>
           )}
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col p-6 max-w-screen-xl w-full mx-auto">
+      <main className="flex-1 flex flex-col p-3 sm:p-6 max-w-screen-xl w-full mx-auto">
         {/* Tabs */}
-        <div className="flex space-x-1 bg-secondary/50 p-1 rounded-xl mb-6 w-max border border-border">
+        <div className="flex flex-nowrap space-x-1 bg-secondary/50 p-1 rounded-xl mb-4 sm:mb-6 w-full sm:w-max max-w-full overflow-x-auto no-scrollbar border border-border whitespace-nowrap shrink-0">
           {canManageStores && (
             <button
               onClick={() => setActiveTab('STORES')}
-              className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${
+              className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-bold transition-colors shrink-0 whitespace-nowrap ${
                 activeTab === 'STORES' 
                   ? 'bg-background text-foreground shadow-sm' 
                   : 'text-muted-foreground hover:text-foreground hover:bg-secondary'
               }`}
             >
-              <div className="flex items-center gap-2">
-                <Store className="w-4 h-4 text-blue-500" /> Tiendas
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <Store className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-500" /> Tiendas
               </div>
             </button>
           )}
           <button
             onClick={() => setActiveTab('PRINTERS')}
-            className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${
+            className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-bold transition-colors shrink-0 whitespace-nowrap ${
               activeTab === 'PRINTERS' 
                 ? 'bg-background text-foreground shadow-sm' 
                 : 'text-muted-foreground hover:text-foreground hover:bg-secondary'
             }`}
           >
-            <div className="flex items-center gap-2">
-              <Printer className="w-4 h-4" /> Impresoras
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <Printer className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Impresoras
             </div>
           </button>
           {Boolean(permissions?.settings_finance) && (
             <button
               onClick={() => setActiveTab('FINANCE')}
-              className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${
+              className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-bold transition-colors shrink-0 whitespace-nowrap ${
                 activeTab === 'FINANCE' 
                   ? 'bg-background text-foreground shadow-sm' 
                   : 'text-muted-foreground hover:text-foreground hover:bg-secondary'
               }`}
             >
-              <div className="flex items-center gap-2">
-                <CreditCard className="w-4 h-4 text-orange-500" /> Finanzas
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <CreditCard className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-500" /> Comisiones
               </div>
             </button>
           )}

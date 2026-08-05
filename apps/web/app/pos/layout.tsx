@@ -12,6 +12,12 @@ export default function PosLayout({ children }: { children: React.ReactNode }) {
   const { role, username, isHydrated, permissions } = useRole();
   const router = useRouter();
   const [isChecking, setIsChecking] = useState(true);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  };
 
   useEffect(() => {
     if (isHydrated) {
@@ -25,28 +31,21 @@ export default function PosLayout({ children }: { children: React.ReactNode }) {
 
   // Sincronización en segundo plano
   useEffect(() => {
+    const isApkMode = process.env.NEXT_PUBLIC_APP_MODE === 'apk';
     const handleOnline = async () => {
       
       await syncCatalog();
 
-      try {
-        const pendingSales = await db.pending_sales.toArray();
-        if (pendingSales.length === 0) return;
-
-        let syncedCount = 0;
-        for (const sale of pendingSales) {
-          const { local_id, sync_status, ...saleData } = sale as any;
-          const { error } = await supabase.from('sales').insert(saleData);
-          if (!error) {
-            await db.pending_sales.delete(sale.local_id!);
-            syncedCount++;
+      if (isApkMode) {
+        try {
+          const { syncPendingSales } = await import('../lib/localDb');
+          const syncedCount = await syncPendingSales();
+          if (syncedCount > 0) {
+            showToast(`✅ ${syncedCount} ventas offline sincronizadas con éxito.`, 'success');
           }
+        } catch (err) {
+          console.error("Error en sincronización background apk:", err);
         }
-        if (syncedCount > 0) {
-          alert(`✅ ${syncedCount} ventas offline sincronizadas con éxito.`);
-        }
-      } catch (err) {
-        console.error("Error en sincronización background:", err);
       }
     };
 
@@ -74,6 +73,15 @@ export default function PosLayout({ children }: { children: React.ReactNode }) {
   return (
     <>
       {children}
+      {toast && (
+        <div className="fixed bottom-4 right-4 z-[9999] animate-in fade-in slide-in-from-bottom-4 duration-300">
+          <div className={`px-4 py-3 rounded-xl shadow-lg flex items-center gap-3 ${
+            toast.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-red-600 text-white'
+          }`}>
+            <div className="font-bold text-sm">{toast.message}</div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

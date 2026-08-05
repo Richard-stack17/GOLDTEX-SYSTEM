@@ -27,7 +27,8 @@ export type Family = {
 import {
   Search, ArrowLeft, Trash2, Printer,
   Delete, ShoppingCart, XCircle, RefreshCw,
-  Clock, CheckCircle2, Sun, Moon, Scissors, Car, Eye, AlertTriangle, Lock
+  Clock, CheckCircle2, Sun, Moon, Scissors, Car, Eye, AlertTriangle, Lock,
+  CloudOff, CloudUpload, Cloud, CloudAlert, X, Layers
 } from "lucide-react";
 import { db, type LocalService } from "../lib/localDb";
 import { supabase } from "../lib/supabase";
@@ -83,6 +84,7 @@ export default function POSPage() {
   const [showConfigAlert, setShowConfigAlert] = useState(false);
   const [previewTicketData, setPreviewTicketData] = useState<any>(null);
   const [hasPosAccess, setHasPosAccess] = useState(false);
+  const isApkMode = process.env.NEXT_PUBLIC_APP_MODE === 'apk';
 
   useEffect(() => {
     if (!isHydrated) return;
@@ -123,7 +125,8 @@ export default function POSPage() {
   }, []);
 
 
-  // ── Cart ──
+  // ── Cart & Mobile Navigation State ──
+  const [mobileTab, setMobileTab] = useState<"catalog" | "cart">("catalog");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [ticketNumber, setTicketNumber] = useState<number>(1);
   const [isEmitting, setIsEmitting] = useState(false);
@@ -424,6 +427,7 @@ export default function POSPage() {
   // ── Vendedor History ──
   const [rightPanelMode, setRightPanelMode] = useState<"cart" | "history">("cart");
   const [historyTickets, setHistoryTickets] = useState<HistoryTicket[]>([]);
+  const pendingSales = useLiveQuery(() => db.pending_sales.toArray(), []) || [];
 
   // ── Numpad (productos de tela) ──
   const [numpadProduct, setNumpadProduct] = useState<Product | null>(null);
@@ -638,6 +642,7 @@ export default function POSPage() {
         if (exists) return prev.map((i) => i.id === numpadProduct.id ? { ...i, quantity: qty, editedPrice: price } : i);
         return [...prev, { ...numpadProduct, quantity: qty, editedPrice: price }];
       });
+      setMobileTab("cart");
     }
     setNumpadProduct(null);
   };
@@ -655,7 +660,7 @@ export default function POSPage() {
   const previewPrice = parseFloat(numpadPrice) || 0;
   const previewSubtotal = previewQty * previewPrice;
 
-  // ── Emit Ticket (PENDING — mostrador, no cobro) ──
+  // ── Emit Ticket (Offline-First: Guarda en Dexie + Imprime al instante sin bloquear) ──
   const handleEmitTicket = async () => {
     if (!isCajaOpen) {
       alert("Caja Cerrada. Debe realizar la apertura de caja para emitir tickets.");
@@ -663,28 +668,15 @@ export default function POSPage() {
     }
     if (cart.length === 0) return;
     setIsEmitting(true);
+
     try {
-      let customerId = "00000000-0000-0000-0000-000000000000";
-      let custQuery = supabase.from("customers").select("id").eq("business_name", "CLIENTE VARIOS").limit(1);
-      if (activeStoreId) custQuery = custQuery.eq("store_id", activeStoreId);
-      const { data: customerData } = await custQuery;
-      if (customerData && customerData.length > 0) {
-        customerId = customerData[0]!.id;
-      } else {
-        const { data: newCustomer } = await supabase
-          .from("customers")
-          .insert({ business_name: "CLIENTE VARIOS", doc_number: "00000000000", document_type: "SIN_DOC", is_frequent: false, store_id: activeStoreId })
-          .select("id").single();
-        if (newCustomer) customerId = newCustomer.id;
-      }
-
       const todayStr = getLimaTodayStr();
+      const currentTicketNo = ticketNumber || 1;
+      const docNum = `TKT-${String(currentTicketNo).padStart(4, '0')}`;
+      const cartSnapshot = [...cart];
+      const totalSnapshot = total;
+      const sellerName = username || "Propietario";
 
-      /**
-       * Formatea el detalle de cada ítem según su tipo:
-       * - Telas: "CODE NOMBRE — Xm × S/ Y.YY"
-       * - Confección/Taxi (servicios sin MTS): "CODE: NOMBRE — S/ Y.YY"
-       */
       const formatItemDetail = (i: CartItem): string => {
         if (i.is_service) {
           return `${i.code}: ${i.name} — S/ ${i.editedPrice.toFixed(2)}`;
@@ -692,59 +684,92 @@ export default function POSPage() {
         return `${i.code} ${i.name} — ${i.quantity}m × S/ ${i.editedPrice.toFixed(2)}`;
       };
 
-      const sellerName = username || "Propietario";
-      let sellerId: string | null = null;
+      // 1. Guardado Offline-First en Dexie (db.pending_sales)
+      let localId: number | undefined;
       try {
-        const { data: profData } = await supabase.from('profiles').select('id').eq('username', sellerName).maybeSingle();
-        if (profData?.id) sellerId = profData.id;
-      } catch (e) { }
+        localId = await db.pending_sales.add({
+          offline_uuid: crypto.randomUUID(),
+          store_id: activeStoreId || '',
+          seller_id: null,
+          cashier_id: null,
+          customer_id: null,
+          total: totalSnapshot,
+          status: 'PENDING',
+          created_at: new Date().toISOString(),
+          items: cartSnapshot,
+          sync_status: 'PENDING',
+          retry_count: 0
+        });
+      } catch (e) {
+        console.warn("No se pudo guardar localmente en Dexie", e);
+      }
 
-      const rpcPayload = {
-        customer_id: customerId,
-        record_date: todayStr,
-        detail: cart.map(formatItemDetail).join('\n'),
-        items: cart,
-        total: total,
-        seller_id: sellerId,
-        store_id: activeStoreId
-      };
+      // 2. Snapshot para la interfaz y disparar impresión INMEDIATA (offline o online)
+      setLastSaleInfo({ ticketNum: currentTicketNo, docNum, items: cartSnapshot, total: totalSnapshot });
 
-      const { data: rpcResult, error: saleError } = await supabase.rpc('emit_pos_ticket', {
-        p_payload: rpcPayload
-      });
-
-      if (saleError) throw saleError;
-      if (!rpcResult || !rpcResult.success) throw new Error("Error interno al emitir el ticket.");
-
-      const nextInternalNum = rpcResult.internal_ticket_number;
-      const docNum = rpcResult.proforma_number;
-
-      // Snapshot para impresión
-      setLastSaleInfo({ ticketNum: nextInternalNum, docNum, items: [...cart], total });
-
-      // Limpiar y preparar siguiente cliente
-      setCart([]);
-      await Promise.all([
-        fetchTodayTicketNumber(),
-        fetchHistory()
-      ]);
-
-      // Imprimir silenciosamente (Fire and Forget para no bloquear el UI de React)
-      const cartSnapshot = [...cart]; // Capturar el estado actual del carrito
       setTimeout(() => {
         const saleDataForPrint = {
           proforma_number: docNum,
-          customer_name: username || "Propietario",
+          customer_name: sellerName,
           items: cartSnapshot,
-          total: total
+          total: totalSnapshot
         };
         silentPrintSaleReceipt(saleDataForPrint, true)
           .catch((e: any) => console.error('Error impresión POS:', e));
       }, 50);
 
+      // 3. Limpiar carrito y avanzar contador local inmediatamente
+      setCart([]);
+      setTicketNumber(prev => prev + 1);
+      setRightPanelMode('history');
+      setMobileTab('cart');
+
+      // 4. Intentar sincronización en background con Supabase (sin arrojar alertas si falla por red)
+      (async () => {
+        try {
+          let customerId = "00000000-0000-0000-0000-000000000000";
+          try {
+            let custQuery = supabase.from("customers").select("id").eq("business_name", "CLIENTE VARIOS").limit(1);
+            if (activeStoreId) custQuery = custQuery.eq("store_id", activeStoreId);
+            const { data: customerData } = await custQuery;
+            if (customerData && customerData.length > 0) customerId = customerData[0]!.id;
+          } catch (_) { }
+
+          let sellerId: string | null = null;
+          try {
+            const { data: profData } = await supabase.from('profiles').select('id').eq('username', sellerName).maybeSingle();
+            if (profData?.id) sellerId = profData.id;
+          } catch (_) { }
+
+          const rpcPayload = {
+            customer_id: customerId,
+            record_date: todayStr,
+            detail: cartSnapshot.map(formatItemDetail).join('\n'),
+            items: cartSnapshot,
+            total: totalSnapshot,
+            seller_id: sellerId,
+            store_id: activeStoreId
+          };
+
+          const { data: rpcResult, error: saleError } = await supabase.rpc('emit_pos_ticket', { p_payload: rpcPayload });
+          if (!saleError && rpcResult?.success) {
+            if (localId) {
+              await db.pending_sales.update(localId, {
+                sync_status: 'SYNCED',
+                id: rpcResult.id || undefined,
+                synced_at: new Date().toISOString()
+              });
+            }
+            fetchTodayTicketNumber();
+            fetchHistory();
+          }
+        } catch (e) {
+          console.warn("📌 [Modo Avión / Offline] Ticket registrado e impreso localmente. La sincronización se completará al reconectar:", e);
+        }
+      })();
+
     } catch (err) {
-      console.error(err);
-      alert(err instanceof Error ? err.message : "Error al emitir el ticket.");
+      console.error("Error al emitir el ticket localmente:", err);
     } finally {
       setIsEmitting(false);
     }
@@ -848,33 +873,35 @@ export default function POSPage() {
   }
 
   return (
-    <div className="flex flex-col lg:flex-row h-[100dvh] bg-background text-foreground overflow-hidden">
+    <div className="flex flex-col lg:flex-row h-[100dvh] bg-background text-foreground overflow-hidden relative">
 
       {/* ════════════════════════════════════════
           LEFT PANEL — Catálogo de Telas
           ════════════════════════════════════════ */}
-      <div className="flex-1 flex flex-col h-full border-r border-border overflow-hidden bg-secondary/10">
+      <div className={`flex-1 flex flex-col h-full border-r border-border overflow-hidden bg-secondary/10 ${mobileTab === 'catalog' ? 'flex' : 'hidden lg:flex'}`}>
 
-        {/* Search Bar */}
-        <div className="p-6 border-b border-border bg-surface z-10 flex flex-col gap-4 shadow-sm relative">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-4 flex-1">
-              <Button variant="ghost" size="icon" className="w-12 h-12 rounded-full hover:bg-secondary/50" onClick={handleBackClick}>
-                <ArrowLeft className="w-6 h-6" />
+        {/* Header (Escritorio lg: + Móvil <lg:) */}
+        <div className="p-3 sm:p-4 border-b border-border bg-card z-10 flex flex-col gap-2 shadow-sm relative shrink-0">
+          {/* ESCRITORIO ADAPTATIVO (lg:flex) — 2 Filas en lg (< xl), 1 Fila en xl (>= 1280px) */}
+          <div className="hidden lg:flex flex-col xl:flex-row xl:items-center xl:justify-between gap-2.5">
+            {/* Fila 1 (o Izquierda/Centro en xl): Flecha + Store info + Buscador */}
+            <div className="flex items-center gap-2.5 flex-1 min-w-0">
+              <Button variant="ghost" size="icon" className="w-10 h-10 xl:w-11 xl:h-11 rounded-xl hover:bg-secondary/80 shrink-0" onClick={handleBackClick}>
+                <ArrowLeft className="w-5 h-5" />
               </Button>
               {activeStore && (
-                <div className="flex flex-col shrink-0 text-left">
+                <div className="flex flex-col text-left shrink-0">
                   <span className="text-[9px] font-black text-muted-foreground uppercase tracking-widest leading-none">Punto de Venta</span>
-                  <span className="text-[11px] font-black text-amber-600 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded mt-1 uppercase leading-none">
+                  <span className="text-xs font-black text-amber-600 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-lg mt-1 uppercase leading-none truncate max-w-[130px] xl:max-w-[160px]">
                     {activeStore.name}
                   </span>
                 </div>
               )}
-              <div className="relative flex-1 flex items-center">
-                <Search className="absolute left-4 w-6 h-6 text-muted-foreground pointer-events-none" />
+              <div className="relative flex-1 min-w-[150px] flex items-center">
+                <Search className="absolute left-3.5 w-4 h-4 xl:w-5 xl:h-5 text-muted-foreground pointer-events-none" />
                 <Input
                   placeholder="Buscar familia, código o tela..."
-                  className="pl-14 h-16 bg-background text-xl rounded-2xl border-2 border-border/50 focus-visible:border-primary shadow-sm cursor-pointer"
+                  className="pl-10 xl:pl-11 h-10 xl:h-11 bg-background text-xs xl:text-sm rounded-xl border-2 border-border/60 focus-visible:border-primary shadow-sm cursor-pointer w-full"
                   value={search}
                   onClick={() => setQwertyOpen(true)}
                   readOnly
@@ -882,56 +909,120 @@ export default function POSPage() {
               </div>
             </div>
 
-            {/* Theme toggle + ticket badge */}
-            <div className="flex items-center gap-3">
-              {permissions?.pos_open_caja && (
+            {/* Fila 2 (o Derecha en xl): Controles de Caja, User, Theme, Ticket Badge */}
+            <div className="flex items-center justify-end gap-2 shrink-0">
+              {permissions?.pos_open_caja && !isCajaOpen && (
                 <button
-                  disabled={isCajaOpen}
                   onClick={handleOpenCaja}
-                  className={`px-4 h-12 rounded-2xl text-xs font-black uppercase transition-all ${!isCajaOpen
-                      ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-md cursor-pointer animate-pulse"
-                      : "bg-secondary/40 text-muted-foreground/50 border border-border cursor-not-allowed opacity-50"
-                    }`}
+                  className="px-3.5 h-10 xl:h-11 shrink-0 flex items-center justify-center bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition-all shadow-md cursor-pointer animate-pulse"
                 >
-                  Apertura de Caja
+                  Aperturar Caja
                 </button>
               )}
-              {permissions?.pos_close_caja && (
+              {permissions?.pos_close_caja && isCajaOpen && (
                 <button
-                  disabled={!isCajaOpen}
                   onClick={handleCloseCajaAttempt}
-                  className={`px-4 h-12 rounded-2xl text-xs font-black uppercase transition-all ${isCajaOpen
-                      ? "bg-red-600/10 text-red-600 border border-red-500/30 hover:bg-red-600 hover:text-white cursor-pointer"
-                      : "bg-secondary/40 text-muted-foreground/50 border border-border cursor-not-allowed opacity-50"
-                    }`}
+                  className="px-3.5 h-10 xl:h-11 shrink-0 flex items-center justify-center bg-red-600/10 border border-red-500/30 text-red-600 hover:bg-red-600 hover:text-white font-bold text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer"
                 >
                   Cerrar Caja
                 </button>
               )}
-              <AccountSwitcher />
+              <div className="h-10 xl:h-11 shrink-0 flex items-center">
+                <AccountSwitcher />
+              </div>
               <button
                 onClick={toggleTheme}
                 title={theme === 'dark' ? 'Modo Claro' : 'Modo Oscuro'}
-                className="flex items-center justify-center w-12 h-12 rounded-2xl bg-secondary hover:bg-muted transition-colors border border-border"
+                className="w-10 sm:w-11 h-10 sm:h-11 shrink-0 flex items-center justify-center rounded-xl bg-secondary hover:bg-muted transition-colors border border-border"
               >
                 {theme === 'dark' ? <Sun className="w-5 h-5 text-yellow-400" /> : <Moon className="w-5 h-5 text-indigo-500" />}
               </button>
-              <div className="bg-emerald-500/10 border-2 border-emerald-500/30 px-5 py-2 rounded-2xl flex flex-col items-center shrink-0">
-                <span className="text-[10px] text-emerald-600 font-bold uppercase tracking-wider">Próximo #</span>
-                <span className="text-3xl font-black text-emerald-600 leading-none">{ticketNumber}</span>
+              <div className="bg-emerald-500/10 border border-emerald-500/30 px-3 h-10 sm:h-11 shrink-0 flex items-center gap-2 rounded-xl">
+                <span className="text-[10px] text-emerald-600 font-bold uppercase tracking-wider whitespace-nowrap">Próximo #</span>
+                <span className="text-base xl:text-lg font-black text-emerald-600 leading-none">{ticketNumber}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* MÓVIL (< lg) — 2 Filas Compactas */}
+          <div className="flex lg:hidden flex-col gap-2">
+            {/* Fila 1: Flecha + Store + Buscador W-Full */}
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="icon" className="w-10 h-10 rounded-xl hover:bg-secondary/80 shrink-0" onClick={handleBackClick}>
+                <ArrowLeft className="w-5 h-5" />
+              </Button>
+              {activeStore && (
+                <div className="flex flex-col text-left shrink-0">
+                  <span className="text-[8px] font-black text-muted-foreground uppercase tracking-widest leading-none">POS</span>
+                  <span className="text-[10px] font-black text-amber-600 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded mt-0.5 uppercase leading-none truncate max-w-[100px]">
+                    {activeStore.name}
+                  </span>
+                </div>
+              )}
+              <div className="relative flex-1 min-w-0 flex items-center">
+                <Search className="absolute left-3 w-4 h-4 text-muted-foreground pointer-events-none" />
+                <Input
+                  placeholder="Buscar familia..."
+                  className="pl-9 h-10 bg-background text-xs rounded-xl border-2 border-border/60 focus-visible:border-primary shadow-sm cursor-pointer w-full"
+                  value={search}
+                  onClick={() => setQwertyOpen(true)}
+                  readOnly
+                />
+              </div>
+            </div>
+
+            {/* Fila 2: Botón Caja (Izq) y Acciones (Der) */}
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                {permissions?.pos_open_caja && !isCajaOpen && (
+                  <button
+                    onClick={handleOpenCaja}
+                    className="px-3 h-10 bg-emerald-600 text-white font-bold text-[10px] uppercase rounded-xl shadow-sm animate-pulse flex items-center justify-center shrink-0"
+                  >
+                    Aperturar Caja
+                  </button>
+                )}
+                {permissions?.pos_close_caja && isCajaOpen && (
+                  <button
+                    onClick={handleCloseCajaAttempt}
+                    className="px-3 h-10 bg-red-600/10 border border-red-500/30 text-red-600 font-bold text-[10px] uppercase rounded-xl flex items-center justify-center shrink-0"
+                  >
+                    Cerrar Caja
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <AccountSwitcher />
+                <button
+                  onClick={toggleTheme}
+                  title={theme === 'dark' ? 'Modo Claro' : 'Modo Oscuro'}
+                  className="flex items-center justify-center w-10 h-10 rounded-xl bg-secondary border border-border shrink-0"
+                >
+                  {theme === 'dark' ? <Sun className="w-4 h-4 text-yellow-400" /> : <Moon className="w-4 h-4 text-indigo-500" />}
+                </button>
+                <div className="bg-emerald-500/10 border border-emerald-500/30 px-2.5 h-10 rounded-xl flex items-center gap-1.5 shrink-0">
+                  <span className="text-[9px] text-emerald-600 font-bold uppercase">#</span>
+                  <span className="text-base font-black text-emerald-600 leading-none">{ticketNumber}</span>
+                </div>
               </div>
             </div>
           </div>
 
           {/* QWERTY */}
           {qwertyOpen && (
-            <div className="absolute top-[100px] left-6 right-6 bg-card border-2 border-border/80 rounded-3xl p-5 shadow-2xl z-50 flex flex-col gap-2 animate-in fade-in duration-200">
-              <button onClick={() => setQwertyOpen(false)} className="absolute right-4 top-4 text-red-500 hover:bg-red-500/10 w-10 h-10 flex items-center justify-center rounded-full font-black cursor-pointer">✕</button>
+            <div className="fixed inset-x-2 top-20 sm:absolute sm:top-[100px] sm:left-6 sm:right-6 bg-card border-2 border-border/80 rounded-3xl p-3 sm:p-5 shadow-2xl z-50 flex flex-col gap-2 animate-in fade-in duration-200 max-h-[80vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-1 px-1">
+                <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Teclado Virtual</span>
+                <button onClick={() => setQwertyOpen(false)} className="text-red-500 hover:bg-red-500/10 font-bold p-1 rounded-lg flex items-center gap-1 text-xs cursor-pointer">
+                  <span>Cerrar</span> <X className="w-4 h-4" />
+                </button>
+              </div>
               {[["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"], ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"], ["A", "S", "D", "F", "G", "H", "J", "K", "L", "Ñ"]].map((row, ri) => (
                 <div key={ri} className="flex gap-1.5 justify-center">
                   {row.map((key) => (
                     <button key={key} onClick={() => handleQwertyKey(key)}
-                      className="h-12 flex-1 max-w-[50px] bg-secondary/80 hover:bg-primary hover:text-white rounded-xl font-bold text-lg active:scale-95 transition-all touch-manipulation cursor-pointer">
+                      className="h-10 sm:h-12 flex-1 max-w-[50px] bg-secondary/80 hover:bg-primary hover:text-white rounded-xl font-bold text-base sm:text-lg active:scale-95 transition-all touch-manipulation cursor-pointer">
                       {key}
                     </button>
                   ))}
@@ -940,18 +1031,18 @@ export default function POSPage() {
               <div className="flex gap-1.5 justify-center">
                 {["Z", "X", "C", "V", "B", "N", "M"].map((key) => (
                   <button key={key} onClick={() => handleQwertyKey(key)}
-                    className="h-12 flex-1 max-w-[50px] bg-secondary/80 hover:bg-primary hover:text-white rounded-xl font-bold text-lg active:scale-95 transition-all touch-manipulation cursor-pointer">
+                    className="h-10 sm:h-12 flex-1 max-w-[50px] bg-secondary/80 hover:bg-primary hover:text-white rounded-xl font-bold text-base sm:text-lg active:scale-95 transition-all touch-manipulation cursor-pointer">
                     {key}
                   </button>
                 ))}
-                <button onClick={() => handleQwertyKey("DEL")} className="h-12 px-5 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white rounded-xl font-bold active:scale-95 transition-all flex items-center justify-center shrink-0 cursor-pointer">
+                <button onClick={() => handleQwertyKey("DEL")} className="h-10 sm:h-12 px-4 sm:px-5 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white rounded-xl font-bold active:scale-95 transition-all flex items-center justify-center shrink-0 cursor-pointer">
                   <Delete className="w-5 h-5" />
                 </button>
               </div>
               <div className="flex gap-2 justify-center mt-1">
-                <button onClick={() => { setSearch(""); setActiveFamily(null); }} className="h-12 px-5 bg-secondary/40 text-muted-foreground hover:bg-secondary rounded-xl font-bold active:scale-95 transition-all cursor-pointer">Limpiar</button>
-                <button onClick={() => handleQwertyKey("SPACE")} className="h-12 flex-1 max-w-[300px] bg-secondary/80 hover:bg-primary hover:text-white rounded-xl font-bold active:scale-95 transition-all uppercase cursor-pointer">Espacio</button>
-                <button onClick={() => setQwertyOpen(false)} className="h-12 px-8 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black active:scale-95 transition-all uppercase cursor-pointer">OK</button>
+                <button onClick={() => { setSearch(""); setActiveFamily(null); }} className="h-10 sm:h-12 px-4 sm:px-5 bg-secondary/40 text-muted-foreground hover:bg-secondary rounded-xl font-bold text-xs sm:text-sm active:scale-95 transition-all cursor-pointer">Limpiar</button>
+                <button onClick={() => handleQwertyKey("SPACE")} className="h-10 sm:h-12 flex-1 max-w-[300px] bg-secondary/80 hover:bg-primary hover:text-white rounded-xl font-bold text-xs sm:text-sm active:scale-95 transition-all uppercase cursor-pointer">Espacio</button>
+                <button onClick={() => setQwertyOpen(false)} className="h-10 sm:h-12 px-6 sm:px-8 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs sm:text-sm active:scale-95 transition-all uppercase cursor-pointer">OK</button>
               </div>
             </div>
           )}
@@ -959,7 +1050,7 @@ export default function POSPage() {
 
         {/* Catalog Grid or Closed Box State */}
         {!isCajaOpen ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-secondary/5">
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-secondary/5 pb-20 lg:pb-8">
             <div className="w-20 h-20 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center mb-6 shadow-inner animate-bounce">
               <Lock className="w-10 h-10" />
             </div>
@@ -980,27 +1071,27 @@ export default function POSPage() {
             )}
           </div>
         ) : (
-          <div className="flex-1 overflow-auto bg-secondary/10 flex flex-col">
-            <div className={`flex flex-col h-full overflow-auto ${numpadProduct ? "hidden" : ""}`}>
-              <div className="px-6 pt-6 flex justify-between items-center shrink-0">
+          <div className="flex-1 overflow-auto bg-secondary/10 flex flex-col pb-20 lg:pb-0">
+            <div className="flex flex-col h-full overflow-auto">
+              <div className="h-12 flex items-center justify-between px-3 sm:px-6 shrink-0 border-b border-border/30 bg-surface/50">
                 {viewMode === 'SERVICES' ? (
-                  <div className="flex gap-1 bg-background border-2 border-border/60 rounded-xl p-1 shadow-sm">
-                    <Button variant="ghost" className="h-10 px-4 rounded-lg text-xs font-bold hover:bg-purple-50 hover:text-purple-600 transition-colors" disabled={servicesPage === 1} onClick={() => setServicesPage(p => p - 1)}>Anterior</Button>
-                    <div className="flex items-center px-3 text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                  <div className="flex items-center gap-2 text-xs font-bold text-muted-foreground bg-transparent border-0 flex-1 min-w-0 mr-2 overflow-x-auto whitespace-nowrap scrollbar-hide">
+                    <Button variant="ghost" className="h-8 px-2.5 rounded-lg border border-border/50 text-xs font-bold hover:bg-purple-50 hover:text-purple-600 transition-colors shrink-0" disabled={servicesPage === 1} onClick={() => setServicesPage(p => p - 1)}>Anterior</Button>
+                    <span className="whitespace-nowrap text-[11px] font-bold text-muted-foreground uppercase shrink-0">
                       Pág {servicesPage} de {Math.max(1, Math.ceil(localServices.length / servicesPageSize))}
-                    </div>
-                    <Button variant="ghost" className="h-10 px-4 rounded-lg text-xs font-bold hover:bg-purple-50 hover:text-purple-600 transition-colors" disabled={servicesPage === Math.max(1, Math.ceil(localServices.length / servicesPageSize))} onClick={() => setServicesPage(p => p + 1)}>Siguiente</Button>
+                    </span>
+                    <Button variant="ghost" className="h-8 px-2.5 rounded-lg border border-border/50 text-xs font-bold hover:bg-purple-50 hover:text-purple-600 transition-colors shrink-0" disabled={servicesPage === Math.max(1, Math.ceil(localServices.length / servicesPageSize))} onClick={() => setServicesPage(p => p + 1)}>Siguiente</Button>
                   </div>
                 ) : viewMode === 'FAMILIES' && !activeFamily && !search ? (
-                  <div className="flex items-center gap-1.5 overflow-x-auto py-1 max-w-full no-scrollbar">
+                  <div className="flex items-center gap-1.5 overflow-x-auto whitespace-nowrap scrollbar-hide flex-1 min-w-0 mr-2 no-scrollbar">
                     {familyPagePills.map((pill) => (
                       <button
                         key={pill.page}
                         type="button"
                         onClick={() => setFamilyPage(pill.page)}
-                        className={`h-9 px-3.5 rounded-xl text-xs font-black transition-all whitespace-nowrap cursor-pointer shadow-sm ${familyPage === pill.page
-                            ? "bg-emerald-600 text-white shadow-emerald-500/20 scale-105"
-                            : "bg-background border-2 border-border/60 text-muted-foreground hover:border-emerald-500/50 hover:text-emerald-600 hover:bg-emerald-50/50"
+                        className={`h-8 px-3 rounded-lg text-xs font-black transition-all whitespace-nowrap cursor-pointer shadow-sm ${familyPage === pill.page
+                          ? "bg-emerald-600 text-white shadow-emerald-500/20"
+                          : "bg-background border border-border/60 text-muted-foreground hover:border-emerald-500/50 hover:text-emerald-600 hover:bg-emerald-50/50"
                           }`}
                       >
                         {pill.label}
@@ -1008,65 +1099,69 @@ export default function POSPage() {
                     ))}
                   </div>
                 ) : (
-                  <div></div>
+                  <div className="flex-1 min-w-0"></div>
                 )}
 
-                {localServices.length > 0 && (
+                {/* Control Segmentado de Pestañas (Tab Toggle) */}
+                <div className="flex bg-secondary/40 p-1 rounded-xl border border-border shrink-0">
                   <button
-                    onClick={() => {
-                      setNumpadProduct(null);
-                      if (viewMode === 'SERVICES') {
-                        setViewMode('FAMILIES');
-                        setActiveFamily(null);
-                      } else {
-                        setViewMode('SERVICES');
-                        setActiveFamily(null);
-                      }
-                    }}
-                    className={`h-11 px-5 rounded-2xl font-black text-xs uppercase tracking-wider transition-all flex items-center gap-2 shadow-sm ${viewMode === 'SERVICES'
-                        ? 'bg-purple-600 text-white shadow-purple-500/20'
-                        : 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:opacity-90 active:scale-95'
+                    type="button"
+                    onClick={() => { setViewMode('FAMILIES'); setActiveFamily(null); setNumpadProduct(null); }}
+                    className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-all flex items-center gap-1.5 cursor-pointer ${viewMode === 'FAMILIES'
+                      ? "bg-card text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
                       }`}
                   >
-                    <Scissors className="w-4 h-4" />
-                    {viewMode === 'SERVICES' ? 'Volver a Telas' : 'Servicios'}
+                    <Layers className="w-3.5 h-3.5" />
+                    <span>Telas</span>
                   </button>
-                )}
+                  <button
+                    type="button"
+                    onClick={() => { setViewMode('SERVICES'); setActiveFamily(null); setNumpadProduct(null); }}
+                    className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-all flex items-center gap-1.5 cursor-pointer ${viewMode === 'SERVICES'
+                      ? "bg-purple-600 text-white shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                      }`}
+                  >
+                    <Scissors className="w-3.5 h-3.5" />
+                    <span>Servicios</span>
+                  </button>
+                </div>
               </div>
               {viewMode === 'SERVICES' ? (
-                <div className="p-6">
-                  <h2 className="text-sm font-bold text-muted-foreground uppercase tracking-wider mb-4">Todos los Servicios</h2>
-                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="p-3 sm:p-6">
+                  <h2 className="h-8 flex items-center shrink-0 whitespace-nowrap text-xs sm:text-sm font-bold text-muted-foreground uppercase tracking-wider mb-3">Todos los Servicios</h2>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-4">
                     {localServices.slice((servicesPage - 1) * servicesPageSize, servicesPage * servicesPageSize).map((svc) => (
                       <button key={svc.id} onClick={() => {
                         const productObj: Product = { id: svc.id, familyId: 'SERVICE', name: svc.name, code: 'SVC', price: 0, is_service: true };
                         const existing = cart.find(i => i.id === svc.id);
                         openNumpad(productObj, existing);
                       }}
-                        className="flex flex-col items-center justify-center p-6 bg-purple-50 border-2 border-purple-200 hover:bg-purple-100 transition-all active:scale-[0.96] rounded-2xl shadow-sm text-center gap-3 cursor-pointer text-purple-700">
-                        <div className="text-xl font-black uppercase tracking-tight">{svc.name}</div>
+                        className="flex flex-col items-center justify-center p-3 sm:p-6 bg-purple-50 border-2 border-purple-200 hover:bg-purple-100 transition-all active:scale-[0.96] rounded-2xl shadow-sm text-center gap-2 cursor-pointer text-purple-700">
+                        <div className="text-sm sm:text-xl font-black uppercase tracking-tight line-clamp-2">{svc.name}</div>
                       </button>
                     ))}
                     {localServices.length === 0 && (
-                      <div className="col-span-full py-12 text-center text-muted-foreground text-lg">No hay servicios registrados.</div>
+                      <div className="col-span-full py-12 text-center text-muted-foreground text-base sm:text-lg">No hay servicios registrados.</div>
                     )}
                   </div>
                 </div>
               ) : !activeFamily && !search ? (
-                <div className="p-6 flex flex-col h-full">
-                  <h2 className="text-sm font-bold text-muted-foreground uppercase tracking-wider mb-4">Familias de Tela</h2>
-                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 flex-1 content-start">
+                <div className="p-3 sm:p-6 flex flex-col h-full">
+                  <h2 className="h-8 flex items-center shrink-0 whitespace-nowrap text-xs sm:text-sm font-bold text-muted-foreground uppercase tracking-wider mb-3">Familias de Tela</h2>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-4 flex-1 content-start">
                     {families.slice((familyPage - 1) * familyPageSize, familyPage * familyPageSize).map((fam) => (
                       <button key={fam.id} onClick={() => { setActiveFamily(fam); setNumpadProduct(null); }}
-                        className="text-left p-3 rounded-2xl border-2 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer shadow-sm bg-emerald-50 border-emerald-200 text-emerald-800 hover:bg-emerald-100 flex flex-col items-start gap-1">
-                        <div className="text-2xl font-black mb-1 opacity-80">{fam.code}</div>
-                        <div className="text-base font-semibold tracking-tight">{fam.name}</div>
+                        className="text-left p-2.5 sm:p-3 rounded-2xl border-2 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer shadow-sm bg-emerald-50 border-emerald-200 text-emerald-800 hover:bg-emerald-100 flex flex-col items-start gap-1 min-w-0">
+                        <div className="text-lg sm:text-2xl font-black mb-0.5 opacity-80">{fam.code}</div>
+                        <div className="text-xs sm:text-base font-semibold tracking-tight truncate w-full">{fam.name}</div>
                       </button>
                     ))}
                   </div>
                 </div>
               ) : (
-                <div className="p-6 space-y-8">
+                <div className="p-4 sm:p-6 space-y-6 sm:space-y-8">
                   {search ? (
                     <>
                       <div className="flex justify-between items-center">
@@ -1107,10 +1202,10 @@ export default function POSPage() {
                         <div className="py-12 text-center text-muted-foreground text-lg">Sin resultados para "{search}".</div>
                       )}
                       {totalSearchPages > 1 && (
-                        <div className="flex justify-center gap-3 border-t border-border/55 pt-6">
+                        <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap scrollbar-hide border-t border-border/55 pt-4 pb-2">
                           {Array.from({ length: totalSearchPages }).map((_, i) => (
                             <Button key={i + 1} variant={searchPage === i + 1 ? "default" : "outline"}
-                              className="h-14 px-8 text-lg rounded-2xl font-bold" onClick={() => setSearchPage(i + 1)}>
+                              className="h-10 px-4 text-xs sm:text-sm rounded-xl font-bold whitespace-nowrap shrink-0" onClick={() => setSearchPage(i + 1)}>
                               {i * searchPageSize + 1}–{Math.min((i + 1) * searchPageSize, combinedSearchResults.length)}
                             </Button>
                           ))}
@@ -1119,19 +1214,19 @@ export default function POSPage() {
                     </>
                   ) : (
                     <>
-                      <h2 className="text-sm font-bold text-muted-foreground uppercase tracking-wider">
+                      <h2 className="h-8 flex items-center shrink-0 whitespace-nowrap text-xs sm:text-sm font-bold text-muted-foreground uppercase tracking-wider mb-3">
                         Familia {activeFamily?.code} — {activeFamily?.name}
                       </h2>
-                      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-4">
                         {matchedProducts.map((product) => (
                           <button key={product.id} onClick={() => openNumpad(product)}
-                            className="flex flex-col items-center justify-center p-3 bg-glass border-2 border-border hover:border-primary/50 transition-all active:scale-[0.96] rounded-2xl shadow-sm text-center gap-2 cursor-pointer">
-                            <div className="text-sm font-black uppercase tracking-tight"><span className="font-mono text-primary mr-1.5">{product.code}</span>{product.name}</div>
-                            <div className="text-lg font-black text-primary">S/ {product.price.toFixed(2)}</div>
+                            className="flex flex-col items-center justify-center p-2.5 sm:p-3 bg-glass border-2 border-border hover:border-primary/50 transition-all active:scale-[0.96] rounded-xl sm:rounded-2xl shadow-sm text-center gap-1 cursor-pointer min-w-0">
+                            <div className="text-[11px] sm:text-sm font-bold uppercase tracking-tight truncate w-full"><span className="font-mono text-primary mr-1">{product.code}</span>{product.name}</div>
+                            <div className="text-xs sm:text-lg font-black text-primary">S/ {product.price.toFixed(2)}</div>
                           </button>
                         ))}
                         {matchedProducts.length === 0 && (
-                          <div className="col-span-full py-12 text-center text-muted-foreground text-lg">Sin telas en esta categoría.</div>
+                          <div className="col-span-full py-12 text-center text-muted-foreground text-sm sm:text-lg">Sin telas en esta categoría.</div>
                         )}
                       </div>
                     </>
@@ -1139,90 +1234,6 @@ export default function POSPage() {
                 </div>
               )}
             </div>
-            {numpadProduct && (
-              <div className="flex flex-col justify-center items-center p-4 bg-background h-full overflow-auto">
-                <div className="w-full max-w-[540px] bg-card rounded-3xl border-2 border-border/50 flex flex-col animate-in zoom-in-95 duration-200">
-                  {/* Header */}
-                  <div className="p-4 border-b border-border bg-surface text-center shrink-0">
-                    <div className="flex items-center justify-center gap-3">
-                      <span className="font-mono text-base font-black text-muted-foreground bg-secondary px-3 py-1 rounded-lg">{numpadProduct.code}</span>
-                      <h3 className="text-lg font-black uppercase text-primary">{numpadProduct.name}</h3>
-                    </div>
-                  </div>
-
-                  {/* Campos Precio Fijo / Variable y Cantidad */}
-                  <div className="px-4 pt-3 pb-2 bg-secondary/10 border-b border-border flex flex-col gap-2">
-                    {!numpadProduct.is_service && (
-                      <div className="flex gap-3">
-                        <div className="flex-1 bg-background rounded-xl border-2 border-border p-2.5 text-center opacity-60">
-                          <div className="text-[10px] font-bold text-muted-foreground uppercase mb-0.5">Precio Fijo</div>
-                          <div className="text-xl font-bold">S/ {numpadProduct.price.toFixed(2)}</div>
-                        </div>
-                        <div className={`flex-1 rounded-xl border-2 p-2.5 text-center cursor-pointer transition-all ${numpadField === "price" ? "border-primary bg-primary/10" : "border-border bg-background"}`}
-                          onClick={() => setNumpadField("price")}>
-                          <div className={`text-[10px] font-bold uppercase mb-0.5 ${numpadField === "price" ? "text-primary" : "text-muted-foreground"}`}>Precio Variable</div>
-                          <div className={`text-xl font-bold ${numpadField === "price" ? "text-primary" : "text-foreground"}`}>S/ {numpadPrice || "0.00"}</div>
-                        </div>
-                      </div>
-                    )}
-                    {numpadProduct.is_service && (
-                      <div className="flex gap-3">
-                        <div className={`flex-1 rounded-xl border-2 p-2.5 text-center cursor-pointer transition-all border-purple-500 bg-purple-500/10`}
-                          onClick={() => setNumpadField("price")}>
-                          <div className={`text-[10px] font-bold uppercase mb-0.5 text-purple-600`}>Precio del Servicio</div>
-                          <div className={`text-xl font-bold text-foreground`}>S/ {numpadPrice || "0.00"}</div>
-                        </div>
-                      </div>
-                    )}
-                    {!numpadProduct.is_service && (
-                      <div className={`w-full rounded-xl border-2 p-2.5 text-center cursor-pointer transition-all flex items-center justify-center gap-3 ${numpadField === "qty" ? "border-emerald-500 bg-emerald-500/10" : "border-border bg-background"}`}
-                        onClick={() => setNumpadField("qty")}>
-                        <div className={`text-xs font-bold uppercase ${numpadField === "qty" ? "text-emerald-600" : "text-muted-foreground"}`}>Cantidad:</div>
-                        <div className={`text-4xl font-black font-mono tracking-tighter ${numpadField === "qty" ? "text-emerald-500" : "text-foreground"}`}>{numpadQty || "0"}</div>
-                        <div className={`text-base font-bold uppercase ${numpadField === "qty" ? "text-emerald-600" : "text-muted-foreground"}`}>
-                          mts
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Teclado numérico — botones más pequeños para tablet */}
-                  <div className="px-4 pt-3 pb-2 grid grid-cols-3 gap-1.5 bg-card">
-                    {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((num) => (
-                      <button key={num} onClick={() => handleNumpadKey(num)}
-                        className="h-10 text-2xl font-black rounded-xl bg-secondary/50 border-2 border-transparent hover:border-primary active:bg-primary active:text-white transition-colors touch-manipulation">
-                        {num}
-                      </button>
-                    ))}
-                    <button onClick={() => numpadField === "price" && handleNumpadKey(".")}
-                      className={`h-10 text-2xl font-black rounded-xl border-2 border-transparent transition-colors touch-manipulation ${numpadField === "price" ? "bg-secondary/50 hover:border-primary active:bg-primary active:text-white" : "bg-secondary/20 text-muted-foreground/30 cursor-not-allowed"}`}>
-                      .
-                    </button>
-                    <button onClick={() => handleNumpadKey("0")} className="h-10 text-2xl font-black rounded-xl bg-secondary/50 border-2 border-transparent hover:border-primary active:bg-primary active:text-white transition-colors touch-manipulation">0</button>
-                    <button onClick={() => handleNumpadKey("DEL")} className="h-10 flex items-center justify-center rounded-xl bg-red-500/10 text-red-500 border-2 border-transparent active:bg-red-500 active:text-white transition-colors touch-manipulation">
-                      <Delete className="w-6 h-6" />
-                    </button>
-                  </div>
-
-                  {/* Preview subtotal y botones de acción */}
-                  <div className="px-4 pb-4 pt-2 flex flex-col gap-2.5">
-                    <div className="bg-background border-2 border-border rounded-xl p-3 flex items-center justify-between gap-4">
-                      <div className="text-sm font-mono font-bold text-muted-foreground">
-                        {numpadProduct.is_service ? `S/ ${previewPrice.toFixed(2)}` : `${previewQty} MTS × S/ ${previewPrice.toFixed(2)}`}
-                      </div>
-                      <div className="text-2xl font-black text-emerald-500 font-mono">S/ {previewSubtotal.toFixed(2)}</div>
-                    </div>
-                    <div className="flex gap-3">
-                      <Button variant="outline" className="h-14 flex-1 text-base font-bold uppercase rounded-2xl border-2" onClick={() => setNumpadProduct(null)}>Cancelar</Button>
-                      <Button className="h-14 flex-[2] text-xl font-black uppercase rounded-2xl shadow-xl" onClick={handleNumpadOk}
-                        disabled={(!numpadProduct.is_service && (!numpadQty || parseInt(numpadQty) <= 0)) || !numpadPrice}>
-                        {cart.find((c) => c.id === numpadProduct.id) ? "Actualizar" : "Agregar"}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -1230,7 +1241,15 @@ export default function POSPage() {
       {/* ════════════════════════════════════════
           RIGHT PANEL — Proforma + Emitir + Historial
           ════════════════════════════════════════ */}
-      <div className="w-full lg:w-[500px] flex flex-col h-[50dvh] lg:h-full bg-surface shadow-xl z-20 shrink-0 border-t lg:border-t-0 lg:border-l border-border">
+      <div className={`w-full lg:w-[360px] xl:w-[440px] 2xl:w-[500px] flex flex-col h-full bg-surface shadow-xl z-20 shrink-0 border-t lg:border-t-0 lg:border-l border-border ${mobileTab === 'cart' ? 'flex' : 'hidden lg:flex'} ${!isCajaOpen ? 'pointer-events-none opacity-40 select-none' : ''}`}>
+
+        {/* Header en móvil para volver al catálogo */}
+        <div className="lg:hidden flex items-center justify-between p-3 border-b border-border bg-card">
+          <Button variant="ghost" size="sm" className="gap-2 font-bold text-xs" onClick={() => setMobileTab('catalog')}>
+            <ArrowLeft className="w-4 h-4" /> Volver al Catálogo
+          </Button>
+          <span className="font-black text-sm uppercase text-primary">Proforma Actual</span>
+        </div>
 
         <div className="px-5 pt-5 pb-3 border-b border-border bg-card shrink-0 flex flex-col gap-3">
           <div className="flex gap-2 bg-secondary/30 p-1 rounded-xl">
@@ -1263,7 +1282,7 @@ export default function POSPage() {
         {rightPanelMode === 'cart' ? (
           <>
             {/* Cart items */}
-            <div className="flex-1 overflow-auto p-2 space-y-1 bg-secondary/5">
+            <div className="flex-1 overflow-auto p-2 space-y-1 bg-secondary/5 pb-20 lg:pb-2">
               {cart.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-muted-foreground gap-4 opacity-40">
                   <ShoppingCart className="w-20 h-20" />
@@ -1330,7 +1349,7 @@ export default function POSPage() {
             </div>
 
             {/* Footer Cart */}
-            <div className="p-3 border-t border-border bg-card shadow-[0_-8px_30px_rgba(0,0,0,0.06)] shrink-0">
+            <div className="p-3 border-t border-border bg-card shadow-[0_-8px_30px_rgba(0,0,0,0.06)] shrink-0 pb-20 lg:pb-3">
               {/* Botones de Servicios de Acceso Rápido */}
               {quickAccessServices.length > 0 && (
                 <div className="mb-2 flex gap-2">
@@ -1342,8 +1361,8 @@ export default function POSPage() {
                         onClick={() => openNumpad({ id: svc.id, familyId: 'SERVICE', name: svc.name, code: 'SVC', price: 0, is_service: true }, existing)}
                         variant="outline"
                         className={`flex-1 h-8 border-dashed border-2 font-bold text-[10px] flex items-center justify-center gap-2 transition-colors uppercase ${existing
-                            ? (idx === 1 ? "border-orange-400 text-orange-600 bg-orange-50 hover:bg-orange-100" : "border-purple-400 text-purple-600 bg-purple-50 hover:bg-purple-100")
-                            : "hover:bg-primary/5 hover:text-primary"
+                          ? (idx === 1 ? "border-orange-400 text-orange-600 bg-orange-50 hover:bg-orange-100" : "border-purple-400 text-purple-600 bg-purple-50 hover:bg-purple-100")
+                          : "hover:bg-primary/5 hover:text-primary"
                           }`}
                       >
                         <Scissors className="w-3 h-3" />
@@ -1387,7 +1406,7 @@ export default function POSPage() {
           </>
         ) : (
           /* History items */
-          <div className="flex-1 overflow-auto p-4 space-y-3 bg-secondary/5">
+          <div className="flex-1 overflow-auto p-4 space-y-3 bg-secondary/5 pb-20 lg:pb-4">
             <div className="flex items-center justify-between mb-4">
               <span className="text-xs font-bold text-muted-foreground uppercase">Proformas de Hoy</span>
               <button onClick={fetchHistory} className="p-2 bg-secondary rounded-lg hover:bg-secondary/80 transition-colors text-muted-foreground">
@@ -1403,57 +1422,67 @@ export default function POSPage() {
               historyTickets.map((ticket) => {
                 const ticketNo = parseInternalTicketNum(ticket);
                 const sunatDoc = starsoftDocNum(ticket);
+                const statusBorderColor = ticket.status === 'PENDING'
+                  ? 'border-orange-500/30 hover:border-orange-500/60'
+                  : ticket.status === 'COMPLETED'
+                    ? 'border-emerald-500/30 hover:border-emerald-500/60'
+                    : 'border-red-500/30 hover:border-red-500/60';
+
+                const statusNumberColor = ticket.status === 'PENDING'
+                  ? 'text-orange-600'
+                  : ticket.status === 'COMPLETED'
+                    ? 'text-emerald-600'
+                    : 'text-red-500';
+
                 return (
-                  <Card key={ticket.id} className="bg-background border-border shadow-sm rounded-xl overflow-hidden">
-                    <CardContent className="p-3 flex flex-col gap-1.5">
-                      <div className="flex items-start justify-between">
-                        <div className="flex flex-col min-w-0">
-                          <div className="text-base font-black text-foreground">
+                  <Card key={ticket.id} className={`bg-background shadow-sm rounded-xl overflow-hidden transition-all border-2 ${statusBorderColor}`}>
+                    <CardContent className="p-2.5 flex flex-col gap-1">
+                      {/* Fila 1: Ticket # + Monto Destacado + Badge Estado */}
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className={`text-xs sm:text-sm font-black shrink-0 ${statusNumberColor}`}>
                             {formatTicketHash(ticketNo)}
-                            <span className="text-[10px] text-muted-foreground font-mono ml-2">
-                              ({ticket.proforma_number})
-                            </span>
-                          </div>
-                          {ticket.invoice_number && (
-                            <span className="text-[10px] text-emerald-600 font-mono mt-0.5 font-bold">
-                              Doc: {ticket.invoice_number}
-                            </span>
-                          )}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground font-mono truncate">
+                            ({ticket.proforma_number || ticket.invoice_number})
+                          </span>
                         </div>
-                        <div className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md uppercase ${ticket.status === 'PENDING' ? 'bg-orange-500/20 text-orange-600' : ticket.status === 'COMPLETED' ? 'bg-emerald-500/20 text-emerald-600' : 'bg-red-500/20 text-red-600'}`}>
-                          {ticket.status === 'PENDING' ? 'Pendiente' : ticket.status === 'COMPLETED' ? 'Pagado' : 'Anulado'}
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className={`font-black text-xs sm:text-sm font-mono ${ticket.status === 'PENDING' ? 'text-amber-600' : ticket.status === 'COMPLETED' ? 'text-emerald-600' : 'text-muted-foreground line-through'}`}>
+                            S/ {ticket.total.toFixed(2)}
+                          </span>
+                          <span className={`text-[9px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider ${ticket.status === 'PENDING' ? 'bg-orange-500/15 text-orange-600 border border-orange-500/30' : ticket.status === 'COMPLETED' ? 'bg-emerald-500/15 text-emerald-600 border border-emerald-500/30' : 'bg-red-500/15 text-red-600 border border-red-500/30'}`}>
+                            {ticket.status === 'PENDING' ? 'PENDIENTE' : ticket.status === 'COMPLETED' ? 'ATENDIDA' : 'ANULADA'}
+                          </span>
                         </div>
                       </div>
-                      <div className="flex justify-between items-center text-xs mt-0.5">
-                        <span className="text-muted-foreground font-mono">{new Date(ticket.created_at).toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" })}</span>
-                        <span className={`font-black text-sm ${ticket.status === 'PENDING' ? 'text-orange-500' :
-                            ticket.status === 'COMPLETED' ? 'text-emerald-500' :
-                              'text-muted-foreground line-through'
-                          }`}>
-                          S/ {ticket.total.toFixed(2)}
+
+                      {/* Fila 2: Información en una sola línea (Hora • Usuario • Estado cobro) */}
+                      <div className="flex items-center gap-2 text-[10px] text-muted-foreground flex-wrap leading-none py-0.5">
+                        <span className="font-mono">
+                          {new Date(ticket.created_at).toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" })}
+                        </span>
+                        {permissions?.view_cashier_name && (
+                          <>
+                            <span>•</span>
+                            <span className="font-bold text-muted-foreground uppercase tracking-wider text-[10px]">
+                              ATENDIDO POR: {(ticket as any).seller?.username || 'ADMIN'}
+                            </span>
+                          </>
+                        )}
+                        <span>•</span>
+                        <span className={ticket.status === 'PENDING' ? 'text-orange-500 font-medium' : ticket.status === 'COMPLETED' ? 'text-emerald-600 font-medium' : 'text-red-500 font-medium'}>
+                          {ticket.status === 'PENDING' ? 'Sin cobrar' : ticket.status === 'COMPLETED' ? 'Cobrado' : ''}
                         </span>
                       </div>
-                      <div className="flex flex-col gap-0.5 mt-1">
-                        {permissions?.view_cashier_name && (
-                          <div className={`text-[10px] font-bold uppercase ${ticket.status === 'PENDING' ? 'text-orange-600/90' :
-                              ticket.status === 'COMPLETED' ? 'text-emerald-600' :
-                                'text-muted-foreground'
-                            }`}>
-                            ATENDIDO POR: {(ticket as any).seller?.username || 'ADMIN'}
-                          </div>
-                        )}
-                        {ticket.status === 'PENDING' && (
-                          <div className="text-[10px] font-medium text-orange-500/80">
-                            Aún no se ha cobrado
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex gap-2 mt-2">
+
+                      {/* Fila 3: Botones Compactos */}
+                      <div className="flex items-center justify-end gap-1.5 pt-0.5">
                         <button
                           onClick={() => handleReprint(ticket)}
-                          className="flex-1 py-1.5 bg-secondary/50 hover:bg-secondary rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition-colors"
+                          className="h-7 px-2.5 bg-secondary/60 hover:bg-secondary border border-border rounded-lg text-[10px] font-bold flex items-center gap-1 transition-colors"
                         >
-                          <Printer className="w-3.5 h-3.5" /> REIMPRIMIR
+                          <Printer className="w-3 h-3 text-muted-foreground" /> Reimprimir
                         </button>
                         <button
                           onClick={() => {
@@ -1505,19 +1534,205 @@ export default function POSPage() {
                             };
                             setPreviewTicketData(saleDataForPrint);
                           }}
-                          className="flex-1 py-2 bg-secondary/20 hover:bg-secondary/40 text-foreground rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-colors border border-border"
+                          className="h-7 px-2.5 bg-secondary/30 hover:bg-secondary/60 text-foreground border border-border rounded-lg text-[10px] font-bold flex items-center gap-1 transition-colors"
                         >
-                          <Eye className="w-4 h-4" /> VISTA PREVIA
+                          <Eye className="w-3 h-3 text-muted-foreground" /> Vista previa
                         </button>
                       </div>
                     </CardContent>
                   </Card>
-                )
+                );
               })
+            )}
+
+            {isApkMode && pendingSales.length > 0 && (
+              <div className="mt-4 border-t pt-4">
+                <div className="flex items-center justify-between mb-3 px-1">
+                  <h3 className="text-sm font-bold flex items-center gap-2 text-muted-foreground">
+                    <CloudOff className="w-4 h-4" />
+                    Proformas Pendientes ({pendingSales.length})
+                  </h3>
+                </div>
+                <div className="flex flex-col gap-2">
+                  {pendingSales.map(ps => (
+                    <Card key={ps.local_id} className="bg-background border-border shadow-sm rounded-xl overflow-hidden opacity-90">
+                      <CardContent className="p-3 flex flex-col gap-1.5">
+                        <div className="flex items-start justify-between">
+                          <div className="flex flex-col min-w-0">
+                            <div className="text-base font-black text-foreground">
+                              {ps.offline_uuid ? 'LOCAL-' + ps.offline_uuid.substring(0, 4).toUpperCase() : 'N/A'}
+                            </div>
+                            <span className="text-[10px] text-muted-foreground font-mono mt-0.5">
+                              En espera de subida
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="text-[10px] font-bold px-1.5 py-0.5 rounded-md uppercase bg-orange-500/20 text-orange-600">
+                              LOCAL
+                            </div>
+                            {ps.sync_status === 'SYNCING' && <span title="Sincronizando..."><CloudUpload className="w-4 h-4 text-blue-500 animate-pulse" /></span>}
+                            {ps.sync_status === 'ERROR' && <span title={ps.sync_error || "Error"}><CloudAlert className="w-4 h-4 text-red-500" /></span>}
+                            {(ps.sync_status === 'PENDING' || !ps.sync_status) && <span title="Pendiente"><CloudOff className="w-4 h-4 text-orange-500" /></span>}
+                            {ps.sync_status === 'SYNCED' && <span title="Sincronizado"><Cloud className="w-4 h-4 text-emerald-500" /></span>}
+                          </div>
+                        </div>
+                        <div className="flex justify-between items-center text-xs mt-0.5">
+                          <span className="text-muted-foreground font-mono">
+                            {new Date(ps.created_at).toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" })}
+                          </span>
+                          <span className="font-black text-sm text-foreground">
+                            S/ {ps.total.toFixed(2)}
+                          </span>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
         )}
       </div>
+
+      {/* ════════════════════════════════════════
+          BARRA DE NAVEGACIÓN INFERIOR (MÓVIL)
+          ════════════════════════════════════════ */}
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-background/95 backdrop-blur border-t border-border px-4 py-2 flex items-center justify-around gap-2 shadow-2xl h-16">
+        <button
+          type="button"
+          onClick={() => setMobileTab('catalog')}
+          className={`flex-1 flex flex-col items-center justify-center py-2 px-3 rounded-xl transition-all ${mobileTab === 'catalog'
+            ? 'bg-primary/10 text-primary font-black scale-105'
+            : 'text-muted-foreground hover:bg-secondary/50 font-semibold'
+            }`}
+        >
+          <div className="flex items-center gap-1.5 text-xs uppercase tracking-wider">
+            <Search className="w-4 h-4" />
+            <span>Catálogo</span>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setMobileTab('cart')}
+          className={`flex-1 flex flex-col items-center justify-center py-2 px-3 rounded-xl transition-all ${mobileTab === 'cart'
+            ? 'bg-emerald-500/10 text-emerald-600 font-black scale-105'
+            : 'text-muted-foreground hover:bg-secondary/50 font-semibold'
+            }`}
+        >
+          <div className="flex items-center gap-1.5 text-xs uppercase tracking-wider relative">
+            <ShoppingCart className="w-4 h-4" />
+            <span>Proforma</span>
+            {cart.length > 0 && (
+              <span className="ml-1 bg-emerald-600 text-white text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-full leading-none shadow-sm">
+                {cart.length}
+              </span>
+            )}
+          </div>
+        </button>
+      </div>
+
+      {/* ════════════════════════════════════════
+          FULLSCREEN NUMPAD MODAL (Global Overlay)
+          ════════════════════════════════════════ */}
+      {numpadProduct && (
+        <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
+          <div className="w-full max-w-sm sm:max-w-md bg-card rounded-3xl p-3 sm:p-5 flex flex-col gap-2 shadow-2xl justify-start h-auto max-h-[92vh] overflow-y-auto border border-border/60">
+            {/* Header */}
+            <div className="pb-2 border-b border-border bg-surface/50 rounded-2xl text-center shrink-0 flex items-center justify-between gap-2">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="w-8 h-8 rounded-full sm:hidden"
+                onClick={() => setNumpadProduct(null)}
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </Button>
+              <div className="flex-1 flex items-center justify-center gap-2 min-w-0">
+                <span className="font-mono text-xs sm:text-sm font-black text-muted-foreground bg-secondary px-2 py-0.5 rounded-lg shrink-0">{numpadProduct.code}</span>
+                <h3 className="text-sm sm:text-base font-black uppercase text-primary truncate max-w-[180px] sm:max-w-none">{numpadProduct.name}</h3>
+              </div>
+              <button
+                onClick={() => setNumpadProduct(null)}
+                className="w-8 h-8 rounded-full bg-secondary/50 hover:bg-secondary text-muted-foreground hover:text-foreground flex items-center justify-center transition-colors shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Quantity and Price Inputs */}
+            <div className="p-2.5 bg-secondary/10 border border-border/60 rounded-2xl flex flex-col gap-2 shrink-0">
+              {!numpadProduct.is_service && (
+                <div className="flex gap-2 sm:gap-3">
+                  <div className="flex-1 bg-background rounded-xl border-2 border-border p-2 text-center opacity-60">
+                    <div className="text-[9px] sm:text-[10px] font-bold text-muted-foreground uppercase mb-0.5">Precio Fijo</div>
+                    <div className="text-xs sm:text-lg font-bold">S/ {numpadProduct.price.toFixed(2)}</div>
+                  </div>
+                  <div className={`flex-1 rounded-xl border-2 p-2 text-center cursor-pointer transition-all ${numpadField === "price" ? "border-primary bg-primary/10" : "border-border bg-background"}`}
+                    onClick={() => setNumpadField("price")}>
+                    <div className={`text-[9px] sm:text-[10px] font-bold uppercase mb-0.5 ${numpadField === "price" ? "text-primary" : "text-muted-foreground"}`}>Precio Variable</div>
+                    <div className={`text-xs sm:text-lg font-bold ${numpadField === "price" ? "text-primary" : "text-foreground"}`}>S/ {numpadPrice || "0.00"}</div>
+                  </div>
+                </div>
+              )}
+              {numpadProduct.is_service && (
+                <div className="flex gap-2 sm:gap-3">
+                  <div className={`flex-1 rounded-xl border-2 p-2 text-center cursor-pointer transition-all border-purple-500 bg-purple-500/10`}
+                    onClick={() => setNumpadField("price")}>
+                    <div className={`text-[9px] sm:text-[10px] font-bold uppercase mb-0.5 text-purple-600`}>Precio del Servicio</div>
+                    <div className={`text-xs sm:text-lg font-bold text-foreground`}>S/ {numpadPrice || "0.00"}</div>
+                  </div>
+                </div>
+              )}
+              {!numpadProduct.is_service && (
+                <div className={`w-full rounded-xl border-2 p-2 text-center cursor-pointer transition-all flex items-center justify-center gap-2 ${numpadField === "qty" ? "border-emerald-500 bg-emerald-500/10" : "border-border bg-background"}`}
+                  onClick={() => setNumpadField("qty")}>
+                  <div className={`text-xs font-bold uppercase ${numpadField === "qty" ? "text-emerald-600" : "text-muted-foreground"}`}>Cantidad:</div>
+                  <div className={`text-2xl sm:text-3xl font-black font-mono tracking-tighter ${numpadField === "qty" ? "text-emerald-500" : "text-foreground"}`}>{numpadQty || "0"}</div>
+                  <div className={`text-xs sm:text-sm font-bold uppercase ${numpadField === "qty" ? "text-emerald-600" : "text-muted-foreground"}`}>
+                    mts
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Keypad Grid */}
+            <div className="grid grid-cols-3 gap-1.5 shrink-0 pt-1">
+              {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((num) => (
+                <button key={num} onClick={() => handleNumpadKey(num)}
+                  className="h-10 sm:h-11 text-lg sm:text-xl font-black rounded-xl bg-secondary/60 border-2 border-transparent hover:border-primary active:bg-primary active:text-white transition-colors touch-manipulation cursor-pointer">
+                  {num}
+                </button>
+              ))}
+              <button onClick={() => numpadField === "price" && handleNumpadKey(".")}
+                className={`h-10 sm:h-11 text-lg sm:text-xl font-black rounded-xl border-2 border-transparent transition-colors touch-manipulation cursor-pointer ${numpadField === "price" ? "bg-secondary/60 hover:border-primary active:bg-primary active:text-white" : "bg-secondary/20 text-muted-foreground/30 cursor-not-allowed"}`}>
+                .
+              </button>
+              <button onClick={() => handleNumpadKey("0")} className="h-10 sm:h-11 text-lg sm:text-xl font-black rounded-xl bg-secondary/60 border-2 border-transparent hover:border-primary active:bg-primary active:text-white transition-colors touch-manipulation cursor-pointer">0</button>
+              <button onClick={() => handleNumpadKey("DEL")} className="h-10 sm:h-11 flex items-center justify-center rounded-xl bg-red-500/10 text-red-500 border-2 border-transparent active:bg-red-500 active:text-white transition-colors touch-manipulation cursor-pointer">
+                <Delete className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Preview Subtotal */}
+            <div className="bg-background border-2 border-border rounded-xl p-2 flex items-center justify-between gap-3 shrink-0">
+              <div className="text-xs font-mono font-bold text-muted-foreground">
+                {numpadProduct.is_service ? `S/ ${previewPrice.toFixed(2)}` : `${previewQty} MTS × S/ ${previewPrice.toFixed(2)}`}
+              </div>
+              <div className="text-lg sm:text-xl font-black text-emerald-500 font-mono">S/ {previewSubtotal.toFixed(2)}</div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-2 sm:gap-3 shrink-0 pt-1 pb-1">
+              <Button variant="outline" className="h-11 flex-1 text-xs sm:text-sm font-bold uppercase rounded-xl border-2" onClick={() => setNumpadProduct(null)}>Cancelar</Button>
+              <Button className="h-11 flex-[2] text-sm sm:text-base font-black uppercase rounded-xl shadow-xl bg-primary text-primary-foreground hover:bg-primary/90" onClick={handleNumpadOk}
+                disabled={(!numpadProduct.is_service && (!numpadQty || parseInt(numpadQty) <= 0)) || !numpadPrice}>
+                {cart.find((c) => c.id === numpadProduct.id) ? "Actualizar" : "Agregar"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modales obsoletos eliminados */}
 
@@ -1610,7 +1825,7 @@ export default function POSPage() {
               Vista Previa de Impresión
             </DialogTitle>
           </DialogHeader>
-          <div className="py-2">
+          <div className="py-2 overflow-x-auto max-w-full font-mono text-xs">
             {previewTicketData && (
               <ReceiptPreview
                 maxChars={activePrinter?.max_chars || 42}
@@ -1632,7 +1847,7 @@ export default function POSPage() {
           <DialogHeader className="mb-4">
             <DialogTitle className="text-xl font-black text-slate-800 flex items-center gap-2">
               <span className="text-red-500">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /><line x1="10" x2="10" y1="11" y2="17" /><line x1="14" x2="14" y1="11" y2="17" /></svg>
               </span>
               ¿Vaciar proforma actual?
             </DialogTitle>

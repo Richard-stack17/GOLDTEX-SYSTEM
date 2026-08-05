@@ -73,12 +73,20 @@ export interface LocalEmployee {
 
 export interface PendingSale {
   local_id?: number; // Auto-incremented por Dexie
-  id?: string; // ID real si se generó, o nulo si es 100% local
+  offline_uuid: string; // UUID v4 generado localmente — NUNCA cambia
+  id?: string | null; // ID real de Supabase (se llena tras la sync exitosa)
+  store_id: string | null;
+  seller_id: string | null;
+  cashier_id: string | null;
   customer_id: string | null;
   total: number;
   status: string;
   created_at: string;
   items: any[]; // Detalles de la venta
+  sync_status: 'PENDING' | 'SYNCING' | 'SYNCED' | 'ERROR';
+  sync_error?: string | null;
+  retry_count: number;
+  synced_at?: string | null;
 }
 
 export class GoltexPosDB extends Dexie {
@@ -94,11 +102,11 @@ export class GoltexPosDB extends Dexie {
 
   constructor() {
     super('GoltexPosDB');
-    this.version(8).stores({ // v8: added sales, transactions, employees
+    this.version(9).stores({ // v8: added sales, transactions, employees. v9: updated pending_sales
       products: 'id, family_id, name, sku, price, stock',
       families: 'id, name, code',
       services: 'id, name, is_quick_access',
-      pending_sales: '++local_id, id, customer_id, total, status, created_at',
+      pending_sales: '++local_id, offline_uuid, sync_status, created_at, id, customer_id, total, status',
       profiles: 'id, username, employee_id, password_hash, role, email',
       roles: 'id, name',
       sales: 'id, issue_date, status',
@@ -261,5 +269,70 @@ export async function syncCatalog(targetStoreId?: string) {
   } catch (err) {
     console.error("Error sincronizando catálogo:", err);
   }
+}
+
+/**
+ * Función para sincronizar proformas pendientes de forma robusta.
+ * Solo se llamará en modo APK.
+ */
+export async function syncPendingSales() {
+  if (typeof window === 'undefined' || !navigator.onLine) {
+    return 0;
+  }
+
+  let syncedCount = 0;
+  try {
+    const pendingSales = await db.pending_sales
+      .filter(sale => sale.sync_status === 'PENDING' || sale.sync_status === 'ERROR')
+      .toArray();
+
+    if (pendingSales.length === 0) return 0;
+
+    for (const sale of pendingSales) {
+      if (!sale.local_id) continue;
+      
+      // Marcar como sincronizando
+      await db.pending_sales.update(sale.local_id, {
+        sync_status: 'SYNCING'
+      });
+
+      // Extraer datos para Supabase
+      const saleData = {
+        store_id: sale.store_id,
+        seller_id: sale.seller_id,
+        cashier_id: sale.cashier_id,
+        customer_id: sale.customer_id,
+        total: sale.total,
+        status: sale.status,
+        created_at: sale.created_at,
+        issue_date: sale.created_at.split('T')[0], // assuming created_at is ISO string
+        items: sale.items,
+        internal_ticket_number: null,
+        proforma_number: null, // Supabase triggers/functions should generate this
+      };
+
+      const { data, error } = await supabase.from('sales').insert(saleData).select('id').single();
+
+      if (error) {
+        await db.pending_sales.update(sale.local_id, {
+          sync_status: 'ERROR',
+          sync_error: error.message,
+          retry_count: (sale.retry_count || 0) + 1
+        });
+      } else if (data) {
+        await db.pending_sales.update(sale.local_id, {
+          sync_status: 'SYNCED',
+          id: data.id, // Guardar el ID real asignado por Supabase
+          sync_error: null,
+          synced_at: new Date().toISOString()
+        });
+        syncedCount++;
+      }
+    }
+  } catch (err: any) {
+    console.error("Error en syncPendingSales:", err);
+  }
+
+  return syncedCount;
 }
 

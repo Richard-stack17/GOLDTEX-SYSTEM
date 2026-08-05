@@ -39,31 +39,40 @@ export default function HubPage() {
 
   if (!isHydrated || !role || !username) return null;
 
+  const isApkMode = process.env.NEXT_PUBLIC_APP_MODE === 'apk';
+
+  const isModuleAllowed = (key: string, permValue?: boolean) => {
+    if (!permValue) return false;
+    if (!isApkMode) return true;
+    // En modo APK, solo se permiten los módulos móviles (POS y Configuración)
+    return key === "pos" || key === "settings";
+  };
+
   const hasAnyModuleAccess = Boolean(
-    permissions?.access_pos ||
-    permissions?.access_inventory ||
-    permissions?.access_dashboard ||
-    permissions?.access_caja ||
-    permissions?.access_contabilidad ||
-    permissions?.access_clientes ||
-    permissions?.access_personal ||
-    permissions?.access_proformas ||
-    permissions?.access_settings
+    isModuleAllowed("pos", permissions?.access_pos) ||
+    isModuleAllowed("inventory", permissions?.access_inventory) ||
+    isModuleAllowed("dashboard", permissions?.access_dashboard) ||
+    isModuleAllowed("caja", permissions?.access_caja) ||
+    isModuleAllowed("contabilidad", permissions?.access_contabilidad) ||
+    isModuleAllowed("clientes", permissions?.access_clientes) ||
+    isModuleAllowed("personal", permissions?.access_personal) ||
+    isModuleAllowed("proformas", permissions?.access_proformas) ||
+    isModuleAllowed("settings", permissions?.access_settings)
   );
 
 
 
   return (
-    <div className="min-h-screen p-8 max-w-[1400px] mx-auto space-y-12">
-      <header className="flex justify-between items-end border-b border-white/10 pb-6">
+    <div className="min-h-screen p-4 sm:p-6 md:p-8 max-w-[1400px] mx-auto space-y-6 md:space-y-12">
+      <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 border-b border-white/10 pb-6">
         <div>
-          <h1 className="text-4xl font-bold tracking-tight mb-2">Hola, {username || role}</h1>
-          <p className="text-muted-foreground text-lg">¿Qué deseas hacer hoy?</p>
+          <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold tracking-tight mb-1 md:mb-2">Hola, {username || role}</h1>
+          <p className="text-muted-foreground text-sm sm:text-base md:text-lg">¿Qué deseas hacer hoy?</p>
         </div>
-        <div className="flex flex-col items-end gap-3">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground bg-secondary/50 py-2 px-4 rounded-full">
-              <Clock className="w-4 h-4" />
+        <div className="flex flex-col items-start sm:items-end gap-3 w-full md:w-auto">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full sm:w-auto">
+            <div className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground bg-secondary/50 py-1.5 px-3 sm:py-2 sm:px-4 rounded-full">
+              <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
               <span suppressHydrationWarning>{isMounted ? currentDateTime : ''}</span>
             </div>
             {/* Store Switcher */}
@@ -72,16 +81,16 @@ export default function HubPage() {
             <button
               onClick={toggleTheme}
               title={theme === 'dark' ? 'Cambiar a Modo Claro' : 'Cambiar a Modo Oscuro'}
-              className="flex items-center justify-center w-10 h-10 rounded-full bg-secondary/50 hover:bg-secondary transition-colors border border-border"
+              className="flex items-center justify-center w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-secondary/50 hover:bg-secondary transition-colors border border-border shrink-0"
             >
-              {theme === 'dark' ? <Sun className="w-5 h-5 text-yellow-400" /> : <Moon className="w-5 h-5 text-indigo-400" />}
+              {theme === 'dark' ? <Sun className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-400" /> : <Moon className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-400" />}
             </button>
           </div>
           <button
             onClick={() => setShowLogoutConfirm(true)}
-            className="flex items-center gap-2 bg-secondary/30 px-3 py-1.5 rounded-xl border border-border text-sm font-semibold text-foreground hover:bg-secondary transition-colors"
+            className="flex items-center gap-2 bg-secondary/30 px-3 py-1.5 rounded-xl border border-border text-xs sm:text-sm font-semibold text-foreground hover:bg-secondary transition-colors"
           >
-            <UserCircle className="w-5 h-5 text-muted-foreground" />
+            <UserCircle className="w-4 h-4 sm:w-5 sm:h-5 text-muted-foreground" />
             Cerrar Sesión
           </button>
         </div>
@@ -89,13 +98,17 @@ export default function HubPage() {
 
       {!hasAnyModuleAccess ? (
         <div className="text-center py-16 bg-glass/30 rounded-2xl border border-white/10 p-8 space-y-3">
-          <p className="text-lg font-bold text-muted-foreground">No cuentas con módulos asignados actualmente.</p>
+          <p className="text-lg font-bold text-muted-foreground">
+            {isApkMode 
+              ? "No cuentas con módulos móviles asignados actualmente."
+              : "No cuentas con módulos asignados actualmente."}
+          </p>
           <p className="text-sm text-muted-foreground/70">Comunícate con un Administrador para habilitar los permisos de tu cuenta.</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {/* POS - Acceso: access_pos */}
-          {Boolean(permissions?.access_pos) && (
+          {isModuleAllowed("pos", permissions?.access_pos) && (
             <Link href="/pos" className="block group">
               <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-blue-500/50 hover:shadow-[0_0_30px_rgba(59,130,246,0.2)]">
                 <CardHeader>
@@ -112,7 +125,7 @@ export default function HubPage() {
           )}
 
           {/* Inventario - Acceso: access_inventory */}
-          {Boolean(permissions?.access_inventory) && (
+          {isModuleAllowed("inventory", permissions?.access_inventory) && (
             <Link href="/inventario" className="block group">
               <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-purple-500/50 hover:shadow-[0_0_30px_rgba(168,85,186,0.2)]">
                 <CardHeader>
@@ -129,7 +142,7 @@ export default function HubPage() {
           )}
 
           {/* Dashboard - Acceso: access_dashboard */}
-          {Boolean(permissions?.access_dashboard) && (
+          {isModuleAllowed("dashboard", permissions?.access_dashboard) && (
             <Link href="/dashboard" className="block group">
               <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-emerald-500/50 hover:shadow-[0_0_30px_rgba(16,185,129,0.2)]">
                 <CardHeader>
@@ -146,7 +159,7 @@ export default function HubPage() {
           )}
 
           {/* Caja - Acceso: access_caja */}
-          {Boolean(permissions?.access_caja) && (
+          {isModuleAllowed("caja", permissions?.access_caja) && (
             <Link href="/caja" className="block group">
               <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-cyan-500/50 hover:shadow-[0_0_30px_rgba(6,182,212,0.2)]">
                 <CardHeader>
@@ -163,7 +176,7 @@ export default function HubPage() {
           )}
 
           {/* Contabilidad - Acceso: access_contabilidad */}
-          {Boolean(permissions?.access_contabilidad) && (
+          {isModuleAllowed("contabilidad", permissions?.access_contabilidad) && (
             <Link href="/contabilidad" className="block group w-full">
               <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-amber-500/50 hover:shadow-[0_0_30px_rgba(245,158,11,0.2)] cursor-pointer">
                 <CardHeader>
@@ -180,7 +193,7 @@ export default function HubPage() {
           )}
 
           {/* Clientes Frecuentes - Acceso: access_clientes */}
-          {Boolean(permissions?.access_clientes) && (
+          {isModuleAllowed("clientes", permissions?.access_clientes) && (
             <Link href="/clientes" className="block group w-full">
               <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-pink-500/50 hover:shadow-[0_0_30px_rgba(236,72,153,0.2)] cursor-pointer">
                 <CardHeader>
@@ -197,7 +210,7 @@ export default function HubPage() {
           )}
 
           {/* Personal - Acceso: access_personal */}
-          {Boolean(permissions?.access_personal) && (
+          {isModuleAllowed("personal", permissions?.access_personal) && (
             <Link href="/admin/personal" className="block group">
               <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-indigo-500/50 hover:shadow-[0_0_30px_rgba(99,102,241,0.2)]">
                 <CardHeader>
@@ -214,7 +227,7 @@ export default function HubPage() {
           )}
 
           {/* Historial de Proformas - Acceso: access_proformas */}
-          {Boolean(permissions?.access_proformas) && (
+          {isModuleAllowed("proformas", permissions?.access_proformas) && (
             <Link href="/historial-proformas" className="block group">
               <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-teal-500/50 hover:shadow-[0_0_30px_rgba(20,184,166,0.2)]">
                 <CardHeader>
@@ -231,7 +244,7 @@ export default function HubPage() {
           )}
 
           {/* Configuración - Acceso: access_settings */}
-          {Boolean(permissions?.access_settings) && (
+          {isModuleAllowed("settings", permissions?.access_settings) && (
             <Link href="/configuracion" className="block group">
               <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-emerald-500/50 hover:shadow-[0_0_30px_rgba(16,185,129,0.2)]">
                 <CardHeader>

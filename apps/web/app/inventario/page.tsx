@@ -592,41 +592,41 @@ export default function InventarioPage() {
     <div className="min-h-screen bg-background text-foreground flex flex-col">
 
       {/* ── Header ── */}
-      <header className="bg-card border-b border-border px-6 h-16 flex items-center justify-between shadow-sm shrink-0">
-        <div className="flex items-center gap-4">
-          <Link href="/hub" className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-secondary">
-            <ArrowLeft className="w-5 h-5" />
-          </Link>
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center">
+      <header className="bg-card border-b border-border px-4 sm:px-6 py-3 sm:py-0 min-h-[4rem] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm shrink-0">
+        <div className="flex items-center gap-3 sm:gap-4 w-full sm:w-auto justify-between sm:justify-start">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <Link href="/hub" className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-secondary shrink-0">
+              <ArrowLeft className="w-5 h-5" />
+            </Link>
+            <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center shrink-0">
               <PackageSearch className="w-4 h-4 text-white" />
             </div>
-            <div>
-              <h1 className="text-base font-bold leading-none">Módulo de Inventario</h1>
-              <p className="text-xs text-muted-foreground mt-0.5">Catálogo y Control de Stock</p>
+            <div className="min-w-0">
+              <h1 className="text-sm sm:text-base font-bold leading-none truncate">Módulo de Inventario</h1>
+              <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 truncate">Catálogo y Control de Stock</p>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-4 w-full sm:w-auto justify-between sm:justify-end">
           <StoreSwitcher />
           {activeTab === "catalogo" && Boolean(permissions?.inventory_create) && (
-            <button onClick={() => openModal(undefined, "catalogo")} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold transition-colors shadow-sm hover:bg-primary/90">
-              <Plus className="w-3.5 h-3.5" /> Nuevo Producto
+            <button onClick={() => openModal(undefined, "catalogo")} className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold transition-colors shadow-sm hover:bg-primary/90 whitespace-nowrap shrink-0">
+              <Plus className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Nuevo Producto</span><span className="sm:hidden">Producto</span>
             </button>
           )}
           {activeTab === "familias" && Boolean(permissions?.inventory_create) && (
-            <button onClick={() => openFamilyModal()} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold transition-colors shadow-sm hover:bg-primary/90">
-              <FolderPlus className="w-3.5 h-3.5" /> Nueva Familia
+            <button onClick={() => openFamilyModal()} className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold transition-colors shadow-sm hover:bg-primary/90 whitespace-nowrap shrink-0">
+              <FolderPlus className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Nueva Familia</span><span className="sm:hidden">Familia</span>
             </button>
           )}
           {activeTab === "servicios" && Boolean(permissions?.inventory_create) && (
-            <button onClick={() => openServiceModal()} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold transition-colors shadow-sm hover:bg-primary/90">
-              <Plus className="w-3.5 h-3.5" /> Nuevo Servicio
+            <button onClick={() => openServiceModal()} className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold transition-colors shadow-sm hover:bg-primary/90 whitespace-nowrap shrink-0">
+              <Plus className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Nuevo Servicio</span><span className="sm:hidden">Servicio</span>
             </button>
           )}
 
-          <div className="flex bg-secondary rounded-lg p-1 gap-1">
+          <div className="flex bg-secondary rounded-lg p-1 gap-1 overflow-x-auto no-scrollbar whitespace-nowrap max-w-full">
             {[
               { id: "catalogo", label: "Catálogo General" },
               { id: "inventario", label: "Inventario Físico" },
@@ -636,7 +636,7 @@ export default function InventarioPage() {
               <button
                 key={id}
                 onClick={() => setActiveTab(id as any)}
-                className={`px-3 py-1 rounded-md text-xs font-bold transition-colors ${activeTab === id
+                className={`px-2.5 sm:px-3 py-1 rounded-md text-xs font-bold transition-colors whitespace-nowrap ${activeTab === id
                   ? "bg-foreground text-background"
                   : "text-muted-foreground hover:text-foreground"
                   }`}
@@ -648,7 +648,7 @@ export default function InventarioPage() {
         </div>
       </header>
 
-      <main className="flex-1 p-6 max-w-screen-xl w-full mx-auto space-y-6">
+      <main className="flex-1 p-3 sm:p-6 max-w-screen-xl w-full mx-auto space-y-6">
 
         <ConfirmDialog
           isOpen={!!productToDelete}

@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "next dev --port 3001",
     "build": "next build",
+    "build:apk": "NEXT_PUBLIC_APP_MODE=apk next build && npx cap sync android",
     "start": "next start",
     "lint": "eslint --max-warnings 0",
     "check-types": "next typegen && tsc --noEmit"

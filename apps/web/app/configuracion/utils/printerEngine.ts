@@ -298,16 +298,31 @@ import { supabase } from '../../lib/supabase';
 
 export async function silentPrintSaleReceipt(saleData: any, doubleCopy: boolean = false) {
   try {
-    // 1. Fetch default printer configuration from Supabase (prioritize the one with auto_print: true)
-    const { data: printers, error } = await supabase
-      .from('printers')
-      .select('*')
-      .order('auto_print', { ascending: false });
-    const activePrinter = printers?.[0];
+    // 1. Fetch default printer configuration with offline fallback
+    let activePrinter: any = null;
+    try {
+      const { data: printers } = await supabase
+        .from('printers')
+        .select('*')
+        .order('auto_print', { ascending: false });
+      if (printers && printers.length > 0) {
+        activePrinter = printers[0];
+        try { localStorage.setItem('cached_printer_config', JSON.stringify(activePrinter)); } catch (_) {}
+      }
+    } catch (e) {
+      console.warn("📌 [Modo Avión / Offline] Fallo al consultar impresoras en Supabase. Usando caché local:", e);
+    }
 
-    if (error || !activePrinter || activePrinter.type !== 'bluetooth') {
-      console.warn("No hay impresora Bluetooth por defecto configurada en Supabase.");
-      return;
+    if (!activePrinter) {
+      try {
+        const cached = localStorage.getItem('cached_printer_config');
+        if (cached) activePrinter = JSON.parse(cached);
+      } catch (_) {}
+    }
+
+    // Fallback genérico para impresoras térmicas si no hay configuración en BD
+    if (!activePrinter) {
+      activePrinter = { name: 'Impresora Bluetooth', paper_width: 80, max_chars: 42, type: 'bluetooth' };
     }
 
     let deviceToPrint = null;

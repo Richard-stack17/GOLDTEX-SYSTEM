@@ -49,27 +49,27 @@ export default function StoreSwitcher() {
   };
 
   return (
-    <div className="relative inline-block text-left">
+    <div className="relative inline-block text-left shrink-0">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full text-white text-xs font-bold transition-all shadow-sm cursor-pointer border ${
+        className={`flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 rounded-full text-white text-xs font-bold transition-all shadow-sm cursor-pointer border shrink-0 whitespace-nowrap ${
           isAllStoresMode
             ? 'bg-amber-600 hover:bg-amber-700 border-amber-500/30'
             : 'bg-indigo-600 hover:bg-indigo-700 border-indigo-500/30'
         }`}
       >
         <ButtonIcon className="w-3.5 h-3.5 shrink-0" />
-        <span>{buttonLabel}</span>
-        <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+        <span className="truncate max-w-[120px] sm:max-w-xs">{buttonLabel}</span>
+        <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
       </button>
 
       {isOpen && (
         <>
           <div
-            className="fixed inset-0 z-40"
+            className="fixed inset-0 z-[9998]"
             onClick={() => setIsOpen(false)}
           />
-          <div className="absolute right-0 mt-2 w-64 bg-card border border-border rounded-2xl shadow-xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150 p-1.5">
+          <div className="absolute left-0 sm:left-auto sm:right-0 mt-2 w-64 max-w-[calc(100vw-1.5rem)] bg-card border-2 border-border/80 rounded-2xl shadow-2xl z-[9999] p-1.5">
             <div className="px-3 py-2 text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground border-b border-border mb-1">
               Cambiar de Tienda
             </div>

@@ -232,50 +232,50 @@ export default function ClientesPage() {
       {toast && <Toast message={toast.message} type={toast.type} />}
 
       <main className="flex-1">
-        <header className="bg-card border-b border-border px-6 h-16 flex items-center justify-between shadow-sm">
-          <div className="flex items-center gap-4">
-            <Link href="/hub" className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-secondary">
-              <ArrowLeft className="w-5 h-5" />
-            </Link>
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 bg-purple-500 rounded-lg flex items-center justify-center">
+        <header className="bg-card border-b border-border px-4 sm:px-6 py-3 sm:py-0 min-h-[4rem] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm">
+          <div className="flex items-center gap-3 sm:gap-4 w-full sm:w-auto justify-between sm:justify-start">
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+              <Link href="/hub" className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-secondary shrink-0">
+                <ArrowLeft className="w-5 h-5" />
+              </Link>
+              <div className="w-8 h-8 bg-purple-500 rounded-lg flex items-center justify-center shrink-0">
                 <Users className="w-4 h-4 text-white" />
               </div>
-              <div>
-                <h1 className="text-base font-bold leading-none">Módulo de Clientes</h1>
-                <p className="text-xs text-muted-foreground mt-0.5">Gestión de Clientes Frecuentes</p>
+              <div className="min-w-0">
+                <h1 className="text-sm sm:text-base font-bold leading-none truncate">Módulo de Clientes</h1>
+                <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 truncate">Gestión de Clientes Frecuentes</p>
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 sm:gap-4 w-full sm:w-auto justify-between sm:justify-end">
             <StoreSwitcher />
             {Boolean(permissions?.customers_create) && (
               <button
                 onClick={() => handleOpenModal()}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-sm flex items-center gap-2 shadow-sm transition-colors"
+                className="px-3 sm:px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs sm:text-sm flex items-center gap-1.5 sm:gap-2 shadow-sm transition-colors whitespace-nowrap shrink-0"
               >
-                <Plus className="w-4 h-4" /> Nuevo Cliente
+                <Plus className="w-4 h-4" /> <span className="hidden sm:inline">Nuevo Cliente</span><span className="sm:hidden">Nuevo</span>
               </button>
             )}
           </div>
         </header>
 
-        <div className="p-8 max-w-5xl mx-auto space-y-6">
+        <div className="p-3 sm:p-6 md:p-8 max-w-5xl mx-auto space-y-6">
           {/* Controls bar */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
-            <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-200 flex items-center gap-3 flex-1">
+            <div className="bg-white p-3 sm:p-4 rounded-2xl shadow-sm border border-gray-200 flex items-center gap-3 flex-1 min-w-0">
               <Search className="w-5 h-5 text-gray-400 shrink-0 ml-2" />
               <input
                 type="text"
                 placeholder="Buscar por DNI/RUC o Nombre..."
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                className="w-full bg-transparent border-none focus:outline-none text-gray-900 font-medium placeholder:text-gray-400"
+                className="w-full bg-transparent border-none focus:outline-none text-gray-900 font-medium placeholder:text-gray-400 text-sm sm:text-base"
               />
             </div>
 
             {/* Toggle show inactive */}
-            <div className="bg-white px-4 py-3.5 rounded-2xl shadow-sm border border-gray-200 flex items-center gap-3 shrink-0">
+            <div className="bg-white px-4 py-3 sm:py-3.5 rounded-2xl shadow-sm border border-gray-200 flex items-center gap-3 shrink-0">
               <label className="text-xs font-bold text-gray-600 cursor-pointer select-none flex items-center gap-2">
                 <input
                   type="checkbox"
@@ -288,7 +288,7 @@ export default function ClientesPage() {
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead className="bg-gray-50 border-b border-gray-200 text-gray-600">
                 <tr>
