@@ -1002,8 +1002,8 @@ export default function CajaPage() {
     <div className="min-h-screen bg-background text-foreground flex flex-col">
 
       {/* ── Header ── */}
-      <header className="bg-card border-b border-border px-4 sm:px-6 py-3 sm:py-0 min-h-[4rem] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm">
-        <div className="flex items-center gap-3 sm:gap-4 w-full sm:w-auto justify-between sm:justify-start">
+      <header className="bg-card border-b border-border flex flex-col md:flex-row md:items-center justify-between gap-3 p-4 sm:p-6 shadow-sm shrink-0">
+        <div className="flex items-center gap-4 pt-2 sm:pt-0 w-full sm:w-auto justify-between sm:justify-start">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <Link href="/hub" className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-secondary shrink-0">
               <ArrowLeft className="w-5 h-5" />
@@ -1025,7 +1025,7 @@ export default function CajaPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 overflow-x-auto whitespace-nowrap scrollbar-hide w-full sm:w-auto pb-1 sm:pb-0">
           {/* Status Filter Pills */}
           <div className="flex bg-secondary rounded-lg p-1 gap-1">
             {STATUS_FILTERS.map(({ id, label }) => (
@@ -1087,32 +1087,36 @@ export default function CajaPage() {
       </header>
 
       {/* ── Summary bar ── */}
-      <div className="bg-card/60 border-b border-border/50 px-6 py-3 flex items-center gap-6">
-        <div className="flex items-center gap-2.5">
-          <AlertCircle className="w-4 h-4 text-orange-500" />
-          <span className="text-orange-500 font-black text-lg">{sortedTickets.length}</span>
-          <span className="text-muted-foreground text-sm font-medium">
-            tickets {
-              statusFilter === "PENDING" ? "pendientes" :
-                statusFilter === "COMPLETED" ? "pagados" :
-                  statusFilter === "CANCELLED" ? "anulados" : "en total"
-            }
-          </span>
-        </div>
-        <div className="w-px h-4 bg-border" />
-        <div className="flex items-center gap-2">
-          <span className="text-muted-foreground text-sm">
-            {statusFilter === "PENDING" ? "Por cobrar:" : "Monto:"}
-          </span>
-          <span className="text-foreground font-black text-lg font-mono">S/ {filteredTotal.toFixed(2)}</span>
-        </div>
-        <div className="ml-auto text-xs text-muted-foreground font-mono">
-          Auto-actualiza cada 5s
+      <div className="px-4 sm:px-6 pt-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 p-3 bg-secondary/30 rounded-xl">
+          <div className="flex items-center gap-2.5">
+            <AlertCircle className="w-4 h-4 text-orange-500 shrink-0" />
+            <span className="text-orange-500 font-black text-lg">{sortedTickets.length}</span>
+            <span className="text-muted-foreground text-sm font-medium">
+              tickets {
+                statusFilter === "PENDING" ? "pendientes" :
+                  statusFilter === "COMPLETED" ? "pagados" :
+                    statusFilter === "CANCELLED" ? "anulados" : "en total"
+              }
+            </span>
+          </div>
+          <div className="hidden sm:block w-px h-4 bg-border" />
+          <div className="flex flex-1 justify-between sm:justify-end items-center gap-4 w-full sm:w-auto">
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground text-sm">
+                {statusFilter === "PENDING" ? "Por cobrar:" : "Monto:"}
+              </span>
+              <span className="text-foreground font-black text-lg font-mono">S/ {filteredTotal.toFixed(2)}</span>
+            </div>
+            <div className="text-xs text-muted-foreground font-mono">
+              Auto-actualiza cada 5s
+            </div>
+          </div>
         </div>
       </div>
 
       {/* ── Ticket List ── */}
-      <main className="flex-1 p-6">
+      <main className="flex-1 p-4 sm:p-6">
         {isLoading && tickets.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 gap-4 text-muted-foreground">
             <RefreshCw className="w-10 h-10 animate-spin" />
@@ -1203,8 +1207,9 @@ export default function CajaPage() {
             })}
           </div>
         ) : (
-          <div className="max-w-screen-xl mx-auto overflow-x-auto rounded-xl border border-border bg-card">
-            <table className="w-full text-left text-sm">
+          <div className="max-w-screen-xl mx-auto rounded-xl border border-border bg-card">
+            <div className="w-full overflow-x-auto whitespace-nowrap scrollbar-hide">
+              <table className="w-full text-left text-sm">
               <thead className="bg-background text-muted-foreground border-b border-border select-none">
                 <tr>
                   <th
@@ -1303,7 +1308,8 @@ export default function CajaPage() {
                   />
                 ))}
               </tbody>
-            </table>
+              </table>
+            </div>
           </div>
         )}
       </main>

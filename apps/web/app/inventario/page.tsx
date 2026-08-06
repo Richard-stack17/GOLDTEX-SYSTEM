@@ -592,8 +592,8 @@ export default function InventarioPage() {
     <div className="min-h-screen bg-background text-foreground flex flex-col">
 
       {/* ── Header ── */}
-      <header className="bg-card border-b border-border px-4 sm:px-6 py-3 sm:py-0 min-h-[4rem] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm shrink-0">
-        <div className="flex items-center gap-3 sm:gap-4 w-full sm:w-auto justify-between sm:justify-start">
+      <header className="bg-card border-b border-border flex flex-col md:flex-row md:items-center justify-between gap-3 p-4 sm:p-6 shadow-sm shrink-0">
+        <div className="flex items-center gap-4 pt-2 sm:pt-0 w-full sm:w-auto justify-between sm:justify-start">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <Link href="/hub" className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-secondary shrink-0">
               <ArrowLeft className="w-5 h-5" />
@@ -626,7 +626,7 @@ export default function InventarioPage() {
             </button>
           )}
 
-          <div className="flex bg-secondary rounded-lg p-1 gap-1 overflow-x-auto no-scrollbar whitespace-nowrap max-w-full">
+          <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center overflow-x-auto whitespace-nowrap scrollbar-hide border-b border-border pb-1 w-full max-w-full">
             {[
               { id: "catalogo", label: "Catálogo General" },
               { id: "inventario", label: "Inventario Físico" },
@@ -670,11 +670,11 @@ export default function InventarioPage() {
         {activeTab === "catalogo" && (
           <Card className="bg-glass border-white/10 shadow-xl overflow-hidden">
             <CardHeader className="border-b border-border bg-surface/50 pb-4">
-              <div className="flex justify-between items-center">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 sm:gap-0">
                 <CardTitle className="text-lg">Telas del Catálogo</CardTitle>
-                <div className="flex items-center gap-4">
+                <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center w-full sm:w-auto">
                   {renderStatusFilter()}
-                  <div className="relative w-72">
+                  <div className="relative w-full sm:w-72">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <Input
                     placeholder="Buscar por SKU o nombre..."
@@ -776,11 +776,11 @@ export default function InventarioPage() {
         {activeTab === "inventario" && (
           <Card className="bg-glass border-white/10 shadow-xl overflow-hidden">
             <CardHeader className="border-b border-border bg-surface/50 pb-4">
-              <div className="flex justify-between items-center">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 sm:gap-0">
                 <CardTitle className="text-lg">Inventario de Stock</CardTitle>
-                <div className="flex items-center gap-4">
+                <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center w-full sm:w-auto">
                   {renderStatusFilter()}
-                  <div className="relative w-72">
+                  <div className="relative w-full sm:w-72">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <Input
                     placeholder="Buscar por SKU o nombre..."

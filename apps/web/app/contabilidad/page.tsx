@@ -435,8 +435,8 @@ export default function ContabilidadPage() {
 
       <main className="flex-1 min-w-0">
         {/* Header */}
-        <header className="bg-card border-b border-border px-6 h-16 flex items-center justify-between shadow-sm">
-          <div className="flex items-center gap-4">
+        <header className="bg-card border-b border-border flex flex-col md:flex-row md:items-center justify-between gap-3 p-4 sm:p-6 shadow-sm">
+          <div className="flex items-center gap-4 pt-2 sm:pt-0">
             <Link href="/hub" className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-secondary">
               <ArrowLeft className="w-5 h-5" />
             </Link>
@@ -456,8 +456,8 @@ export default function ContabilidadPage() {
         <div className="p-6 max-w-screen-2xl mx-auto space-y-5">
           {/* Filter Card */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
-            <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-end">
-              <div className="flex gap-4 flex-1">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+              <div className="flex flex-col sm:flex-row gap-2.5 flex-1">
                 <div className="flex flex-col gap-1.5 flex-1">
                   <label className="text-xs font-bold text-gray-600 uppercase tracking-wider flex items-center gap-1.5">
                     <Calendar className="w-3.5 h-3.5 text-indigo-500" /> Fecha Inicio

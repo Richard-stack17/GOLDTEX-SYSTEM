@@ -232,8 +232,8 @@ export default function ClientesPage() {
       {toast && <Toast message={toast.message} type={toast.type} />}
 
       <main className="flex-1">
-        <header className="bg-card border-b border-border px-4 sm:px-6 py-3 sm:py-0 min-h-[4rem] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm">
-          <div className="flex items-center gap-3 sm:gap-4 w-full sm:w-auto justify-between sm:justify-start">
+        <header className="bg-card border-b border-border flex flex-col md:flex-row md:items-center justify-between gap-3 p-4 sm:p-6 shadow-sm shrink-0">
+          <div className="flex items-center gap-4 pt-2 sm:pt-0 w-full sm:w-auto justify-between sm:justify-start">
             <div className="flex items-center gap-2 sm:gap-3 min-w-0">
               <Link href="/hub" className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-secondary shrink-0">
                 <ArrowLeft className="w-5 h-5" />
@@ -262,7 +262,7 @@ export default function ClientesPage() {
 
         <div className="p-3 sm:p-6 md:p-8 max-w-5xl mx-auto space-y-6">
           {/* Controls bar */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+          <div className="flex flex-col sm:flex-row gap-2.5 items-start sm:items-center w-full">
             <div className="bg-white p-3 sm:p-4 rounded-2xl shadow-sm border border-gray-200 flex items-center gap-3 flex-1 min-w-0">
               <Search className="w-5 h-5 text-gray-400 shrink-0 ml-2" />
               <input
@@ -288,8 +288,9 @@ export default function ClientesPage() {
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-x-auto">
-            <table className="w-full text-left text-sm">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+            <div className="w-full overflow-x-auto scrollbar-hide">
+              <table className="w-full text-left text-sm min-w-[600px]">
               <thead className="bg-gray-50 border-b border-gray-200 text-gray-600">
                 <tr>
                   <SortableTableHead field="doc_number" currentSort={sortConfig} onSort={(k) => requestSort(k as any)}>
@@ -390,10 +391,11 @@ export default function ClientesPage() {
                 )}
               </tbody>
             </table>
+            </div>
 
             {/* Pagination Component */}
             {sortedCustomers.length > 0 && (
-              <div className="border-t border-gray-200 bg-gray-50/50">
+              <div className="border-t border-gray-200 bg-gray-50/50 flex flex-col sm:flex-row items-center justify-between gap-3 w-full p-4">
                 <Pagination
                   currentPage={currentPage}
                   totalItems={sortedCustomers.length}

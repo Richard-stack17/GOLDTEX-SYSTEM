@@ -97,6 +97,22 @@ export default function AccountSwitcher() {
         throw new Error("Contraseña incorrecta.");
       }
 
+      // Purgar estado local (tiendas, permisos, etc.) del usuario anterior
+      localStorage.removeItem("goltex_active_store_id");
+      localStorage.removeItem("goltex_active_store_name");
+      localStorage.removeItem("goltex_permissions");
+      localStorage.removeItem("goltex_store_mode");
+      localStorage.removeItem("goltex_default_store_id");
+
+      // Guardar credenciales del nuevo usuario
+      localStorage.setItem("goltex_role", profileData.role);
+      localStorage.setItem("goltex_username", profileData.username);
+      if (profileData.employee_id) {
+        localStorage.setItem("goltex_employee_id", profileData.employee_id);
+      } else {
+        localStorage.removeItem("goltex_employee_id");
+      }
+
       setRole(profileData.role);
       setUsername(profileData.username);
       setEmployeeId(profileData.employee_id ?? null);
@@ -111,6 +127,7 @@ export default function AccountSwitcher() {
       localStorage.setItem("goltex_saved_accounts", JSON.stringify(newSaved.slice(0, 10)));
       
       setIsOpen(false);
+      window.location.reload(); // Recarga limpia del árbol de React para destruir caché en memoria
     } catch (err: any) {
       setError(err.message || "Error al autenticar");
     } finally {

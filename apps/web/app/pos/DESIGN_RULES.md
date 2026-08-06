@@ -27,7 +27,7 @@
 ### Celdas de Control
 - **PRECIO FIJO** (izquierda, solo lectura): precio original de la base
 - **PRECIO VARIABLE** (derecha, editable): cargado con el precio fijo inicial, permite regateo
-- **METROS** (fila ancha inferior): solo números enteros, SIN decimales
+- **METROS** (fila ancha inferior): permite enteros y decimales (ej. 1.5, 2.75)
 
 ### Colores de foco interactivos
 - Campo activo "METROS": brilla en **esmeralda (green)**
@@ -64,5 +64,4 @@
 - Los precios ya incluyen IGV (lo gestiona Starsoft externamente)
 
 ## 7. Cantidades
-- Formato estrictamente **entero**: `1`, `2`, `5`, `12`
-- **NUNCA** usar decimales: ~~`1.000`~~, ~~`1.00`~~
+- Formato **decimal** permitido: `1`, `1.5`, `5`, `12.75`

@@ -78,6 +78,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     loadUserStores();
   }, [isHydrated, employeeId, role]);
 
+  // BUG FIX CRÍTICO: Forzar reseteo si el nuevo usuario no tiene permisos globales
+  useEffect(() => {
+    if (isHydrated && role && !isGlobalUser) {
+      setIsAllStoresModeState(false);
+      if (typeof window !== "undefined" && localStorage.getItem("goltex_store_mode") === "ALL") {
+        localStorage.setItem("goltex_store_mode", "SINGLE");
+      }
+    }
+  }, [role, employeeId, isGlobalUser, isHydrated]);
+
   const applyProfileStore = async (targetStoreId: string | null) => {
     if (!targetStoreId) return;
 

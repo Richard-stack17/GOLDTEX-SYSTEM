@@ -8,7 +8,7 @@ import {
   CheckCircle2, RefreshCw, KeyRound, Plus,
   ShieldCheck, UserCog, Edit2, X, Trash2, Check, XCircle,
   ShoppingCart, PackageSearch, BarChart3, Banknote, FileSpreadsheet, Contact, ScrollText, Settings, Shield, Save, Loader2, Lock, Info, RotateCcw,
-  Eye, EyeOff
+  Eye, EyeOff, ArrowUpDown
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useRole } from '../../context/RoleContext';
@@ -1540,12 +1540,12 @@ export default function PersonalPage() {
     if (isGlobalRole && hasNoSpecificStores && !isNoProfile) {
       return {
         storeElement: (
-          <span className="text-xs font-bold text-purple-600 bg-purple-50 px-2.5 py-0.5 rounded-full border border-purple-200">
+          <span className="text-xs font-bold text-purple-600 bg-purple-50 px-2.5 py-0.5 rounded-full border border-purple-200 whitespace-nowrap shrink-0 inline-flex items-center">
             Acceso Global
           </span>
         ),
         roleElement: (
-          <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full border ${getRoleBadgeStyle(profileRole || 'ADMIN')}`}>
+          <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full border ${getRoleBadgeStyle(profileRole || 'ADMIN')} whitespace-nowrap shrink-0 inline-flex items-center`}>
             {profileRole || 'ADMIN'}
           </span>
         )
@@ -1559,20 +1559,20 @@ export default function PersonalPage() {
           {empStores.map((es) => {
             const storeName = es.stores?.name || storeMap.get(es.store_id) || 'Tienda';
             return (
-              <span key={es.store_id} className="text-xs font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200 whitespace-nowrap">
+              <span key={es.store_id} className="text-xs font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200 whitespace-nowrap shrink-0 inline-flex items-center">
                 {storeName}
               </span>
             );
           })}
         </div>
       ) : (
-        <span className="text-xs font-bold text-purple-600 bg-purple-50 px-2.5 py-0.5 rounded-full border border-purple-200">
+        <span className="text-xs font-bold text-purple-600 bg-purple-50 px-2.5 py-0.5 rounded-full border border-purple-200 whitespace-nowrap shrink-0 inline-flex items-center">
           Acceso Global
         </span>
       );
 
       const roleElement = (
-        <span className="text-xs font-bold px-2.5 py-0.5 rounded-full border bg-amber-500/10 border-amber-500/30 text-amber-600">
+        <span className="text-xs font-bold px-2.5 py-0.5 rounded-full border bg-amber-500/10 border-amber-500/30 text-amber-600 whitespace-nowrap shrink-0 inline-flex items-center">
           Sin acceso
         </span>
       );
@@ -1585,7 +1585,7 @@ export default function PersonalPage() {
       return {
         storeElement: <span className="text-xs text-muted-foreground italic">—</span>,
         roleElement: profileRole ? (
-          <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full border ${getRoleBadgeStyle(profileRole)}`}>
+          <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full border ${getRoleBadgeStyle(profileRole)} whitespace-nowrap shrink-0 inline-flex items-center`}>
             {profileRole}
           </span>
         ) : (
@@ -1600,7 +1600,7 @@ export default function PersonalPage() {
         {empStores.map((es) => {
           const storeName = es.stores?.name || storeMap.get(es.store_id) || 'Tienda';
           return (
-            <span key={es.store_id} className="text-xs font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200 whitespace-nowrap">
+            <span key={es.store_id} className="text-xs font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200 whitespace-nowrap shrink-0 inline-flex items-center">
               {storeName}
             </span>
           );
@@ -1614,14 +1614,14 @@ export default function PersonalPage() {
           const storeName = es.stores?.name || storeMap.get(es.store_id) || 'Tienda';
           const roleName = es.role || profileRole || 'CAJERO';
           return (
-            <span key={es.store_id} className={`text-xs font-bold px-2.5 py-0.5 rounded-full border ${getRoleBadgeStyle(roleName)} whitespace-nowrap`}>
+            <span key={es.store_id} className={`text-xs font-bold px-2.5 py-0.5 rounded-full border ${getRoleBadgeStyle(roleName)} whitespace-nowrap shrink-0 inline-flex items-center`}>
               {storeName}: {roleName}
             </span>
           );
         })}
       </div>
     ) : (
-      <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full border ${getRoleBadgeStyle(empStores[0]?.role || profileRole || 'CAJERO')}`}>
+      <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full border ${getRoleBadgeStyle(empStores[0]?.role || profileRole || 'CAJERO')} whitespace-nowrap shrink-0 inline-flex items-center`}>
         {empStores[0]?.role || profileRole || 'CAJERO'}
       </span>
     );
@@ -1761,8 +1761,8 @@ export default function PersonalPage() {
     <div className="min-h-screen bg-background text-foreground flex flex-col">
 
       {/* ── Header ── */}
-      <header className="bg-card border-b border-border px-6 h-16 flex items-center justify-between shadow-sm shrink-0">
-        <div className="flex items-center gap-4">
+      <header className="bg-card border-b border-border flex flex-col md:flex-row md:items-center justify-between gap-3 p-4 sm:p-6 shadow-sm shrink-0">
+        <div className="flex items-center gap-4 pt-2 sm:pt-0">
           <Link href="/hub" className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-secondary">
             <ArrowLeft className="w-5 h-5" />
           </Link>
@@ -1777,7 +1777,7 @@ export default function PersonalPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-4 w-full sm:w-auto justify-between sm:justify-end">
           <StoreSwitcher />
           <button
             onClick={loadData}
@@ -1788,7 +1788,7 @@ export default function PersonalPage() {
             Actualizar
           </button>
 
-          <div className="flex bg-secondary rounded-lg p-1 gap-1">
+          <div className="flex overflow-x-auto whitespace-nowrap scrollbar-hide bg-secondary rounded-lg p-1 gap-1 w-full sm:w-auto border-b sm:border-0 border-border pb-1 sm:pb-1">
             {[
               { id: 'empleados' as Tab, label: 'Empleados' },
               { id: 'usuarios' as Tab, label: 'Usuarios (Perfiles)' },
@@ -1819,15 +1819,15 @@ export default function PersonalPage() {
           <div className="w-full">
             {/* List */}
             <div className="bg-card border border-border rounded-2xl shadow-sm overflow-hidden">
-              <div className="px-5 py-4 border-b border-border bg-muted/20 flex items-center justify-between">
-                <div className="flex items-center gap-3">
+              <div className="px-5 py-4 border-b border-border bg-muted/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
+                <div className="flex flex-wrap items-center gap-3">
                   <h2 className="text-sm font-bold uppercase tracking-wider">Personal Registrado</h2>
                   <span className="text-xs text-muted-foreground font-mono bg-secondary px-2.5 py-1 rounded-full">
                     {visibleEmployees.length} empleado{visibleEmployees.length !== 1 ? 's' : ''}
                   </span>
                 </div>
-                <div className="flex items-center gap-3">
-                  <label className="flex items-center gap-2 cursor-pointer select-none border border-border bg-background px-3 py-1.5 rounded-xl hover:bg-secondary/40 transition-colors">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+                  <label className="flex items-center gap-2 cursor-pointer select-none border border-border bg-background px-3 py-1.5 rounded-xl hover:bg-secondary/40 transition-colors shrink-0">
                     <input
                       type="checkbox"
                       className="peer sr-only"
@@ -1880,11 +1880,21 @@ export default function PersonalPage() {
                   <table className="w-full text-sm">
                     <thead className="bg-muted/30 border-b border-border text-muted-foreground">
                       <tr>
-                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">Nombre Completo</th>
-                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">DNI</th>
-                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">Tienda Asignada</th>
-                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">Rol de Acceso</th>
-                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">Usuario Vinculado</th>
+                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">
+                          <div className="flex items-center gap-1 cursor-pointer hover:text-foreground transition-colors">Nombre Completo <ArrowUpDown className="w-3.5 h-3.5" /></div>
+                        </th>
+                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">
+                          <div className="flex items-center gap-1 cursor-pointer hover:text-foreground transition-colors">DNI <ArrowUpDown className="w-3.5 h-3.5" /></div>
+                        </th>
+                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">
+                          <div className="flex items-center gap-1 cursor-pointer hover:text-foreground transition-colors">Tienda Asignada <ArrowUpDown className="w-3.5 h-3.5" /></div>
+                        </th>
+                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">
+                          <div className="flex items-center gap-1 cursor-pointer hover:text-foreground transition-colors">Rol de Acceso <ArrowUpDown className="w-3.5 h-3.5" /></div>
+                        </th>
+                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">
+                          <div className="flex items-center gap-1 cursor-pointer hover:text-foreground transition-colors">Usuario Vinculado <ArrowUpDown className="w-3.5 h-3.5" /></div>
+                        </th>
                         <th className="px-5 py-3 text-center text-xs font-bold uppercase tracking-wider">Acciones</th>
                       </tr>
                     </thead>
@@ -1989,15 +1999,15 @@ export default function PersonalPage() {
           <div className="w-full">
             {/* Credentials list */}
             <div className="bg-card border border-border rounded-2xl shadow-sm overflow-hidden">
-              <div className="px-5 py-4 border-b border-border bg-muted/20 flex items-center justify-between">
-                <div className="flex items-center gap-3">
+              <div className="px-5 py-4 border-b border-border bg-muted/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
+                <div className="flex flex-wrap items-center gap-3">
                   <h2 className="text-sm font-bold uppercase tracking-wider">Usuarios con Acceso</h2>
                   <span className="text-xs text-muted-foreground font-mono bg-secondary px-2.5 py-1 rounded-full">
                     {activeProfiles.length} usuario{activeProfiles.length !== 1 ? 's' : ''}
                   </span>
                 </div>
-                <div className="flex items-center gap-3">
-                  <label className="flex items-center gap-2 cursor-pointer select-none border border-border bg-background px-3 py-1.5 rounded-xl hover:bg-secondary/40 transition-colors">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+                  <label className="flex items-center gap-2 cursor-pointer select-none border border-border bg-background px-3 py-1.5 rounded-xl hover:bg-secondary/40 transition-colors shrink-0">
                     <input
                       type="checkbox"
                       className="peer sr-only"
@@ -2057,11 +2067,21 @@ export default function PersonalPage() {
                   <table className="w-full text-sm">
                     <thead className="bg-muted/30 border-b border-border text-muted-foreground">
                       <tr>
-                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">Usuario</th>
-                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">Rol</th>
-                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">Tienda Asignada</th>
-                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">Empleado Vinculado</th>
-                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">Gmail</th>
+                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">
+                          <div className="flex items-center gap-1 cursor-pointer hover:text-foreground transition-colors">Usuario <ArrowUpDown className="w-3.5 h-3.5" /></div>
+                        </th>
+                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">
+                          <div className="flex items-center gap-1 cursor-pointer hover:text-foreground transition-colors">Rol <ArrowUpDown className="w-3.5 h-3.5" /></div>
+                        </th>
+                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">
+                          <div className="flex items-center gap-1 cursor-pointer hover:text-foreground transition-colors">Tienda Asignada <ArrowUpDown className="w-3.5 h-3.5" /></div>
+                        </th>
+                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">
+                          <div className="flex items-center gap-1 cursor-pointer hover:text-foreground transition-colors">Empleado Vinculado <ArrowUpDown className="w-3.5 h-3.5" /></div>
+                        </th>
+                        <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider">
+                          <div className="flex items-center gap-1 cursor-pointer hover:text-foreground transition-colors">Gmail <ArrowUpDown className="w-3.5 h-3.5" /></div>
+                        </th>
                         <th className="px-5 py-3 text-center text-xs font-bold uppercase tracking-wider">Acciones</th>
                       </tr>
                     </thead>
@@ -2159,9 +2179,9 @@ export default function PersonalPage() {
         {/* ════ TAB 3: ROLES Y PERMISOS ════ */}
         {activeTab === 'roles' && (
           <div className="bg-card border border-border rounded-2xl shadow-sm overflow-hidden">
-            <div className="px-5 py-4 border-b border-border bg-muted/20 flex items-center justify-between flex-wrap gap-3">
+            <div className="px-5 py-4 border-b border-border bg-muted/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
               <h2 className="text-sm font-bold uppercase tracking-wider">Matriz de Roles y Permisos</h2>
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
                 {/* Toggle Mostrar Inactivos */}
                 <label className="flex items-center gap-2 cursor-pointer select-none pr-3 border-r border-border">
                   <div className="relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full">

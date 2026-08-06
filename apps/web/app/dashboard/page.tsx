@@ -522,8 +522,8 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
       {/* ── Header ── */}
-      <header className="bg-card border-b border-border px-6 h-16 flex items-center justify-between shadow-sm shrink-0">
-        <div className="flex items-center gap-4">
+      <header className="bg-card border-b border-border flex flex-col md:flex-row md:items-center justify-between gap-3 p-4 sm:p-6 shadow-sm shrink-0">
+        <div className="flex items-center gap-4 pt-2 sm:pt-0">
           <Link href="/hub" className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-secondary">
             <ArrowLeft className="w-5 h-5" />
           </Link>
@@ -579,50 +579,52 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <div className={`flex items-center gap-2 p-2 rounded-lg border transition-colors ${dateFilter === "CUSTOM" ? "bg-primary/5 border-primary/30" : "bg-secondary/30 border-border/50"}`}>
+          <div className={`flex flex-col lg:flex-row items-start lg:items-center gap-2 p-2 rounded-lg border transition-colors w-full lg:w-auto ${dateFilter === "CUSTOM" ? "bg-primary/5 border-primary/30" : "bg-secondary/30 border-border/50"}`}>
             <div className={`text-[11px] font-semibold uppercase tracking-wider pl-1 hidden lg:block ${dateFilter === "CUSTOM" ? "text-primary" : "text-muted-foreground"}`}>
               Rango Personalizado:
             </div>
-            <select
-              value={selectedDay}
-              onChange={(e) => handleCustomFilter("DAY", e.target.value)}
-              className={`h-8 px-1 rounded-md border text-sm focus:outline-none focus:ring-2 focus:ring-primary font-medium w-16 ${dateFilter === "CUSTOM" ? "border-primary/50 bg-background text-foreground" : "border-input bg-background/50 text-muted-foreground"}`}
-            >
-              <option value="">Día</option>
-              {Array.from({ length: selectedMonth === "" ? 31 : new Date(selectedYear === "" ? new Date().getFullYear() : selectedYear, (selectedMonth as number) + 1, 0).getDate() }).map((_, i) => (
-                <option key={i + 1} value={i + 1}>{i + 1}</option>
-              ))}
-            </select>
-            <select
-              value={selectedMonth}
-              onChange={(e) => handleCustomFilter("MONTH", e.target.value)}
-              className={`h-8 px-2 rounded-md border text-sm focus:outline-none focus:ring-2 focus:ring-primary font-medium ${dateFilter === "CUSTOM" ? "border-primary/50 bg-background text-foreground" : "border-input bg-background/50 text-muted-foreground"}`}
-            >
-              <option value="">Todos los meses</option>
-              {['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'].map((m, i) => (
-                <option key={i} value={i}>{m}</option>
-              ))}
-            </select>
-            <select
-              value={selectedYear}
-              onChange={(e) => handleCustomFilter("YEAR", e.target.value)}
-              className={`h-8 px-2 rounded-md border text-sm focus:outline-none focus:ring-2 focus:ring-primary font-medium w-24 ${dateFilter === "CUSTOM" ? "border-primary/50 bg-background text-foreground" : "border-input bg-background/50 text-muted-foreground"}`}
-            >
-              <option value="" disabled>Año</option>
-              {[2023, 2024, 2025, 2026, 2027].map(y => (
-                <option key={y} value={y}>{y}</option>
-              ))}
-            </select>
+            <div className="grid grid-cols-3 gap-1.5 sm:gap-2 w-full">
+              <select
+                value={selectedDay}
+                onChange={(e) => handleCustomFilter("DAY", e.target.value)}
+                className={`w-full min-w-0 h-8 px-2 rounded-md border text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-primary font-medium ${dateFilter === "CUSTOM" ? "border-primary/50 bg-background text-foreground" : "border-input bg-background/50 text-muted-foreground"}`}
+              >
+                <option value="">Día</option>
+                {Array.from({ length: selectedMonth === "" ? 31 : new Date(selectedYear === "" ? new Date().getFullYear() : selectedYear, (selectedMonth as number) + 1, 0).getDate() }).map((_, i) => (
+                  <option key={i + 1} value={i + 1}>{i + 1}</option>
+                ))}
+              </select>
+              <select
+                value={selectedMonth}
+                onChange={(e) => handleCustomFilter("MONTH", e.target.value)}
+                className={`w-full min-w-0 h-8 px-2 rounded-md border text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-primary font-medium ${dateFilter === "CUSTOM" ? "border-primary/50 bg-background text-foreground" : "border-input bg-background/50 text-muted-foreground"}`}
+              >
+                <option value="">Mes</option>
+                {['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'].map((m, i) => (
+                  <option key={i} value={i}>{m}</option>
+                ))}
+              </select>
+              <select
+                value={selectedYear}
+                onChange={(e) => handleCustomFilter("YEAR", e.target.value)}
+                className={`w-full min-w-0 h-8 px-2 rounded-md border text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-primary font-medium ${dateFilter === "CUSTOM" ? "border-primary/50 bg-background text-foreground" : "border-input bg-background/50 text-muted-foreground"}`}
+              >
+                <option value="" disabled>Año</option>
+                {[2023, 2024, 2025, 2026, 2027].map(y => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
 
         {/* ── TOP KPIs ── */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           {/* 1. Total Facturado (Tarjeta Principal) */}
           {(() => {
             const isAlert = !salesTrend.noData && salesTrend.status === 'red';
             return (
-              <Card className={`relative overflow-hidden transition-colors border-transparent shadow-lg text-white lg:col-span-3 ${isAlert ? 'bg-gradient-to-br from-rose-600 to-rose-800 shadow-rose-600/20' : 'bg-gradient-to-br from-indigo-500 to-indigo-700 shadow-indigo-500/20'}`}>
+              <Card className={`relative overflow-hidden transition-colors border-transparent shadow-lg text-white lg:col-span-1 ${isAlert ? 'bg-gradient-to-br from-rose-600 to-rose-800 shadow-rose-600/20' : 'bg-gradient-to-br from-indigo-500 to-indigo-700 shadow-indigo-500/20'}`}>
                 <div className={`absolute right-[-10%] top-[-10%] opacity-10 text-white`}>
                   <DollarSign className="w-48 h-48" />
                 </div>
@@ -652,7 +654,7 @@ export default function DashboardPage() {
           })()}
 
           {/* 2. Rendimiento del Periodo (Fusión) */}
-          <Card className="bg-card border border-border shadow-sm lg:col-span-3">
+          <Card className="bg-card border border-border shadow-sm lg:col-span-1">
             <CardHeader className="pb-2">
               <CardTitle className="text-muted-foreground font-medium text-sm uppercase tracking-wider font-bold">Rendimiento del Periodo</CardTitle>
             </CardHeader>
@@ -941,13 +943,15 @@ export default function DashboardPage() {
                 Top Familias
               </CardTitle>
             </CardHeader>
-            <CardContent className="pt-4 flex-1 h-64">
-              {topFamilies.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-muted-foreground opacity-50 py-4">
-                  <p className="text-sm font-medium">Vacío</p>
-                </div>
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
+            <CardContent className="p-0">
+              <div className="w-full flex flex-col gap-2 p-1">
+                {topFamilies.length === 0 ? (
+                  <div className="py-12 text-center text-muted-foreground flex flex-col items-center justify-center gap-2">
+                    <p className="text-sm font-medium">Vacío</p>
+                  </div>
+                ) : (
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={topFamilies} layout="vertical" margin={{ top: 0, right: 90, left: 0, bottom: 0 }}>
                     <XAxis type="number" hide />
                     <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 'bold', fill: '#475569' }} width={110} />
@@ -975,8 +979,10 @@ export default function DashboardPage() {
                       />
                     </Bar>
                   </BarChart>
-                </ResponsiveContainer>
-              )}
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
 
@@ -988,13 +994,15 @@ export default function DashboardPage() {
                 Top Productos
               </CardTitle>
             </CardHeader>
-            <CardContent className="pt-4 flex-1 h-64">
-              {topProducts.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-muted-foreground opacity-50 py-4">
-                  <p className="text-sm font-medium">Vacío</p>
-                </div>
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
+            <CardContent className="p-0">
+              <div className="w-full flex flex-col gap-2 p-1">
+                {topProducts.length === 0 ? (
+                  <div className="py-12 text-center text-muted-foreground flex flex-col items-center justify-center gap-2">
+                    <p className="text-sm font-medium">Vacío</p>
+                  </div>
+                ) : (
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={topProducts} layout="vertical" margin={{ top: 0, right: 90, left: 0, bottom: 0 }}>
                     <XAxis type="number" hide />
                     <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 'bold', fill: '#475569' }} width={110} />
@@ -1022,8 +1030,10 @@ export default function DashboardPage() {
                       />
                     </Bar>
                   </BarChart>
-                </ResponsiveContainer>
-              )}
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
 
