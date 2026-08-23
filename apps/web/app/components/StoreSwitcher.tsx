@@ -1,12 +1,14 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Store as StoreIcon, ChevronDown, Check, Building2, LayoutGrid } from 'lucide-react';
+import { createPortal } from "react-dom";
+import { Store as StoreIcon, ChevronDown, Check, Building2, LayoutGrid, Loader2 } from 'lucide-react';
 import { useStore, Store as StoreType } from '../context/StoreContext';
 
 export default function StoreSwitcher() {
   const { activeStore, availableStores, setActiveStore, setAllStoresMode, isLoadingStores, isAllStoresMode, isGlobalUser, availableStoreIds } = useStore();
   const [isOpen, setIsOpen] = useState(false);
+  const [isSwitching, setIsSwitching] = useState(false);
 
   if (isLoadingStores) {
     return (
@@ -37,14 +39,18 @@ export default function StoreSwitcher() {
   const handleSelectStore = async (store: StoreType) => {
     setIsOpen(false);
     if (store.id !== activeStore?.id || isAllStoresMode) {
+      setIsSwitching(true);
       await setActiveStore(store);
+      window.location.reload();
     }
   };
 
   const handleSelectAll = async () => {
     setIsOpen(false);
     if (!isAllStoresMode) {
+      setIsSwitching(true);
       await setAllStoresMode();
+      window.location.reload();
     }
   };
 
@@ -141,6 +147,15 @@ export default function StoreSwitcher() {
             </div>
           </div>
         </>
+      )}
+
+      {isSwitching && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[99999] bg-background/95 backdrop-blur-sm flex flex-col items-center justify-center animate-in fade-in duration-100">
+          <Loader2 className="w-12 h-12 text-primary animate-spin mb-4" />
+          <h2 className="text-xl font-bold text-foreground">Cambiando tienda...</h2>
+          <p className="text-sm text-muted-foreground mt-2">Sincronizando entorno de trabajo</p>
+        </div>,
+        document.body
       )}
     </div>
   );

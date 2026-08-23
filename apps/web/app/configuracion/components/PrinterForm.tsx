@@ -6,11 +6,20 @@ import { ArrowLeft, Printer, Trash2, Search, CheckCircle2, AlertCircle, Loader2,
 import { supabase } from '../../lib/supabase';
 import { useRole } from '../../context/RoleContext';
 import { useStore } from '../../context/StoreContext';
-import { requestBluetoothDevice, printTestReceipt } from '../utils/printerEngine';
+import { 
+  requestBluetoothDevice, 
+  requestUsbDevice, 
+  printTestReceipt, 
+  usbSerialAdapter, 
+  printViaThermalHtml, 
+  generateTicketLines, 
+  buildEscPosBytes,
+  DEFAULT_TEST_SALE_DATA
+} from '../utils/printerEngine';
 import ReceiptPreview from '../../components/ReceiptPreview';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
+import { useIsNativeAndroid } from '../../lib/platform';
 
-// Helper de Toast (mismo estilo que Contabilidad)
 function Toast({ message, type }: { message: string; type: 'success' | 'error' }) {
   return (
     <div className={`fixed bottom-5 right-5 z-50 inline-flex items-center gap-2 px-4 py-2.5 rounded-full border shadow-lg text-xs font-semibold animate-in fade-in slide-in-from-bottom-4 ${
@@ -32,6 +41,7 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
   const { permissions } = useRole();
   const router = useRouter();
   const isEditing = !!printerId;
+  const isNativeAndroid = useIsNativeAndroid();
 
   const [name, setName] = useState('Caja');
   const [model, setModel] = useState('Otro modelo');
@@ -42,7 +52,8 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
   const [port, setPort] = useState(9100);
   const [printReceipts, setPrintReceipts] = useState(true);
   const [autoPrint, setAutoPrint] = useState(false);
-  const [maxChars, setMaxChars] = useState(42);
+  const [maxChars, setMaxChars] = useState<number | string>(48);
+  const [isCustomChars, setIsCustomChars] = useState(false);
   const { activeStoreId } = useStore();
 
   // Store / Tenant assignment (required)
@@ -52,6 +63,8 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
 
   // Hardware state
   const [btDeviceObj, setBtDeviceObj] = useState<any>(null);
+  const [usbDeviceObj, setUsbDeviceObj] = useState<any>(null);
+  const [usbName, setUsbName] = useState<string>('');
   const [isSearching, setIsSearching] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -69,7 +82,7 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
   }, [isEditing]);
 
   const fetchPrinter = async () => {
-    const { data, error } = await supabase.from('printers').select('*').eq('id', printerId).single();
+    const { data } = await supabase.from('printers').select('*').eq('id', printerId).single();
     if (data) {
       setName(data.name);
       setType(data.type);
@@ -80,19 +93,22 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
       setAutoPrint(data.auto_print);
       setStoreId(data.store_id || null);
       setIsActive(data.is_active !== false);
-      if (data.max_chars) setMaxChars(data.max_chars);
+      if (data.max_chars) {
+        setMaxChars(data.max_chars);
+        if (![32, 42, 48, 64].includes(data.max_chars)) {
+          setIsCustomChars(true);
+        }
+      }
     }
   };
 
   useEffect(() => {
-    // Load stores for selector
     const loadStores = async () => {
       const { data } = await supabase.from('stores').select('*').eq('is_active', true).order('created_at', { ascending: true });
       if (data) setStores(data);
     };
     loadStores();
 
-    // If creating and there is an active store, preselect it
     if (!isEditing && activeStoreId) {
       setStoreId(activeStoreId);
     }
@@ -116,16 +132,18 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
 
     setIsLoading(true);
 
+    const safeNumericCols = Number(maxChars) || (paperWidth <= 58 ? 32 : 48);
+
     const payload: any = {
       name,
       type,
       paper_width: paperWidth,
-      mac_address: type === 'bluetooth' ? macAddress : null,
+      mac_address: (type === 'bluetooth' || type === 'usb') ? (macAddress || usbName) : null,
       ip_address: type === 'wifi' ? ipAddress : null,
       port: type === 'wifi' ? port : null,
       auto_print: autoPrint,
-      max_chars: maxChars
-      ,store_id: storeId
+      max_chars: safeNumericCols,
+      store_id: storeId
     };
 
     let error;
@@ -133,19 +151,19 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
       const res = await supabase.from('printers').update(payload).eq('id', printerId);
       error = res.error;
     } else {
-      // New printers are active by default
       payload.is_active = true;
       const res = await supabase.from('printers').insert(payload);
       error = res.error;
     }
 
     setIsLoading(false);
+
     if (error) {
       showToast(error.message, 'error');
     } else {
       setHasUnsavedChanges(false);
-      showToast(isEditing ? 'Impresora actualizada' : 'Impresora agregada', 'success');
-      setTimeout(() => router.push('/configuracion'), 1000);
+      showToast('Impresora guardada correctamente', 'success');
+      setTimeout(() => router.push('/configuracion'), 800);
     }
   };
 
@@ -184,10 +202,27 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
   const handleBuscarBT = async () => {
     try {
       setIsSearching(true);
-      const { name, device } = await requestBluetoothDevice();
-      setMacAddress(name); // Guardamos el nombre comercial en el UI para que el usuario lo vea
+      const { name: btName, device } = await requestBluetoothDevice();
+      setMacAddress(btName);
       setBtDeviceObj(device);
-      showToast(`Conectado a: ${name}`, 'success');
+      setHasUnsavedChanges(true);
+      showToast(`Conectado a: ${btName}`, 'success');
+    } catch (error: any) {
+      showToast(error.message, 'error');
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleBuscarUSB = async () => {
+    try {
+      setIsSearching(true);
+      const result = await requestUsbDevice();
+      setUsbName(result.name);
+      setUsbDeviceObj(result);
+      setMacAddress(result.name);
+      setHasUnsavedChanges(true);
+      showToast(`Conectado a: ${result.name}`, 'success');
     } catch (error: any) {
       showToast(error.message, 'error');
     } finally {
@@ -196,22 +231,51 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
   };
 
   const handleTestPrint = async () => {
-    if (type !== 'bluetooth') {
-      showToast('Por ahora la prueba solo está simulada para redes WiFi.', 'error');
+    const currentCols = Number(maxChars) || (paperWidth <= 58 ? 32 : 48);
+
+    if (type === 'bluetooth') {
+      if (!btDeviceObj) {
+        showToast('Por favor, busca y empareja la impresora Bluetooth con el botón BUSCAR primero.', 'error');
+        return;
+      }
+
+      try {
+        showToast('Conectando con la impresora Bluetooth...', 'success');
+        await printTestReceipt(btDeviceObj, paperWidth, currentCols);
+        showToast('¡Impresión Bluetooth enviada con éxito!', 'success');
+      } catch (error: any) {
+        showToast(error.message, 'error');
+      }
       return;
     }
 
-    if (!btDeviceObj) {
-      showToast('Por favor, busca y empareja la impresora Bluetooth primero.', 'error');
+    if (type === 'usb') {
+      if (!usbDeviceObj) {
+        showToast('Por favor, selecciona la impresora USB con el botón BUSCAR primero.', 'error');
+        return;
+      }
+
+      try {
+        showToast('Enviando datos al puerto USB...', 'success');
+        const lines = generateTicketLines(DEFAULT_TEST_SALE_DATA, currentCols);
+        const uint8 = buildEscPosBytes(lines, currentCols);
+        await usbSerialAdapter.printEscPos(usbDeviceObj, uint8);
+        showToast('Datos enviados al puerto USB con éxito.', 'success');
+      } catch (error: any) {
+        showToast(error.message, 'error');
+      }
       return;
     }
 
-    try {
-      showToast('Enviando página de prueba...', 'success');
-      await printTestReceipt(btDeviceObj, paperWidth);
-      showToast('¡Impresión enviada con éxito!', 'success');
-    } catch (error: any) {
-      showToast(error.message, 'error');
+    if (type === 'wifi') {
+      try {
+        showToast('Abriendo ventana de impresión térmica...', 'success');
+        const lines = generateTicketLines(DEFAULT_TEST_SALE_DATA, currentCols);
+        printViaThermalHtml(lines, paperWidth);
+      } catch (error: any) {
+        showToast(error.message, 'error');
+      }
+      return;
     }
   };
 
@@ -229,8 +293,11 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
     setPort(9100);
     setPrintReceipts(true);
     setAutoPrint(false);
-    setMaxChars(42);
+    setMaxChars(48);
+    setIsCustomChars(false);
     setBtDeviceObj(null);
+    setUsbDeviceObj(null);
+    setUsbName('');
     showToast('Valores predeterminados restaurados', 'success');
     setShowRestoreConfirm(false);
   };
@@ -249,34 +316,57 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
             <div className="w-8 h-8 bg-slate-500 rounded-lg flex items-center justify-center">
               <Printer className="w-4 h-4 text-white" />
             </div>
-            <div>
-              <h1 className="text-base font-bold leading-none">{isEditing ? 'Editar Impresora' : 'Agregar Impresora'}</h1>
-              <p className="text-xs text-muted-foreground mt-0.5">Configuración de dispositivo</p>
+            <div className="min-w-0">
+              <h1 className="text-base sm:text-lg md:text-xl font-bold tracking-tight text-foreground truncate">{isEditing ? 'Editar Impresora' : 'Agregar Impresora'}</h1>
+              <p className="text-[10px] sm:text-xs text-muted-foreground font-medium truncate">Configuración de dispositivo</p>
             </div>
           </div>
         </div>
         <button 
           onClick={handleSave} 
           disabled={isLoading}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold transition-colors shadow-sm hover:bg-primary/90 disabled:opacity-50"
+          className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-bold transition-colors shadow-sm hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
         >
-          <Save className="w-3.5 h-3.5" /> GUARDAR
+          <Save className="w-4 h-4" /> GUARDAR
         </button>
       </header>
 
-      <main className="flex-1 p-6 max-w-2xl mx-auto w-full space-y-6 pb-20">
-        {/* Bloque 1: Básicos */}
+      <main className="flex-1 max-w-2xl w-full mx-auto p-4 sm:p-6 space-y-6">
+        {/* Banner de Estado Inactivo */}
+        {isEditing && !isActive && (
+          <div className="bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl p-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <AlertCircle className="w-5 h-5 text-rose-600 dark:text-rose-400 shrink-0" />
+              <div>
+                <p className="text-sm font-bold text-rose-900 dark:text-rose-200">Impresora Desactivada</p>
+                <p className="text-xs text-rose-700 dark:text-rose-400">Esta impresora está oculta para el POS y Caja.</p>
+              </div>
+            </div>
+            {Boolean(permissions?.settings_printers_manage) && (
+              <button 
+                onClick={confirmReactivate} 
+                disabled={isLoading}
+                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors shrink-0"
+              >
+                REACTIVAR
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Formulario Principal */}
         <div className="bg-card border border-border rounded-xl shadow-sm divide-y divide-border overflow-hidden">
           <div className="px-5 py-4">
-            <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Nombre</label>
+            <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Nombre de la impresora</label>
             <input 
               type="text" 
               value={name} 
               onChange={e => { setName(e.target.value); setHasUnsavedChanges(true); }}
-              className="w-full text-[15px] font-medium bg-transparent outline-none placeholder:text-muted-foreground"
-              placeholder="Ej: Caja"
+              className="w-full text-[15px] font-medium bg-transparent outline-none"
+              placeholder="Ej. Caja Principal"
             />
           </div>
+
           <div className="px-5 py-4">
             <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Modelo de la impresora</label>
             <select 
@@ -284,27 +374,30 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
               onChange={e => { setModel(e.target.value); setHasUnsavedChanges(true); }}
               className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer"
             >
-              <option value="Otro modelo">Otro modelo</option>
+              <option value="Otro modelo">Otro modelo (ESC/POS Genérico)</option>
               <option value="Epson TM-T20">Epson TM-T20</option>
+              <option value="Xprinter XP-58">Xprinter XP-58 / XP-80</option>
               <option value="Star Micronics">Star Micronics</option>
             </select>
           </div>
+
           <div className="px-5 py-4">
-            <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Interfaz</label>
+            <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Tipo de Conexión</label>
             <select 
               value={type} 
               onChange={e => { setType(e.target.value); setHasUnsavedChanges(true); }}
               className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer"
             >
-              <option value="bluetooth">Bluetooth</option>
-              <option value="wifi">WiFi</option>
-              <option value="usb">USB</option>
+              <option value="bluetooth">Bluetooth (Inalámbrico)</option>
+              <option value="usb">USB (Cable Directo)</option>
+              <option value="wifi">WiFi / Red Local (LAN)</option>
             </select>
           </div>
+
           <div className="px-5 py-4">
             <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Tienda / Sucursal *</label>
-            <select
-              value={storeId || ''}
+            <select 
+              value={storeId || ''} 
               onChange={e => { setStoreId(e.target.value || null); setHasUnsavedChanges(true); }}
               className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer"
             >
@@ -316,26 +409,56 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
           </div>
         </div>
 
-        {/* Lógica Condicional de Interfaz */}
+        {/* Lógica Condicional de Interfaz según Tipo */}
         <div className="bg-card border border-border rounded-xl shadow-sm divide-y divide-border overflow-hidden">
           {type === 'bluetooth' && (
             <div className="px-5 py-4 flex items-center justify-between">
-              <div className="flex-1">
-                <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Impresora Bluetooth</label>
+              <div className="flex-1 min-w-0 pr-4">
+                <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Dispositivo Bluetooth</label>
                 <input 
                   type="text" 
                   readOnly
                   value={macAddress} 
-                  className="w-full text-[15px] font-medium text-muted-foreground bg-transparent outline-none cursor-not-allowed"
-                  placeholder="No seleccionada"
+                  className="w-full text-[15px] font-medium text-foreground bg-transparent outline-none truncate"
+                  placeholder={isNativeAndroid ? 'Pulsa BUSCAR para escanear dispositivos Android' : 'No seleccionada (Haz clic en BUSCAR)'}
+                />
+              </div>
+              {/* En Android nativo: usa AndroidBluetoothSerialAdapter (BT Classic SPP).
+                  En Web: usa WebBluetoothAdapter (Web Bluetooth API / Chrome Desktop). */}
+              <button 
+                onClick={handleBuscarBT}
+                disabled={isSearching}
+                className={`px-4 py-2 font-bold text-sm rounded-lg border transition-colors flex items-center shadow-sm shrink-0 cursor-pointer ${
+                  isNativeAndroid
+                    ? 'bg-sky-500 hover:bg-sky-600 text-white border-sky-600 active:bg-sky-700'
+                    : 'bg-secondary text-secondary-foreground border-border hover:bg-secondary/80 active:bg-secondary/60'
+                }`}
+              >
+                <Search className="w-4 h-4 mr-2" />
+                {isSearching ? 'BUSCANDO...' : 'BUSCAR'}
+              </button>
+            </div>
+          )}
+
+          {type === 'usb' && (
+            <div className="px-5 py-4 flex items-center justify-between">
+              <div className="flex-1 min-w-0 pr-4">
+                <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Dispositivo USB (Cable Directo)</label>
+                <input 
+                  type="text" 
+                  readOnly
+                  value={usbName || macAddress} 
+                  className="w-full text-[15px] font-medium text-foreground bg-transparent outline-none truncate"
+                  placeholder="No seleccionada (Haz clic en BUSCAR)"
                 />
               </div>
               <button 
-                onClick={handleBuscarBT}
-                className="ml-4 px-4 py-2 bg-secondary text-secondary-foreground font-bold text-sm rounded-lg border border-border hover:bg-secondary/80 active:bg-secondary/60 transition-colors flex items-center shadow-sm"
+                onClick={handleBuscarUSB}
+                disabled={isSearching}
+                className="px-4 py-2 bg-secondary text-secondary-foreground font-bold text-sm rounded-lg border border-border hover:bg-secondary/80 active:bg-secondary/60 transition-colors flex items-center shadow-sm shrink-0 cursor-pointer"
               >
                 <Search className="w-4 h-4 mr-2" />
-                BUSCAR
+                {isSearching ? 'BUSCANDO...' : 'BUSCAR'}
               </button>
             </div>
           )}
@@ -343,7 +466,7 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
           {type === 'wifi' && (
             <>
               <div className="px-5 py-4">
-                <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Dirección IP</label>
+                <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Dirección IP de la Impresora</label>
                 <input 
                   type="text" 
                   value={ipAddress} 
@@ -353,7 +476,7 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
                 />
               </div>
               <div className="px-5 py-4">
-                <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Puerto</label>
+                <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Puerto RAW ESC/POS</label>
                 <input 
                   type="number" 
                   value={port} 
@@ -369,24 +492,84 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
             <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Ancho de papel</label>
             <select 
               value={paperWidth} 
-              onChange={e => { setPaperWidth(Number(e.target.value)); setHasUnsavedChanges(true); }}
+              onChange={e => { 
+                const newWidth = Number(e.target.value);
+                setPaperWidth(newWidth);
+                if (newWidth === 58) {
+                  setMaxChars(32);
+                } else if (newWidth === 80 && Number(maxChars) === 32) {
+                  setMaxChars(48);
+                }
+                setHasUnsavedChanges(true); 
+              }}
               className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer"
             >
               <option value={80}>80 mm</option>
               <option value={58}>58 mm</option>
             </select>
           </div>
+
           <div className="px-5 py-4">
-            <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Caracteres por línea</label>
-            <select 
-              value={maxChars} 
-              onChange={e => { setMaxChars(Number(e.target.value)); setHasUnsavedChanges(true); }}
-              className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer"
-            >
-              <option value={32}>32 (58mm)</option>
-              <option value={42}>42 (80mm genérico)</option>
-              <option value={48}>48 (80mm estándar)</option>
-            </select>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                Caracteres por línea ({maxChars} columnas)
+              </label>
+              <button
+                type="button"
+                onClick={() => setIsCustomChars(!isCustomChars)}
+                className="text-[11px] font-bold text-primary hover:underline cursor-pointer"
+              >
+                {isCustomChars ? 'Ver lista estándar' : 'Escribir número manual'}
+              </button>
+            </div>
+
+            {!isCustomChars ? (
+              <select 
+                value={[32, 42, 48, 64].includes(Number(maxChars)) ? Number(maxChars) : 'custom'} 
+                onChange={e => { 
+                  if (e.target.value === 'custom') {
+                    setIsCustomChars(true);
+                  } else {
+                    setMaxChars(Number(e.target.value));
+                    setHasUnsavedChanges(true); 
+                  }
+                }}
+                className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer"
+              >
+                <option value={32}>32 (58mm Portátil)</option>
+                <option value={42}>42 (80mm Genérico)</option>
+                <option value={48}>48 (80mm Font A Estándar)</option>
+                <option value={64}>64 (80mm Font B Condensada)</option>
+                <option value="custom">Personalizado...</option>
+              </select>
+            ) : (
+              <div className="flex items-center gap-3">
+                <input 
+                  type="number"
+                  min={20}
+                  max={90}
+                  value={maxChars}
+                  onChange={e => {
+                    const raw = e.target.value;
+                    setMaxChars(raw);
+                    setHasUnsavedChanges(true);
+                  }}
+                  onBlur={() => {
+                    const num = Number(maxChars);
+                    if (!maxChars || isNaN(num) || num < 20) {
+                      setMaxChars(20);
+                    } else if (num > 90) {
+                      setMaxChars(90);
+                    } else {
+                      setMaxChars(Math.round(num));
+                    }
+                  }}
+                  className="w-full text-[15px] font-bold bg-secondary/50 px-3 py-1.5 rounded-lg border border-border outline-none"
+                  placeholder="Ej. 48"
+                />
+                <span className="text-xs font-bold text-muted-foreground whitespace-nowrap">columnas</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -413,18 +596,9 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
         {/* Vista Previa / Calibrador */}
         <div className="mt-4">
           <ReceiptPreview 
-            maxChars={maxChars} 
-            saleData={{
-              proforma_number: 'T001-00001234',
-              customer_name: 'Cliente Prueba',
-              items: [
-                { name: 'TELA ALGODON PREMIUM 100%', quantity: 2, price: 15.5 },
-                { name: 'HILO POLYESTER X', quantity: 1, price: 5 },
-                { name: 'AGUJAS INDUSTRIALES', quantity: 10, price: 0.5 }
-              ],
-              total: 41,
-              comment: 'Prueba de calibración de ticket'
-            }} 
+            maxChars={Number(maxChars) || 48}
+            paperWidth={paperWidth}
+            saleData={DEFAULT_TEST_SALE_DATA} 
           />
         </div>
 
@@ -432,7 +606,7 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
         <div className="mt-8 flex flex-col items-center space-y-4">
           <button 
             onClick={handleTestPrint}
-            className="flex items-center justify-center w-full max-w-sm py-3 bg-card border border-border font-bold text-sm rounded-xl shadow-sm hover:bg-muted active:bg-muted/80 transition-colors"
+            className="flex items-center justify-center w-full max-w-sm py-3 bg-card border border-border font-bold text-sm rounded-xl shadow-sm hover:bg-muted active:bg-muted/80 transition-colors cursor-pointer"
           >
             <Printer className="w-4 h-4 mr-2" />
             IMPRESIÓN DE PRUEBA
@@ -440,7 +614,7 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
           
           <button 
             onClick={handleRestoreDefaults}
-            className="flex items-center justify-center w-full max-w-sm py-3 text-muted-foreground font-bold text-sm rounded-xl hover:bg-muted active:bg-muted/80 transition-colors"
+            className="flex items-center justify-center w-full max-w-sm py-3 text-muted-foreground font-bold text-sm rounded-xl hover:bg-muted active:bg-muted/80 transition-colors cursor-pointer"
           >
             RESTAURAR VALORES PREDETERMINADOS
           </button>
@@ -449,66 +623,58 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
             isActive ? (
               <button 
                 onClick={handleDelete}
-                disabled={isLoading}
-                className="flex items-center justify-center w-full max-w-sm py-3 text-red-500 font-bold text-sm rounded-xl hover:bg-red-500/10 active:bg-red-500/20 transition-colors disabled:opacity-50"
+                className="flex items-center justify-center w-full max-w-sm py-3 text-rose-600 font-bold text-sm rounded-xl hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer"
               >
                 <Trash2 className="w-4 h-4 mr-2" />
                 DESACTIVAR IMPRESORA
               </button>
             ) : (
-              <button
+              <button 
                 onClick={confirmReactivate}
-                disabled={isLoading}
-                className="flex items-center justify-center w-full max-w-sm py-3 text-emerald-600 font-bold text-sm rounded-xl hover:bg-emerald-600/10 active:bg-emerald-600/20 transition-colors disabled:opacity-50"
+                className="flex items-center justify-center w-full max-w-sm py-3 text-emerald-600 font-bold text-sm rounded-xl hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition-colors cursor-pointer"
               >
                 <CheckCircle2 className="w-4 h-4 mr-2" />
-                REACTIVAR IMPRESORA
+                ACTIVAR IMPRESORA
               </button>
             )
           )}
         </div>
       </main>
 
-      {/* Modal Básico Buscando BT */}
-      {isSearching && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center animate-in fade-in duration-200">
-          <div className="bg-card rounded-2xl p-8 max-w-xs w-full shadow-2xl flex flex-col items-center border border-border">
-            <Loader2 className="w-12 h-12 text-emerald-600 animate-spin mb-4" />
-            <h3 className="text-lg font-bold mb-1">Buscando...</h3>
-            <p className="text-sm text-muted-foreground text-center">Asegúrate de que la impresora esté encendida y emparejada.</p>
-          </div>
-        </div>
-      )}
+      {toast && <Toast message={toast.message} type={toast.type} />}
 
-      {/* Modal Confirmación Salir */}
       <ConfirmDialog
         isOpen={showExitConfirm}
-        onCancel={() => setShowExitConfirm(false)}
-        onConfirm={() => router.push('/configuracion')}
         title="Cambios sin guardar"
-        description="Tienes cambios que no han sido guardados. ¿Estás seguro de que quieres salir? Se perderán todas tus modificaciones."
-        isLoading={false}
+        description="Tienes cambios pendientes. ¿Deseas salir sin guardar los cambios de la impresora?"
+        confirmText="Salir sin guardar"
+        cancelText="Permanecer aquí"
+        isDestructive={false}
+        onConfirm={() => router.push('/configuracion')}
+        onCancel={() => setShowExitConfirm(false)}
       />
 
       <ConfirmDialog
         isOpen={showDeleteConfirm}
-        onCancel={() => setShowDeleteConfirm(false)}
-        onConfirm={confirmDelete}
         title="Desactivar Impresora"
-        description="¿Estás seguro de desactivar esta impresora? Podrás reactivarla luego desde el listado."
-        isLoading={isLoading}
+        description="¿Estás seguro de que deseas desactivar esta impresora? Ya no estará disponible para impresión automática."
+        confirmText="Desactivar"
+        cancelText="Cancelar"
+        isDestructive={true}
+        onConfirm={confirmDelete}
+        onCancel={() => setShowDeleteConfirm(false)}
       />
 
       <ConfirmDialog
         isOpen={showRestoreConfirm}
-        onCancel={() => setShowRestoreConfirm(false)}
-        onConfirm={confirmRestoreDefaults}
         title="Restaurar Valores"
-        description="¿Deseas restaurar la configuración predeterminada? Se perderán los cambios no guardados."
-        isLoading={false}
+        description="¿Deseas restaurar todos los parámetros de la impresora a los valores predeterminados de fábrica?"
+        confirmText="Restaurar"
+        cancelText="Cancelar"
+        isDestructive={false}
+        onConfirm={confirmRestoreDefaults}
+        onCancel={() => setShowRestoreConfirm(false)}
       />
-
-      {toast && <Toast message={toast.message} type={toast.type} />}
     </div>
   );
 }

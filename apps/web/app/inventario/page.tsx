@@ -28,11 +28,12 @@ import {
   Pagination
 } from "@goltex/ui";
 import { useTableSort } from "../hooks/useTableSort";
-import { ArrowLeft, Search, Download, Filter, Plus, Edit2, Trash2, Save, FolderPlus, PackageSearch, AlertTriangle, Scissors, RefreshCcw } from "lucide-react";
+import { ArrowLeft, Search, Download, Filter, Plus, Edit2, Trash2, Save, FolderPlus, PackageSearch, AlertTriangle, Scissors, RefreshCcw, Loader2 } from "lucide-react";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { supabase } from "../lib/supabase";
 import StoreSwitcher from "../components/StoreSwitcher";
 import StoreSelector from "../components/StoreSelector";
+import { useIsNativeAndroid } from "../lib/platform";
 
 type Product = {
   id: string;
@@ -68,7 +69,8 @@ type Service = {
 export default function InventarioPage() {
   const router = useRouter();
   const { role, isHydrated, permissions } = useRole();
-  const { activeStoreId, isAllStoresMode, availableStoreIds, availableStores } = useStore();
+  const { activeStoreId, isAllStoresMode, availableStoreIds, availableStores, isLoadingStores } = useStore();
+  const isNativeAndroid = useIsNativeAndroid();
 
   const getStoreName = (id?: string) => {
     if (!id) return "—";
@@ -145,14 +147,16 @@ export default function InventarioPage() {
   }, [families, formData.store_id, editingProduct, formData.family_id]);
 
   useEffect(() => {
+    if (isLoadingStores) return;
     if (isAllStoresMode || activeStoreId) {
       fetchProducts();
       fetchFamilies();
       fetchServices();
     }
-  }, [activeStoreId, isAllStoresMode, availableStoreIds]);
+  }, [activeStoreId, isAllStoresMode, availableStoreIds, isLoadingStores]);
 
   const fetchProducts = async () => {
+    if (isLoadingStores) return;
     setLoadingProducts(true);
     let query = supabase.from("products").select("*").order("created_at", { ascending: false });
     if (isAllStoresMode) {
@@ -170,6 +174,7 @@ export default function InventarioPage() {
   };
 
   const fetchFamilies = async () => {
+    if (isLoadingStores) return;
     setLoadingFamilies(true);
     let query = supabase.from("families").select("*").order("name", { ascending: true });
     if (isAllStoresMode) {
@@ -187,6 +192,7 @@ export default function InventarioPage() {
   };
 
   const fetchServices = async () => {
+    if (isLoadingStores) return;
     setLoadingServices(true);
     let query = supabase.from("services").select("*").order("name", { ascending: true });
     if (isAllStoresMode) {
@@ -583,7 +589,24 @@ export default function InventarioPage() {
   );
 
   // ── Permission guards – placed AFTER all hooks (Rules of Hooks) ──────────
-  if (!isHydrated) return null;
+  if (!isHydrated || isLoadingStores) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="w-8 h-8 text-primary animate-spin" />
+          <p className="text-sm font-semibold text-muted-foreground">Cargando catálogo e inventario...</p>
+        </div>
+      </div>
+    );
+  }
+  if (isNativeAndroid) {
+    return (
+      <AccessDeniedView
+        moduleName="Catálogo / Inventario"
+        customReason="El módulo de Catálogo e Inventario está disponible exclusivamente desde la versión Web."
+      />
+    );
+  }
   if (!permissions?.access_inventory) {
     return <AccessDeniedView moduleName="Catálogo / Inventario" />;
   }
@@ -602,29 +625,31 @@ export default function InventarioPage() {
               <PackageSearch className="w-4 h-4 text-white" />
             </div>
             <div className="min-w-0">
-              <h1 className="text-sm sm:text-base font-bold leading-none truncate">Módulo de Inventario</h1>
-              <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 truncate">Catálogo y Control de Stock</p>
+              <h1 className="text-base sm:text-lg md:text-xl font-bold tracking-tight text-foreground truncate">Módulo de Inventario</h1>
+              <p className="text-[10px] sm:text-xs text-muted-foreground font-medium truncate">Catálogo y Control de Stock</p>
             </div>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 sm:gap-4 w-full sm:w-auto justify-between sm:justify-end">
           <StoreSwitcher />
-          {activeTab === "catalogo" && Boolean(permissions?.inventory_create) && (
-            <button onClick={() => openModal(undefined, "catalogo")} className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold transition-colors shadow-sm hover:bg-primary/90 whitespace-nowrap shrink-0">
-              <Plus className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Nuevo Producto</span><span className="sm:hidden">Producto</span>
-            </button>
-          )}
-          {activeTab === "familias" && Boolean(permissions?.inventory_create) && (
-            <button onClick={() => openFamilyModal()} className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold transition-colors shadow-sm hover:bg-primary/90 whitespace-nowrap shrink-0">
-              <FolderPlus className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Nueva Familia</span><span className="sm:hidden">Familia</span>
-            </button>
-          )}
-          {activeTab === "servicios" && Boolean(permissions?.inventory_create) && (
-            <button onClick={() => openServiceModal()} className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold transition-colors shadow-sm hover:bg-primary/90 whitespace-nowrap shrink-0">
-              <Plus className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Nuevo Servicio</span><span className="sm:hidden">Servicio</span>
-            </button>
-          )}
+          <div className="w-[110px] sm:w-[145px] flex justify-end shrink-0">
+            {activeTab === "catalogo" && Boolean(permissions?.inventory_create) && (
+              <button onClick={() => openModal(undefined, "catalogo")} className="flex w-full items-center justify-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold transition-colors shadow-sm hover:bg-primary/90 whitespace-nowrap">
+                <Plus className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Nuevo Producto</span><span className="sm:hidden">Producto</span>
+              </button>
+            )}
+            {activeTab === "familias" && Boolean(permissions?.inventory_create) && (
+              <button onClick={() => openFamilyModal()} className="flex w-full items-center justify-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold transition-colors shadow-sm hover:bg-primary/90 whitespace-nowrap">
+                <FolderPlus className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Nueva Familia</span><span className="sm:hidden">Familia</span>
+              </button>
+            )}
+            {activeTab === "servicios" && Boolean(permissions?.inventory_create) && (
+              <button onClick={() => openServiceModal()} className="flex w-full items-center justify-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-bold transition-colors shadow-sm hover:bg-primary/90 whitespace-nowrap">
+                <Plus className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Nuevo Servicio</span><span className="sm:hidden">Servicio</span>
+              </button>
+            )}
+          </div>
 
           <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center overflow-x-auto whitespace-nowrap scrollbar-hide border-b border-border pb-1 w-full max-w-full">
             {[

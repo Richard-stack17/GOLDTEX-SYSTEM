@@ -4,14 +4,15 @@ import React, { useState, useRef, useCallback } from 'react';
 import * as XLSX from 'xlsx-js-style';
 import {
   Download, Calendar, CheckCircle2, AlertCircle, BarChart3,
-  Eye, Database, ArrowLeft, RefreshCw, Landmark, Maximize2, Minimize2
+  Eye, Database, ArrowLeft, RefreshCw, Landmark, Maximize2, Minimize2, Loader2
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useRole } from '../context/RoleContext';
-import { AccessDeniedView } from '../components/AccessDeniedView';
 import { useStore } from '../context/StoreContext';
+import { AccessDeniedView } from '../components/AccessDeniedView';
 import StoreSwitcher from "../components/StoreSwitcher";
 import Link from 'next/link';
+import { useIsNativeAndroid } from '../lib/platform';
 
 import { ExcelRow } from './types';
 import ContabilidadTable from './components/ContabilidadTable';
@@ -102,7 +103,8 @@ function Toast({ message, type }: { message: string; type: 'success' | 'error' }
 
 export default function ContabilidadPage() {
   const { isHydrated, permissions, role } = useRole();
-  const { activeStoreId, isAllStoresMode, availableStoreIds } = useStore();
+  const { activeStoreId, isAllStoresMode, availableStoreIds, isLoadingStores } = useStore();
+  const isNativeAndroid = useIsNativeAndroid();
 
   const [dateFilter, setDateFilter] = useState<'TODAY' | 'MONTH' | 'CUSTOM'>('TODAY');
   const [customStart, setCustomStart] = useState(limaToday());
@@ -137,6 +139,7 @@ export default function ContabilidadPage() {
       .gte('issue_date', start)
       .lte('issue_date', end)
       .eq('status', 'COMPLETED')
+      .is('parent_sale_id', null)
       .order('issue_date', { ascending: true });
       
     // ── BLINDAJE CAPA 2: Filtrado estricto por permiso contextual de módulo ──────
@@ -153,6 +156,8 @@ export default function ContabilidadPage() {
   };
 
   const loadRows = useCallback(async (start: string, end: string) => {
+    if (isLoadingStores) return;
+    if (!isAllStoresMode && !activeStoreId) return;
     if (isEditingRef.current) return;
     setIsLoading(true); setError(null); setPreviewRows(null); setIsDataCurrent(false);
     try {
@@ -166,13 +171,14 @@ export default function ContabilidadPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [activeStoreId]);
+  }, [activeStoreId, isAllStoresMode, availableStoreIds, isLoadingStores]);
 
   // ── Auto-load on mount ─────────────────────────────────────────────────────
   React.useEffect(() => {
-    const today = limaToday();
-    loadRows(today, today);
-  }, [loadRows]);
+    if (isLoadingStores) return;
+    if (!isAllStoresMode && !activeStoreId) return;
+    loadRows(startDate, endDate);
+  }, [loadRows, activeStoreId, isAllStoresMode, isLoadingStores]);
 
   React.useEffect(() => {
     const channel = supabase
@@ -422,7 +428,24 @@ export default function ContabilidadPage() {
   const inlineCellCls = 'h-7 px-1.5 border-2 border-transparent hover:border-indigo-200 focus:border-indigo-500 rounded bg-transparent focus:bg-white text-xs font-bold w-full focus:outline-none transition-colors';
 
   // ── Permission guards – placed AFTER all hooks (Rules of Hooks) ──────────
-  if (!isHydrated) return null;
+  if (!isHydrated || isLoadingStores) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="w-8 h-8 text-emerald-600 animate-spin" />
+          <p className="text-sm font-semibold text-gray-600">Cargando contabilidad...</p>
+        </div>
+      </div>
+    );
+  }
+  if (isNativeAndroid) {
+    return (
+      <AccessDeniedView
+        moduleName="Contabilidad"
+        customReason="El módulo de Contabilidad está disponible exclusivamente desde la versión Web."
+      />
+    );
+  }
   if (!permissions?.access_contabilidad) {
     return <AccessDeniedView moduleName="Módulo de Contabilidad" />;
   }
@@ -444,9 +467,9 @@ export default function ContabilidadPage() {
               <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center">
                 <BarChart3 className="w-4 h-4 text-white" />
               </div>
-              <div>
-                <h1 className="text-base font-bold leading-none">Módulo de Contabilidad</h1>
-                <p className="text-xs text-muted-foreground mt-0.5">Control de Ventas y Liquidación</p>
+              <div className="min-w-0">
+                <h1 className="text-base sm:text-lg md:text-xl font-bold tracking-tight text-foreground truncate">Módulo de Contabilidad</h1>
+                <p className="text-[10px] sm:text-xs text-muted-foreground font-medium truncate">Control de Ventas y Liquidación</p>
               </div>
             </div>
           </div>

@@ -19,6 +19,7 @@ export default function AccountSwitcher() {
   const [selectedUser, setSelectedUser] = useState<any | null>(null);
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [isSwitching, setIsSwitching] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -81,6 +82,7 @@ export default function AccountSwitcher() {
 
     setError(null);
     setLoading(true);
+    setIsSwitching(true);
 
     try {
       const { data: profileData, error: profileErr } = await supabase
@@ -113,9 +115,6 @@ export default function AccountSwitcher() {
         localStorage.removeItem("goltex_employee_id");
       }
 
-      setRole(profileData.role);
-      setUsername(profileData.username);
-      setEmployeeId(profileData.employee_id ?? null);
       
       // Update accounts order (bring to top)
       const newSaved = savedAccounts.filter(a => a.username !== profileData.username);
@@ -298,6 +297,15 @@ export default function AccountSwitcher() {
               )}
             </div>
           </div>
+        </div>,
+        document.body
+      )}
+
+      {isSwitching && createPortal(
+        <div className="fixed inset-0 z-[99999] bg-background/95 backdrop-blur-sm flex flex-col items-center justify-center animate-in fade-in duration-100">
+          <Loader2 className="w-12 h-12 text-primary animate-spin mb-4" />
+          <h2 className="text-xl font-bold text-foreground">Cambiando usuario...</h2>
+          <p className="text-sm text-muted-foreground mt-2">Sincronizando entorno de trabajo</p>
         </div>,
         document.body
       )}

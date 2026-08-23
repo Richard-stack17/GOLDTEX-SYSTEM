@@ -203,6 +203,12 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
   }, [username, role, employeeId, profileId, defaultStoreId, fetchPermissions]);
 
   useEffect(() => {
+    // Guard SSR: localStorage no está disponible en el servidor
+    if (typeof window === 'undefined') return;
+
+    // Leer todos los valores de localStorage de forma síncrona y atómica
+    // antes de marcar isHydrated=true para evitar race conditions en el WebView
+    // de Capacitor Android al reanudarse desde el background
     const storedRole = localStorage.getItem("goltex_role");
     const storedUsername = localStorage.getItem("goltex_username");
     const storedEmpId = localStorage.getItem("goltex_employee_id");
@@ -223,12 +229,34 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
       } catch (e) {}
     }
 
+    // isHydrated se emite DESPUÉS de haber cargado todos los valores de localStorage,
+    // garantizando que el guard de `hub/page.tsx` nunca vea role="" con isHydrated=true
     setIsHydrated(true);
 
     if (storedUsername) {
       refreshUserSession();
     }
+
+    // Capacitor Android: cuando el usuario minimiza y vuelve a la app,
+    // el WebView dispara "visibilitychange". Recargamos la sesión silenciosamente
+    // para re-validar el token sin redirigir a /login si los datos locales son válidos.
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        const currentUsername = localStorage.getItem("goltex_username");
+        if (currentUsername) {
+          // Recarga silenciosa — refreshUserSession solo redirige si el perfil fue
+          // marcado como DELETED o si el empleado perdió todas las tiendas activas.
+          refreshUserSession();
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
+
 
   // Asegurar que los permisos se recarguen automáticamente cada vez que cambia la cadena del rol
   useEffect(() => {

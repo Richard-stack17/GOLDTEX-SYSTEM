@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useRole } from '../context/RoleContext';
 import { AccessDeniedView } from '../components/AccessDeniedView';
+import { useIsNativeAndroid } from '../lib/platform';
 import { supabase } from '../lib/supabase';
 import { useStore } from '../context/StoreContext';
 import StoreSwitcher from "../components/StoreSwitcher";
@@ -13,7 +14,7 @@ import { useTableSort } from '../hooks/useTableSort';
 import {
   Search, ClipboardList, Trash2, Calendar, Filter,
   ChevronDown, ChevronUp, AlertCircle, ShoppingBag, ArrowLeft,
-  UserCheck, CreditCard, XCircle, User, ArrowUpDown, ArrowUp, ArrowDown
+  UserCheck, CreditCard, XCircle, User, ArrowUpDown, ArrowUp, ArrowDown, Layers
 } from 'lucide-react';
 import { formatTicketHash, parseInternalTicketNum } from '../lib/ticket-sequence';
 
@@ -21,14 +22,14 @@ const formatPeruDateTimeFull = (isoString?: string | null) => {
   if (!isoString) return null;
   const date = new Date(isoString);
   if (isNaN(date.getTime())) return null;
-  
+
   const day = String(date.getDate()).padStart(2, '0');
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const year = date.getFullYear();
   const hours = String(date.getHours()).padStart(2, '0');
   const minutes = String(date.getMinutes()).padStart(2, '0');
   const seconds = String(date.getSeconds()).padStart(2, '0');
-  
+
   return `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
 };
 
@@ -38,6 +39,14 @@ const limaToday = (): string => {
     year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(new Date());
 };
+
+function getProfileDisplayName(profileObj?: any): string {
+  if (!profileObj) return 'ADMIN';
+  const emp = profileObj.employees;
+  const fullName = Array.isArray(emp) ? emp[0]?.full_name : emp?.full_name;
+  if (fullName && String(fullName).trim().length > 0) return String(fullName).trim();
+  return profileObj.username || 'ADMIN';
+}
 
 // Type definitions
 type SaleItem = {
@@ -60,6 +69,8 @@ type SaleRow = {
   total: number;
   status: string;
   items: SaleItem[];
+  store_id?: string;
+  stores?: { name: string } | null;
   customers?: {
     business_name: string;
     doc_number: string;
@@ -68,12 +79,16 @@ type SaleRow = {
   transactions?: any[];
   created_at?: string;
   updated_at?: string;
+  source_type?: string | null;
+  parent_sale_id?: string | null;
+  children?: any[] | null;
 };
 
 export default function HistorialProformasPage() {
   const router = useRouter();
   const { role, username, isHydrated, permissions } = useRole();
-  const { activeStoreId, isAllStoresMode, availableStoreIds } = useStore();
+  const { activeStoreId, isAllStoresMode, availableStoreIds, isLoadingStores } = useStore();
+  const isNativeAndroid = useIsNativeAndroid();
 
   // State
   const todayLima = limaToday();
@@ -93,19 +108,25 @@ export default function HistorialProformasPage() {
 
   // Load Data
   const loadData = async () => {
+    if (isLoadingStores) return;
+    if (!isAllStoresMode && !activeStoreId) return;
+
     setIsLoading(true);
     setError(null);
     try {
       let query = supabase
         .from('sales')
         .select(`
-          id, internal_ticket_number, proforma_number, invoice_number, voucher_type, voucher_doc_name, voucher_doc_number, issue_date, created_at, updated_at, total, status, items, seller_id, cashier_id, cancelled_by_id,
-          seller:profiles!seller_id(username),
-          cashier:profiles!cashier_id(username),
-          cancelled_by:profiles!cancelled_by_id(username),
+          id, internal_ticket_number, proforma_number, invoice_number, voucher_type, voucher_doc_name, voucher_doc_number, issue_date, created_at, updated_at, total, status, items, seller_id, cashier_id, cancelled_by_id, source_type, parent_sale_id, store_id,
+          stores(name),
+          seller:profiles!seller_id(username, employees:employees!employee_id(full_name)),
+          cashier:profiles!cashier_id(username, employees:employees!employee_id(full_name)),
+          cancelled_by:profiles!cancelled_by_id(username, employees:employees!employee_id(full_name)),
           customers ( business_name, doc_number, document_type ),
-          transactions ( payment_method, amount, sequence, created_at )
+          transactions ( payment_method, amount, sequence, created_at ),
+          children:sales!parent_sale_id(id, internal_ticket_number, proforma_number, total, items, seller_id, created_at, seller:profiles!seller_id(username, employees:employees!employee_id(full_name)))
         `)
+        .is('parent_sale_id', null)
         .gte('issue_date', startDate)
         .lte('issue_date', endDate)
         .order('created_at', { ascending: false })
@@ -115,15 +136,18 @@ export default function HistorialProformasPage() {
       if (statusFilter !== 'ALL') {
         query = query.eq('status', statusFilter);
       }
-      // ── BLINDAJE CAPA 2: Filtrado estricto por permiso contextual de módulo ──────
-      if (activeStoreId) {
-        // Caso normal: tienda activa específica
-        query = query.eq('store_id', activeStoreId);
-      } else if (isAllStoresMode && role !== 'ADMIN' && availableStoreIds.length > 0) {
-        // Modo ALL para empleado multi-tienda: restringe a sus tiendas autorizadas CON PERMISO en este módulo
-        query = query.in('store_id', availableStoreIds);
+
+      // ── FILTRADO ESTRICTO POR TIENDA ACTIVA ──────
+      if (!isAllStoresMode) {
+        if (activeStoreId) {
+          query = query.eq('store_id', activeStoreId);
+        }
+      } else {
+        // Modo "Todas las Tiendas"
+        if (role !== 'ADMIN' && availableStoreIds.length > 0) {
+          query = query.in('store_id', availableStoreIds);
+        }
       }
-      // Si es ADMIN global en modo ALL: sin filtro (ve todo)
 
       const { data, error: err } = await query;
       if (err) throw err;
@@ -138,28 +162,45 @@ export default function HistorialProformasPage() {
   };
 
   useEffect(() => {
-    if (permissions?.access_proformas) {
+    if (permissions?.access_proformas && !isLoadingStores) {
       loadData();
     }
-  }, [startDate, endDate, statusFilter, activeStoreId, permissions]);
+  }, [startDate, endDate, statusFilter, activeStoreId, isAllStoresMode, isLoadingStores, permissions]);
 
   // Derived state & sorting
-  const baseFilteredSales = useMemo(() => {
-    if (!searchTerm) return sales;
-    const lower = searchTerm.toLowerCase();
-    return sales.filter(s =>
-      s.proforma_number?.toLowerCase().includes(lower) ||
-      s.invoice_number?.toLowerCase().includes(lower) ||
-      s.voucher_doc_name?.toLowerCase().includes(lower) ||
-      s.voucher_doc_number?.toLowerCase().includes(lower) ||
-      s.customers?.business_name?.toLowerCase().includes(lower) ||
-      s.customers?.doc_number?.toLowerCase().includes(lower)
-    );
+  const enrichedFilteredSales = useMemo(() => {
+    const base = !searchTerm
+      ? sales
+      : sales.filter(s => {
+        const lower = searchTerm.toLowerCase();
+        return (
+          s.proforma_number?.toLowerCase().includes(lower) ||
+          s.invoice_number?.toLowerCase().includes(lower) ||
+          s.voucher_doc_name?.toLowerCase().includes(lower) ||
+          s.voucher_doc_number?.toLowerCase().includes(lower) ||
+          s.customers?.business_name?.toLowerCase().includes(lower) ||
+          s.customers?.doc_number?.toLowerCase().includes(lower)
+        );
+      });
+
+    return base.map(s => {
+      const childTickets = Array.isArray(s.children) && s.children.length > 0 ? s.children : [];
+      const childNums = childTickets.map((c: any) => c.internal_ticket_number || parseInternalTicketNum(c)).filter(Boolean);
+      const parsedNum = parseInternalTicketNum(s);
+      const effectiveTicketNum = s.internal_ticket_number != null && s.internal_ticket_number > 0
+        ? s.internal_ticket_number
+        : (childNums.length > 0 ? Math.min(...childNums) : (parsedNum ?? 0));
+
+      return {
+        ...s,
+        internal_ticket_number: effectiveTicketNum
+      };
+    });
   }, [sales, searchTerm]);
 
-  const { items: sortedSales, requestSort, sortConfig } = useTableSort(baseFilteredSales, {
+  const { items: sortedSales, requestSort, sortConfig } = useTableSort(enrichedFilteredSales, {
     key: 'internal_ticket_number',
-    direction: 'desc'
+    direction: 'asc'
   });
 
   const renderSortIcon = (key: keyof SaleRow) => {
@@ -195,12 +236,13 @@ export default function HistorialProformasPage() {
         try {
           const { data: profData } = await supabase.from('profiles').select('id').eq('username', username).maybeSingle();
           if (profData?.id) cancellerId = profData.id;
-        } catch (e) {}
+        } catch (e) { }
       }
 
+      // 1. Anular la Venta Principal
       const { error: err } = await supabase
         .from('sales')
-        .update({ 
+        .update({
           status: 'CANCELLED',
           updated_at: nowIso,
           cancelled_by_id: cancellerId
@@ -209,15 +251,38 @@ export default function HistorialProformasPage() {
 
       if (err) throw err;
 
-      setSales(prev => prev.map(s => s.id === saleToCancel.id ? { 
-        ...s, 
-        status: 'CANCELLED', 
-        updated_at: nowIso,
-        cancelled_by_id: cancellerId,
-        cancelled_by: { username }
-      } : s));
+      // 2. Anulación en Cascada: Si es una venta consolidada, anular también sus hijas
+      const { error: errCascade } = await supabase
+        .from('sales')
+        .update({
+          status: 'CANCELLED',
+          updated_at: nowIso,
+          cancelled_by_id: cancellerId
+        })
+        .eq('parent_sale_id', saleToCancel.id);
+
+      if (errCascade) throw errCascade;
+
+      // 3. Actualizar estado local (incluyendo sub-proformas hijas si las tiene)
+      setSales(prev => prev.map(s => {
+        if (s.id === saleToCancel.id) {
+          const updatedChildren = Array.isArray((s as any).children)
+            ? (s as any).children.map((c: any) => ({ ...c, status: 'CANCELLED' }))
+            : (s as any).children;
+          return {
+            ...s,
+            status: 'CANCELLED',
+            updated_at: nowIso,
+            cancelled_by_id: cancellerId,
+            cancelled_by: { username },
+            children: updatedChildren
+          };
+        }
+        return s;
+      }));
     } catch (err: any) {
-      alert(err.message || 'Error al anular');
+      console.error(err);
+      setError(err.message || 'Error al anular la venta.');
     } finally {
       setIsCanceling(false);
       setSaleToCancel(null);
@@ -230,27 +295,35 @@ export default function HistorialProformasPage() {
   };
 
   if (!isHydrated) return null;
+  if (isNativeAndroid) {
+    return (
+      <AccessDeniedView
+        moduleName="Historial de Proformas"
+        customReason="El módulo de Historial de Proformas está disponible exclusivamente desde la versión Web."
+      />
+    );
+  }
   if (!permissions?.access_proformas) {
     return <AccessDeniedView moduleName="Historial de Proformas" />;
   }
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-20 shadow-sm shrink-0">
+      <header className="bg-card border-b border-border sticky top-0 z-20 shadow-sm shrink-0">
         <div className="max-w-7xl mx-auto w-full flex flex-col md:flex-row md:items-center justify-between gap-3 p-4 sm:p-6">
           <div className="flex items-center gap-4 pt-2 sm:pt-0">
-            <Link href="/hub" className="text-gray-500 hover:text-gray-900 transition-colors p-1.5 rounded-lg hover:bg-gray-100">
+            <Link href="/hub" className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-secondary">
               <ArrowLeft className="w-5 h-5" />
             </Link>
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 rounded-lg bg-teal-500 flex items-center justify-center shadow-sm">
                 <ClipboardList className="w-4 h-4 text-white" />
               </div>
-              <div>
-                <h1 className="text-base font-bold text-gray-900 leading-none">
+              <div className="min-w-0">
+                <h1 className="text-base sm:text-lg md:text-xl font-bold tracking-tight text-foreground truncate">
                   Historial de Proformas
                 </h1>
-                <p className="text-xs text-gray-500 font-medium mt-0.5">Módulo de auditoría y control (ADMIN)</p>
+                <p className="text-[10px] sm:text-xs text-muted-foreground font-medium truncate">Módulo de auditoría y control (ADMIN)</p>
               </div>
             </div>
           </div>
@@ -326,8 +399,8 @@ export default function HistorialProformasPage() {
 
         {/* Table */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left">
+          <div className="w-full overflow-x-auto scrollbar-hide">
+            <table className="w-full text-sm text-left min-w-[1000px]">
               <thead className="bg-gray-50 border-b border-gray-200 text-gray-600">
                 <tr>
                   <th
@@ -421,13 +494,56 @@ export default function HistorialProformasPage() {
                       <React.Fragment key={sale.id}>
                         <tr className={`hover:bg-gray-50/50 transition-colors ${isExpanded ? 'bg-gray-50' : ''}`}>
                           <td className="px-4 py-3 font-mono font-bold text-gray-700 whitespace-nowrap">
-                            <div className="font-black text-sm">{formatTicketHash(ticketNo)}</div>
+                            {(() => {
+                              const isConsolidated = sale.source_type === 'CONSOLIDATED' || (Array.isArray(sale.children) && sale.children.length > 0);
+                              const childNums = Array.isArray(sale.children) && sale.children.length > 0
+                                ? sale.children.map((c: any) => c.internal_ticket_number || parseInternalTicketNum(c)).filter(Boolean)
+                                : [];
+
+                              if (isConsolidated && childNums.length > 0) {
+                                return (
+                                  <div className="flex flex-col gap-1">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      {childNums.map((num: number, idx: number) => (
+                                        <React.Fragment key={idx}>
+                                          <span className="font-black text-xs text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded shadow-sm">
+                                            #{num}
+                                          </span>
+                                          {idx < childNums.length - 1 && <span className="text-[10px] font-bold text-gray-400">+</span>}
+                                        </React.Fragment>
+                                      ))}
+                                    </div>
+                                    <span className="inline-flex items-center w-fit px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-violet-100 text-violet-700 border border-violet-200">
+                                      UNIFICADO ({childNums.length})
+                                    </span>
+                                  </div>
+                                );
+                              }
+
+                              return (
+                                <div className="flex items-center gap-1.5">
+                                  <div className="font-black text-sm">{formatTicketHash(ticketNo)}</div>
+                                  {isConsolidated && (
+                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-violet-100 text-violet-700 border border-violet-200">
+                                      UNIF
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </td>
                           <td className="px-4 py-3 font-mono text-gray-600 whitespace-nowrap">
                             {(() => {
-                              const ticketCode = (sale.proforma_number && sale.proforma_number.startsWith("TKT"))
-                                ? sale.proforma_number
-                                : (formatTicketHash(ticketNo) || sale.proforma_number || "---");
+                              const isConsolidated = sale.source_type === 'CONSOLIDATED' || (Array.isArray(sale.children) && sale.children.length > 0);
+                              const childDocs = Array.isArray(sale.children) && sale.children.length > 0
+                                ? sale.children.map((c: any) => c.proforma_number || (c.internal_ticket_number ? `TKT-${String(c.internal_ticket_number).padStart(4, '0')}` : '')).filter(Boolean)
+                                : [];
+
+                              const ticketCode = isConsolidated && childDocs.length > 0
+                                ? childDocs.join(' + ')
+                                : (sale.proforma_number && sale.proforma_number.startsWith("TKT"))
+                                  ? sale.proforma_number
+                                  : (formatTicketHash(ticketNo) || sale.proforma_number || "---");
 
                               const fiscalDoc = sale.invoice_number
                                 || (sale.proforma_number && !sale.proforma_number.startsWith("TKT") ? sale.proforma_number : null);
@@ -437,22 +553,26 @@ export default function HistorialProformasPage() {
                               return (
                                 <div>
                                   <div className="font-extrabold text-slate-900 text-xs">{ticketCode}</div>
-                                  {fiscalDoc && (
-                                    <div className="text-[11px] text-emerald-600 font-bold font-mono tracking-tight">{fiscalDoc}</div>
-                                  )}
-                                  {rawVoucher === "BOLETA" ? (
-                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-extrabold bg-blue-50 text-blue-700 border border-blue-200 mt-1">
-                                      BOLETA
-                                    </span>
-                                  ) : rawVoucher === "FACTURA" ? (
-                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200 mt-1">
-                                      FACTURA
-                                    </span>
-                                  ) : (
-                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-extrabold bg-slate-100 text-slate-600 border border-slate-200 mt-1">
-                                      TICKET / SIMPLE
-                                    </span>
-                                  )}
+                                  <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                                    {isAllStoresMode && sale.stores?.name && (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                        {sale.stores.name}
+                                      </span>
+                                    )}
+                                    {rawVoucher === "BOLETA" ? (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-extrabold bg-blue-50 text-blue-700 border border-blue-200">
+                                        BOLETA
+                                      </span>
+                                    ) : rawVoucher === "FACTURA" ? (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                        FACTURA
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-extrabold bg-slate-100 text-slate-600 border border-slate-200">
+                                        TICKET / SIMPLE
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                               );
                             })()}
@@ -509,8 +629,23 @@ export default function HistorialProformasPage() {
                                     <ShoppingBag className="w-4 h-4" /> Desglose de Ítems
                                   </h4>
                                   {(() => {
-                                    const sellerName = (sale as any).seller?.username || 'ADMIN';
-                                    const cashierName = (sale as any).cashier?.username;
+                                    const rawSellerName = getProfileDisplayName((sale as any).seller);
+                                    const childrenList = Array.isArray((sale as any).children) ? (sale as any).children : [];
+                                    
+                                    let sellerNameDisplay = rawSellerName;
+                                    let isMultipleSeller = false;
+
+                                    if (childrenList.length > 0) {
+                                      const uniqueSellers = Array.from(new Set(childrenList.map((c: any) => getProfileDisplayName(c.seller)).filter(Boolean)));
+                                      if (uniqueSellers.length > 1) {
+                                        sellerNameDisplay = uniqueSellers.join(' + ');
+                                        isMultipleSeller = true;
+                                      } else if (uniqueSellers.length === 1) {
+                                        sellerNameDisplay = uniqueSellers[0] as string;
+                                      }
+                                    }
+
+                                    const cashierName = (sale as any).cashier ? getProfileDisplayName((sale as any).cashier) : null;
                                     const createdTime = formatPeruDateTimeFull(sale.created_at);
                                     
                                     const txList = Array.isArray(sale.transactions) ? sale.transactions : [];
@@ -539,11 +674,18 @@ export default function HistorialProformasPage() {
                                         </div>
 
                                         {/* 2. Atendido */}
-                                        <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-full text-xs font-bold">
-                                          <UserCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                                          <span>ATENDIDO POR: <strong className="uppercase">{sellerName}</strong></span>
-                                          {createdTime && <span className="text-[10px] text-emerald-700 font-mono font-medium">({createdTime})</span>}
-                                        </div>
+                                        {isMultipleSeller ? (
+                                          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-50 border border-purple-200 text-purple-900 rounded-full text-xs font-bold shadow-xs">
+                                            <Layers className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                                            <span>ATENCIÓN COMPARTIDA: <strong className="uppercase text-purple-700">{sellerNameDisplay}</strong></span>
+                                          </div>
+                                        ) : (
+                                          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-full text-xs font-bold">
+                                            <UserCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                            <span>ATENDIDO POR: <strong className="uppercase">{sellerNameDisplay}</strong></span>
+                                            {createdTime && <span className="text-[10px] text-emerald-700 font-mono font-medium">({createdTime})</span>}
+                                          </div>
+                                        )}
 
                                         {/* 3. Cobrado (Si existió cobro) */}
                                         {isPaid && (
@@ -558,7 +700,7 @@ export default function HistorialProformasPage() {
                                         {isCancelled && (
                                           <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-rose-50 border border-rose-200 text-rose-800 rounded-full text-xs font-bold">
                                             <XCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                                            <span>ANULADO POR: <strong className="uppercase">{(sale as any).cancelled_by?.username || 'ADMIN'}</strong></span>
+                                            <span>ANULADO POR: <strong className="uppercase">{getProfileDisplayName((sale as any).cancelled_by)}</strong></span>
                                             {anuladoTime && <span className="text-[10px] text-rose-700 font-mono font-medium">({anuladoTime})</span>}
                                           </div>
                                         )}
@@ -566,68 +708,92 @@ export default function HistorialProformasPage() {
                                     );
                                   })()}
                                 </div>
+                                {Array.isArray((sale as any).children) && (sale as any).children.length > 0 && (
+                                  <div className="mb-4 p-3 bg-indigo-50 border border-indigo-200 rounded-xl">
+                                    <h5 className="text-xs font-black text-indigo-900 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                                      <Layers className="w-4 h-4 text-indigo-600" /> Proformas Unificadas en esta Venta ({((sale as any).children).length})
+                                    </h5>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                      {((sale as any).children).map((child: any) => {
+                                        const childTime = formatPeruDateTimeFull(child.created_at);
+                                        return (
+                                          <div key={child.id} className="flex items-center justify-between bg-white px-3.5 py-2.5 rounded-lg border border-indigo-100 text-xs shadow-sm">
+                                            <div className="flex flex-col">
+                                              <span className="font-mono font-bold text-slate-800">{child.proforma_number || `Ticket #${child.internal_ticket_number}`}</span>
+                                              <span className="text-[10px] text-slate-500 font-medium flex items-center gap-1.5 flex-wrap mt-0.5">
+                                                <span>Atendido por: <strong className="text-slate-700 uppercase">{getProfileDisplayName(child.seller)}</strong></span>
+                                                {childTime && <span className="text-[10px] font-mono font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/80">({childTime})</span>}
+                                              </span>
+                                            </div>
+                                            <span className="font-mono font-black text-indigo-700 text-sm">S/ {child.total.toFixed(2)}</span>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
                                 {Array.isArray(sale.items) && sale.items.length > 0 ? (
-                                   (() => {
-                                     const itemsArray = Array.isArray(sale.items) ? sale.items : [];
-                                     const itemsSubtotal = itemsArray.reduce((acc: number, item: any) => {
-                                       const q = parseFloat(item.quantity) || 1;
-                                       const ep = item.editedPrice !== undefined ? parseFloat(item.editedPrice) : parseFloat(item.price) || 0;
-                                       return acc + (q * ep);
-                                     }, 0);
+                                  (() => {
+                                    const itemsArray = Array.isArray(sale.items) ? sale.items : [];
+                                    const itemsSubtotal = itemsArray.reduce((acc: number, item: any) => {
+                                      const q = parseFloat(item.quantity) || 1;
+                                      const ep = item.editedPrice !== undefined ? parseFloat(item.editedPrice) : parseFloat(item.price) || 0;
+                                      return acc + (q * ep);
+                                    }, 0);
 
-                                     const rawSurcharge = sale.total > itemsSubtotal ? sale.total - itemsSubtotal : 0;
-                                     const surcharge = Math.round(rawSurcharge * 100) / 100;
-                                     const hasSurcharge = surcharge >= 0.01;
+                                    const rawSurcharge = sale.total > itemsSubtotal ? sale.total - itemsSubtotal : 0;
+                                    const surcharge = Math.round(rawSurcharge * 100) / 100;
+                                    const hasSurcharge = surcharge >= 0.01;
 
-                                     const txList = Array.isArray(sale.transactions) ? sale.transactions : [];
-                                     const izipayTx = txList.find((t: any) => t.payment_method === 'IZIPAY' || (t.surcharge_pct && t.surcharge_pct > 0));
-                                     const dbSurchargePct = izipayTx?.surcharge_pct != null && Number(izipayTx.surcharge_pct) > 0 ? Number(izipayTx.surcharge_pct).toFixed(1) : null;
-                                     const surchargePct = dbSurchargePct ?? (itemsSubtotal > 0 ? ((surcharge / itemsSubtotal) * 100).toFixed(1) : "0.0");
+                                    const txList = Array.isArray(sale.transactions) ? sale.transactions : [];
+                                    const izipayTx = txList.find((t: any) => t.payment_method === 'IZIPAY' || (t.surcharge_pct && t.surcharge_pct > 0));
+                                    const dbSurchargePct = izipayTx?.surcharge_pct != null && Number(izipayTx.surcharge_pct) > 0 ? Number(izipayTx.surcharge_pct).toFixed(1) : null;
+                                    const surchargePct = dbSurchargePct ?? (itemsSubtotal > 0 ? ((surcharge / itemsSubtotal) * 100).toFixed(1) : "0.0");
 
-                                     return (
-                                       <table className="w-full text-xs">
-                                         <thead>
-                                           <tr className="text-gray-400 border-b">
-                                             <th className="text-left pb-2 font-bold uppercase">Producto/Servicio</th>
-                                             <th className="text-center pb-2 font-bold uppercase">Cant.</th>
-                                             <th className="text-right pb-2 font-bold uppercase">P.Unit</th>
-                                             <th className="text-right pb-2 font-bold uppercase">Subtotal</th>
-                                           </tr>
-                                         </thead>
-                                         <tbody className="divide-y divide-gray-100">
-                                           {itemsArray.map((item, i) => (
-                                             <tr key={i}>
-                                               <td className="py-2 font-bold text-gray-700">{item.name}</td>
-                                               <td className="py-2 text-center font-medium text-gray-600">{item.quantity}</td>
-                                               <td className="py-2 text-right font-medium text-gray-600">S/ {item.editedPrice.toFixed(2)}</td>
-                                               <td className="py-2 text-right font-extrabold text-gray-800">S/ {(item.quantity * item.editedPrice).toFixed(2)}</td>
-                                             </tr>
-                                           ))}
-                                         </tbody>
-                                         <tfoot className="border-t border-gray-200">
-                                           {hasSurcharge && (
-                                             <>
-                                               <tr>
-                                                 <td colSpan={3} className="pt-2 text-right font-medium text-gray-500">Subtotal Ítems:</td>
-                                                 <td className="pt-2 text-right font-bold text-gray-700 font-mono">S/ {itemsSubtotal.toFixed(2)}</td>
-                                               </tr>
-                                               <tr>
-                                                 <td colSpan={3} className="py-1 text-right font-bold text-amber-600">Recargo Izipay / Tarjeta ({surchargePct}%):</td>
-                                                 <td className="py-1 text-right font-black text-amber-600 font-mono">+ S/ {surcharge.toFixed(2)}</td>
-                                               </tr>
-                                             </>
-                                           )}
-                                           <tr>
-                                             <td colSpan={3} className="py-2 text-right font-black text-gray-900 uppercase">Total Cobrado:</td>
-                                             <td className="py-2 text-right font-black text-teal-700 text-sm font-mono">S/ {sale.total.toFixed(2)}</td>
-                                           </tr>
-                                         </tfoot>
-                                       </table>
-                                     );
-                                   })()
-                                 ) : (
-                                   <p className="text-sm text-gray-500 italic">No hay información detallada en JSON para esta venta.</p>
-                                 )}
+                                    return (
+                                      <table className="w-full text-xs">
+                                        <thead>
+                                          <tr className="text-gray-400 border-b">
+                                            <th className="text-left pb-2 font-bold uppercase">Producto/Servicio</th>
+                                            <th className="text-center pb-2 font-bold uppercase">Cant.</th>
+                                            <th className="text-right pb-2 font-bold uppercase">P.Unit</th>
+                                            <th className="text-right pb-2 font-bold uppercase">Subtotal</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-100">
+                                          {itemsArray.map((item, i) => (
+                                            <tr key={i}>
+                                              <td className="py-2 font-bold text-gray-700">{item.name}</td>
+                                              <td className="py-2 text-center font-medium text-gray-600">{item.quantity}</td>
+                                              <td className="py-2 text-right font-medium text-gray-600">S/ {item.editedPrice.toFixed(2)}</td>
+                                              <td className="py-2 text-right font-extrabold text-gray-800">S/ {(item.quantity * item.editedPrice).toFixed(2)}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                        <tfoot className="border-t border-gray-200">
+                                          {hasSurcharge && (
+                                            <>
+                                              <tr>
+                                                <td colSpan={3} className="pt-2 text-right font-medium text-gray-500">Subtotal Ítems:</td>
+                                                <td className="pt-2 text-right font-bold text-gray-700 font-mono">S/ {itemsSubtotal.toFixed(2)}</td>
+                                              </tr>
+                                              <tr>
+                                                <td colSpan={3} className="py-1 text-right font-bold text-amber-600">Recargo Izipay / Tarjeta ({surchargePct}%):</td>
+                                                <td className="py-1 text-right font-black text-amber-600 font-mono">+ S/ {surcharge.toFixed(2)}</td>
+                                              </tr>
+                                            </>
+                                          )}
+                                          <tr>
+                                            <td colSpan={3} className="py-2 text-right font-black text-gray-900 uppercase">Total Cobrado:</td>
+                                            <td className="py-2 text-right font-black text-teal-700 text-sm font-mono">S/ {sale.total.toFixed(2)}</td>
+                                          </tr>
+                                        </tfoot>
+                                      </table>
+                                    );
+                                  })()
+                                ) : (
+                                  <p className="text-sm text-gray-500 italic">No hay información detallada en JSON para esta venta.</p>
+                                )}
                               </div>
                             </td>
                           </tr>

@@ -288,10 +288,13 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
       if (key === "DEL") setNumpadQty((p) => p.slice(0, -1));
       else if (key === "." && numpadQty.includes(".")) return;
       else if (numpadQty === "" && key === "0") setNumpadQty("0");
+      else if (numpadQty === "0" && key !== "0") setNumpadQty(key);
       else if (numpadQty.length < 4) setNumpadQty((p) => p + key);
     } else {
       if (key === "DEL") setNumpadPrice((p) => p.slice(0, -1));
       else if (key === "." && numpadPrice.includes(".")) return;
+      else if (numpadPrice === "" && key === "0") setNumpadPrice("0");
+      else if (numpadPrice === "0" && key !== "0") setNumpadPrice(key);
       else if (numpadPrice.length < 7) setNumpadPrice((p) => p + key);
     }
   };
@@ -592,14 +595,15 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
       return { id: String(idx), code, name, price: basePrice, editedPrice, quantity, familyId: "" };
     });
     try {
+      showToast("Conectando con la impresora térmica...", "success");
       const saleDataForPrint = { proforma_number: ticket.proforma_number || ticket.invoice_number || '', customer_name: "Cliente General", items: reconstructedItems, total: ticket.total };
       await silentPrintSaleReceipt(saleDataForPrint, false);
-      showToast("Ticket enviado a la impresora.", "success");
+      showToast("¡Ticket impreso con éxito!", "success");
     } catch (err: any) {
       if (err?.message === "NO_PRINTER_CONFIGURED") {
-        showToast("⚠️ No hay ninguna impresora por defecto configurada para esta tienda.", "warning");
+        showToast("No hay ninguna impresora por defecto configurada para esta tienda.", "warning");
       } else {
-        showToast("⚠️ Error de conexión con la impresora. Verifique que esté encendida.", "error");
+        showToast("Error de conexión con la impresora. Verifique que esté encendida.", "error");
       }
     }
   };

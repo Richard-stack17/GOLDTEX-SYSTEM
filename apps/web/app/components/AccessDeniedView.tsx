@@ -7,16 +7,17 @@ import { useRouter } from 'next/navigation';
 interface AccessDeniedViewProps {
   moduleName?: string;
   onBack?: () => void;
+  customReason?: string;
 }
 
-export function AccessDeniedView({ moduleName = 'este módulo', onBack }: AccessDeniedViewProps) {
+export function AccessDeniedView({ moduleName = 'este módulo', onBack, customReason }: AccessDeniedViewProps) {
   const router = useRouter();
 
   const handleGoBack = () => {
     if (onBack) {
       onBack();
     } else {
-      router.push('/hub');
+      window.location.href = '/hub';
     }
   };
 
@@ -32,7 +33,11 @@ export function AccessDeniedView({ moduleName = 'este módulo', onBack }: Access
         </h2>
 
         <p className="text-xs text-gray-500 font-medium leading-relaxed mt-2">
-          No cuentas con los permisos necesarios para acceder a <strong className="text-gray-700">{moduleName}</strong>. Si requieres habilitar esta función, comunícate con el Administrador del sistema.
+          {customReason || (
+            <>
+              No cuentas con los permisos necesarios para acceder a <strong className="text-gray-700">{moduleName}</strong>. Si requieres habilitar esta función, comunícate con el Administrador del sistema.
+            </>
+          )}
         </p>
 
         <div className="mt-6 pt-4 border-t border-gray-100 flex items-center justify-center">

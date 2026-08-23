@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
-import { Users, Search, Plus, Edit, Trash2, ArrowLeft, RotateCcw, CheckCircle2, ShieldAlert } from "lucide-react";
+import { Users, Search, Plus, Edit, Trash2, ArrowLeft, RotateCcw, CheckCircle2, ShieldAlert, Loader2 } from "lucide-react";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import Link from "next/link";
 import { useRole } from "../context/RoleContext";
@@ -11,6 +11,7 @@ import StoreSwitcher from "../components/StoreSwitcher";
 import { AccessDeniedView } from "../components/AccessDeniedView";
 import { Pagination, SortableTableHead } from "@goltex/ui";
 import { useTableSort } from "../hooks/useTableSort";
+import { useIsNativeAndroid } from "../lib/platform";
 
 type Customer = {
   id: string;
@@ -41,7 +42,8 @@ function Toast({ message, type }: { message: string; type: 'success' | 'error' }
 
 export default function ClientesPage() {
   const { role, isHydrated, permissions } = useRole();
-  const { activeStoreId, isAllStoresMode, availableStoreIds, availableStores } = useStore();
+  const { activeStoreId, isAllStoresMode, availableStoreIds, availableStores, isLoadingStores } = useStore();
+  const isNativeAndroid = useIsNativeAndroid();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -65,8 +67,9 @@ export default function ClientesPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (isLoadingStores) return;
     fetchCustomers();
-  }, [activeStoreId]);
+  }, [activeStoreId, isAllStoresMode, isLoadingStores]);
 
   // Reset page when search or toggle changes
   useEffect(() => {
@@ -79,6 +82,7 @@ export default function ClientesPage() {
   };
 
   const fetchCustomers = async () => {
+    if (isLoadingStores) return;
     setLoading(true);
     let query = supabase.from("customers").select("*").order("created_at", { ascending: false });
 
@@ -155,7 +159,7 @@ export default function ClientesPage() {
       doc_number: cleanDoc,
       document_type,
       is_frequent: true,
-      store_id: activeStoreId,
+      store_id: editingCustomer ? editingCustomer.store_id : (isAllStoresMode ? null : activeStoreId),
       is_active: true,
     };
 
@@ -222,7 +226,24 @@ export default function ClientesPage() {
     }
   };
 
-  if (!isHydrated) return null;
+  if (!isHydrated || isLoadingStores) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="w-8 h-8 text-indigo-600 animate-spin" />
+          <p className="text-sm font-semibold text-gray-600">Cargando clientes...</p>
+        </div>
+      </div>
+    );
+  }
+  if (isNativeAndroid) {
+    return (
+      <AccessDeniedView
+        moduleName="Clientes Frecuentes"
+        customReason="El módulo de Clientes está disponible exclusivamente desde la versión Web."
+      />
+    );
+  }
   if (!permissions?.access_clientes) {
     return <AccessDeniedView moduleName="Clientes Frecuentes" />;
   }
@@ -232,35 +253,37 @@ export default function ClientesPage() {
       {toast && <Toast message={toast.message} type={toast.type} />}
 
       <main className="flex-1">
-        <header className="bg-card border-b border-border flex flex-col md:flex-row md:items-center justify-between gap-3 p-4 sm:p-6 shadow-sm shrink-0">
-          <div className="flex items-center gap-4 pt-2 sm:pt-0 w-full sm:w-auto justify-between sm:justify-start">
-            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-              <Link href="/hub" className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-secondary shrink-0">
-                <ArrowLeft className="w-5 h-5" />
-              </Link>
-              <div className="w-8 h-8 bg-purple-500 rounded-lg flex items-center justify-center shrink-0">
-                <Users className="w-4 h-4 text-white" />
-              </div>
-              <div className="min-w-0">
-                <h1 className="text-sm sm:text-base font-bold leading-none truncate">Módulo de Clientes</h1>
-                <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 truncate">Gestión de Clientes Frecuentes</p>
+        <header className="bg-card border-b border-border shadow-sm shrink-0">
+          <div className="max-w-7xl 2xl:max-w-[1600px] mx-auto w-full flex flex-col md:flex-row md:items-center justify-between gap-3 p-4 sm:p-6">
+            <div className="flex items-center gap-4 pt-2 sm:pt-0 w-full sm:w-auto justify-between sm:justify-start">
+              <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                <Link href="/hub" className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-secondary shrink-0">
+                  <ArrowLeft className="w-5 h-5" />
+                </Link>
+                <div className="w-8 h-8 bg-purple-500 rounded-lg flex items-center justify-center shrink-0">
+                  <Users className="w-4 h-4 text-white" />
+                </div>
+                <div className="min-w-0">
+                  <h1 className="text-base sm:text-lg md:text-xl font-bold tracking-tight text-foreground truncate">Módulo de Clientes</h1>
+                  <p className="text-[10px] sm:text-xs text-muted-foreground font-medium truncate">Gestión de Clientes Frecuentes</p>
+                </div>
               </div>
             </div>
-          </div>
-          <div className="flex items-center gap-2 sm:gap-4 w-full sm:w-auto justify-between sm:justify-end">
-            <StoreSwitcher />
-            {Boolean(permissions?.customers_create) && (
-              <button
-                onClick={() => handleOpenModal()}
-                className="px-3 sm:px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs sm:text-sm flex items-center gap-1.5 sm:gap-2 shadow-sm transition-colors whitespace-nowrap shrink-0"
-              >
-                <Plus className="w-4 h-4" /> <span className="hidden sm:inline">Nuevo Cliente</span><span className="sm:hidden">Nuevo</span>
-              </button>
-            )}
+            <div className="flex items-center gap-2 sm:gap-4 w-full sm:w-auto justify-between sm:justify-end">
+              <StoreSwitcher />
+              {Boolean(permissions?.customers_create) && (
+                <button
+                  onClick={() => handleOpenModal()}
+                  className="px-3 sm:px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs sm:text-sm flex items-center gap-1.5 sm:gap-2 shadow-sm transition-colors whitespace-nowrap shrink-0"
+                >
+                  <Plus className="w-4 h-4" /> <span className="hidden sm:inline">Nuevo Cliente</span><span className="sm:hidden">Nuevo</span>
+                </button>
+              )}
+            </div>
           </div>
         </header>
 
-        <div className="p-3 sm:p-6 md:p-8 max-w-5xl mx-auto space-y-6">
+        <div className="p-3 sm:p-6 md:p-8 max-w-7xl 2xl:max-w-[1600px] w-full mx-auto space-y-6">
           {/* Controls bar */}
           <div className="flex flex-col sm:flex-row gap-2.5 items-start sm:items-center w-full">
             <div className="bg-white p-3 sm:p-4 rounded-2xl shadow-sm border border-gray-200 flex items-center gap-3 flex-1 min-w-0">
@@ -290,7 +313,7 @@ export default function ClientesPage() {
 
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
             <div className="w-full overflow-x-auto scrollbar-hide">
-              <table className="w-full text-left text-sm min-w-[600px]">
+              <table className="w-full text-left text-sm min-w-[650px] sm:min-w-full">
               <thead className="bg-gray-50 border-b border-gray-200 text-gray-600">
                 <tr>
                   <SortableTableHead field="doc_number" currentSort={sortConfig} onSort={(k) => requestSort(k as any)}>

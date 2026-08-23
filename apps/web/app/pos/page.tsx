@@ -220,16 +220,20 @@ function PosContent() {
       </Dialog>
 
       <Dialog open={!!previewTicketData} onOpenChange={(open) => !open && setPreviewTicketData(null)}>
-        <DialogContent className="max-w-md bg-white text-slate-900 shadow-2xl rounded-xl border border-slate-200 p-6">
+        <DialogContent className="max-w-md bg-white text-slate-900 shadow-2xl rounded-xl border border-slate-200 p-3 sm:p-6">
           <DialogHeader>
             <DialogTitle className="text-xl font-bold flex items-center gap-2 text-slate-800">
               <Eye className="w-5 h-5 text-emerald-700" />
               Vista Previa de Impresión
             </DialogTitle>
           </DialogHeader>
-          <div className="py-2 overflow-x-auto max-w-full font-mono text-xs">
+          <div className="py-2 w-full overflow-x-auto scrollbar-hide flex justify-center font-mono text-xs">
             {previewTicketData && (
-              <ReceiptPreview maxChars={activePrinter?.max_chars || 42} saleData={previewTicketData} />
+              <ReceiptPreview 
+                maxChars={activePrinter?.max_chars || 48} 
+                paperWidth={activePrinter?.paper_width || 80}
+                saleData={previewTicketData} 
+              />
             )}
           </div>
           <div className="pt-2">

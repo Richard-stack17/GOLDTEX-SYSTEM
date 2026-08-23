@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { Settings, ArrowLeft, Printer, Plus, ChevronRight, Loader2, Info, CreditCard, Save, Store, Edit2, Power, AlertTriangle, AlertCircle, CheckCircle2, Users } from 'lucide-react';
+import { Star, Settings, ArrowLeft, Printer, Plus, ChevronRight, Loader2, Info, CreditCard, Save, Store, Edit2, Power, AlertTriangle, AlertCircle, CheckCircle2, Users } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useRole } from '../context/RoleContext';
@@ -182,6 +182,26 @@ export default function ConfiguracionPage() {
     setIsLoading(false);
   };
 
+  const handleSetDefaultPrinter = async (printerId: string) => {
+    try {
+      // Actualizamos una por una para evitar bloqueos de RLS en actualizaciones masivas
+      const printersToDisable = printers.filter(p => p.id !== printerId && p.auto_print);
+      if (printersToDisable.length > 0) {
+        await Promise.all(
+          printersToDisable.map(p => 
+            supabase.from('printers').update({ auto_print: false }).eq('id', p.id)
+          )
+        );
+      }
+      const { error } = await supabase.from('printers').update({ auto_print: true }).eq('id', printerId);
+      if (error) throw error;
+      showToast('Impresora fijada como principal', 'success');
+      fetchPrinters();
+    } catch (err: any) {
+      showToast('Error fijando impresora: ' + err.message, 'error');
+    }
+  };
+
   const handleReactivatePrinter = async (printerId: string) => {
     try {
       const { error } = await supabase.from('printers').update({ is_active: true }).eq('id', printerId);
@@ -282,8 +302,8 @@ export default function ConfiguracionPage() {
               <Settings className="w-4 h-4 text-white" />
             </div>
             <div className="min-w-0">
-              <h1 className="text-sm sm:text-base font-bold leading-none truncate">Módulo de Configuración</h1>
-              <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 truncate">Ajustes globales del sistema</p>
+              <h1 className="text-base sm:text-lg md:text-xl font-bold tracking-tight text-foreground truncate">Módulo de Configuración</h1>
+              <p className="text-[10px] sm:text-xs text-muted-foreground font-medium truncate">Ajustes globales del sistema</p>
             </div>
           </div>
         </div>
@@ -491,11 +511,26 @@ export default function ConfiguracionPage() {
                   </div>
 
                   <div className="flex items-center ml-2 space-x-3">
-                    {(printer.auto_print || true) && (
-                      <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-200 uppercase tracking-wider">
-                        Recibos
-                      </span>
-                    )}
+                                        <div className="flex items-center space-x-2">
+                      {printer.auto_print ? (
+                        <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-200 uppercase tracking-wider">
+                          Por Defecto
+                        </span>
+                      ) : (
+                        <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200 uppercase tracking-wider">
+                          Inactiva
+                        </span>
+                      )}
+                      {!inactive && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleSetDefaultPrinter(printer.id); }}
+                          className={`p-1.5 rounded-lg transition-colors border border-transparent ${printer.auto_print ? 'text-yellow-500 bg-yellow-50' : 'text-gray-400 hover:text-yellow-500 hover:bg-yellow-50 hover:border-yellow-200'}`}
+                          title="Fijar como Principal"
+                        >
+                          <Star className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                     {inactive ? (
                       <button
                         onClick={(e) => { e.stopPropagation(); handleReactivatePrinter(printer.id); }}

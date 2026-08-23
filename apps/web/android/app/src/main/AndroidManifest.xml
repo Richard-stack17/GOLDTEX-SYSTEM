@@ -38,4 +38,28 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Bluetooth Classic (SPP) — Android 12+ (API 31+) -->
+    <!-- BLUETOOTH_SCAN: necesario para escanear dispositivos BT cercanos -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
+    <!-- BLUETOOTH_CONNECT: necesario para conectar a dispositivos BT emparejados -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <!-- Bluetooth Classic legacy (Android < 12, API ≤ 30) -->
+    <uses-permission android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"
+        android:maxSdkVersion="30" />
+
+    <!-- Localización fina: requerida por Android 6-11 para escanear BT Classic -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"
+        android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"
+        android:maxSdkVersion="30" />
+
+    <!-- Declaración de feature de hardware Bluetooth (no obligatorio instalar en dispositivos sin BT) -->
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+
 </manifest>
+

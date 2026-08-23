@@ -9,6 +9,7 @@ import { useRole } from "../context/RoleContext";
 import { useTheme } from "../context/ThemeContext";
 import StoreSwitcher from "../components/StoreSwitcher";
 import { useRouter } from "next/navigation";
+import { useIsNativeAndroid } from "../lib/platform";
 
 
 export default function HubPage() {
@@ -17,6 +18,7 @@ export default function HubPage() {
   const { theme, toggleTheme } = useTheme();
   const router = useRouter();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const isNativeAndroid = useIsNativeAndroid();
 
   useEffect(() => {
     setIsMounted(true);
@@ -39,12 +41,12 @@ export default function HubPage() {
 
   if (!isHydrated || !role || !username) return null;
 
-  const isApkMode = process.env.NEXT_PUBLIC_APP_MODE === 'apk';
+  const isApkMode = isNativeAndroid || process.env.NEXT_PUBLIC_APP_MODE === 'apk';
 
   const isModuleAllowed = (key: string, permValue?: boolean) => {
     if (!permValue) return false;
     if (!isApkMode) return true;
-    // En modo APK, solo se permiten los módulos móviles (POS y Configuración)
+    // En modo APK Android, solo se permiten los módulos móviles (POS y Configuración)
     return key === "pos" || key === "settings";
   };
 

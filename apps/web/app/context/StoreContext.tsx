@@ -80,13 +80,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   // BUG FIX CRÍTICO: Forzar reseteo si el nuevo usuario no tiene permisos globales
   useEffect(() => {
-    if (isHydrated && role && !isGlobalUser) {
+    if (isHydrated && role && !isLoadingStores && !isGlobalUser) {
       setIsAllStoresModeState(false);
-      if (typeof window !== "undefined" && localStorage.getItem("goltex_store_mode") === "ALL") {
+      if (typeof window !== "undefined") {
         localStorage.setItem("goltex_store_mode", "SINGLE");
       }
     }
-  }, [role, employeeId, isGlobalUser, isHydrated]);
+  }, [role, employeeId, isGlobalUser, isHydrated, isLoadingStores]);
 
   const applyProfileStore = async (targetStoreId: string | null) => {
     if (!targetStoreId) return;
@@ -305,7 +305,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           setRole(selected.role);
         }
         debugMode = `MODO UNICO: ${selected.name}`;
-        await syncCatalog(selected.id);
+        syncCatalog(selected.id).catch(console.error);
       } else {
         // storesForUser.length === 0
         setActiveStoreState(null);
@@ -348,7 +348,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
 
     // 4. Sincronizar Dexie con la nueva tienda
-    await syncCatalog(store.id);
+    syncCatalog(store.id).catch(console.error);
   };
 
   /**

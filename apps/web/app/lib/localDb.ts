@@ -43,6 +43,8 @@ export interface LocalRole {
 }
 
 export interface LocalSale {
+  parent_sale_id?: string | null;
+  source_type?: string | null;
   id: string;
   internal_ticket_number: string | null;
   proforma_number: string | null;
@@ -102,14 +104,14 @@ export class GoltexPosDB extends Dexie {
 
   constructor() {
     super('GoltexPosDB');
-    this.version(9).stores({ // v8: added sales, transactions, employees. v9: updated pending_sales
+    this.version(10).stores({ // v8: added sales, transactions, employees. v9: updated pending_sales
       products: 'id, family_id, name, sku, price, stock',
       families: 'id, name, code',
       services: 'id, name, is_quick_access',
       pending_sales: '++local_id, offline_uuid, sync_status, created_at, id, customer_id, total, status',
       profiles: 'id, username, employee_id, password_hash, role, email',
       roles: 'id, name',
-      sales: 'id, issue_date, status',
+      sales: 'id, issue_date, status, parent_sale_id, source_type',
       transactions: 'id, sale_id, payment_method',
       employees: 'id, full_name, dni'
     });
@@ -118,20 +120,31 @@ export class GoltexPosDB extends Dexie {
 
 export const db = new GoltexPosDB();
 
+if (typeof window !== 'undefined') {
+  db.open().catch(async (err) => {
+    if (err.name === 'VersionError') {
+      if (process.env.NODE_ENV === 'development') console.warn("Schema mismatch detectado. Purgando BD local...");
+      await db.delete();
+      await db.open();
+    }
+  });
+}
+
+
 /**
  * Función de utilidad para sincronizar el catálogo desde Supabase hacia Dexie.
  * Debe ser llamada cuando la aplicación detecte que hay conexión a internet.
  */
 export async function syncCatalog(targetStoreId?: string) {
   if (typeof window === 'undefined' || !navigator.onLine) {
-    console.warn("No hay conexión a internet, saltando sincronización del catálogo.");
+    if (process.env.NODE_ENV === 'development') console.warn("No hay conexión a internet, saltando sincronización del catálogo.");
     return;
   }
 
   const storeId = targetStoreId || localStorage.getItem("goltex_active_store_id");
 
   try {
-    console.log(`Iniciando sincronización del catálogo limpio para la tienda: ${storeId || 'todas'}`);
+    if (process.env.NODE_ENV === 'development') console.log(`Iniciando sincronización del catálogo limpio para la tienda: ${storeId || 'todas'}`);
 
     // Limpieza total preventiva de tablas locales antes de refrescar
     await db.families.clear();
@@ -149,7 +162,7 @@ export async function syncCatalog(targetStoreId?: string) {
 
     if (!famError && familiesData) {
       await db.families.bulkPut(familiesData);
-      console.log(`✅ ${familiesData.length} familias sincronizadas.`);
+      if (process.env.NODE_ENV === 'development') console.log(`✅ ${familiesData.length} familias sincronizadas.`);
     }
 
     // 2. Sincronizar productos
@@ -171,7 +184,7 @@ export async function syncCatalog(targetStoreId?: string) {
       }));
 
       await db.products.bulkPut(localProducts);
-      console.log(`✅ ${localProducts.length} productos sincronizados.`);
+      if (process.env.NODE_ENV === 'development') console.log(`✅ ${localProducts.length} productos sincronizados.`);
     }
 
     // 3. Sincronizar perfiles
@@ -182,7 +195,7 @@ export async function syncCatalog(targetStoreId?: string) {
 
     if (!profError && profilesData) {
       await db.profiles.bulkPut(profilesData);
-      console.log(`✅ ${profilesData.length} perfiles sincronizados.`);
+      if (process.env.NODE_ENV === 'development') console.log(`✅ ${profilesData.length} perfiles sincronizados.`);
     }
 
     // 4. Sincronizar roles y permisos
@@ -199,7 +212,7 @@ export async function syncCatalog(targetStoreId?: string) {
 
     if (!rolesError && rolesData) {
       await db.roles.bulkPut(rolesData);
-      console.log(`✅ ${rolesData.length} roles sincronizados.`);
+      if (process.env.NODE_ENV === 'development') console.log(`✅ ${rolesData.length} roles sincronizados.`);
     }
 
     // 5. Sincronizar servicios
@@ -215,7 +228,7 @@ export async function syncCatalog(targetStoreId?: string) {
     if (!servicesError && servicesData) {
       await db.services.clear();
       await db.services.bulkPut(servicesData);
-      console.log(`✅ ${servicesData.length} servicios sincronizados.`);
+      if (process.env.NODE_ENV === 'development') console.log(`✅ ${servicesData.length} servicios sincronizados.`);
     }
 
     // 6. Sincronizar empleados
@@ -225,7 +238,7 @@ export async function syncCatalog(targetStoreId?: string) {
 
     if (!empError && employeesData) {
       await db.employees.bulkPut(employeesData);
-      console.log(`✅ ${employeesData.length} empleados sincronizados.`);
+      if (process.env.NODE_ENV === 'development') console.log(`✅ ${employeesData.length} empleados sincronizados.`);
     }
 
     // Sincronizar Ventas (Últimos 2 años para analítica)
@@ -234,7 +247,7 @@ export async function syncCatalog(targetStoreId?: string) {
     
     let salesQuery = supabase
       .from('sales')
-      .select('id, internal_ticket_number, proforma_number, invoice_number, issue_date, created_at, total, status, items, seller_id, cashier_id, store_id')
+      .select('id, internal_ticket_number, proforma_number, invoice_number, issue_date, created_at, total, status, items, seller_id, cashier_id, store_id, parent_sale_id, source_type')
       .gte('issue_date', twoYearsAgo.toISOString());
       
     if (storeId) {
@@ -251,7 +264,7 @@ export async function syncCatalog(targetStoreId?: string) {
         created_at: s.created_at
       }));
       await db.sales.bulkPut(formattedSales);
-      console.log(`✅ ${formattedSales.length} ventas sincronizadas.`);
+      if (process.env.NODE_ENV === 'development') console.log(`✅ ${formattedSales.length} ventas sincronizadas.`);
 
       // Sincronizar transacciones asociadas a estas ventas
       // Obtenemos solo transacciones de ventas descargadas (optimización: hacerlo en lotes o descargar todo del último año si no excede límites postgrest)
@@ -262,7 +275,7 @@ export async function syncCatalog(targetStoreId?: string) {
 
       if (!txError && transactionsData) {
         await db.transactions.bulkPut(transactionsData);
-        console.log(`✅ ${transactionsData.length} transacciones sincronizadas.`);
+        if (process.env.NODE_ENV === 'development') console.log(`✅ ${transactionsData.length} transacciones sincronizadas.`);
       }
     }
 
