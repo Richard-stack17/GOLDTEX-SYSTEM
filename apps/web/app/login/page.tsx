@@ -19,7 +19,23 @@ export default function LoginPage() {
     if (searchParams.get("inactive_store") === "true") {
       setError("Acceso Restringido: La sucursal asignada a tu cuenta ha sido desactivada. Contacta al administrador.");
     }
-  }, [searchParams]);
+    if (searchParams.get("error")) {
+      setError(searchParams.get("error"));
+    }
+
+    // Auto-redirección si ya existe una sesión válida en el teléfono / navegador
+    if (typeof window !== "undefined") {
+      const savedUser = localStorage.getItem("goltex_username");
+      const savedRole = localStorage.getItem("goltex_role");
+      const isRevoked = searchParams.get("revoked") === "true";
+      const isInactive = searchParams.get("inactive_store") === "true";
+      const hasError = !!searchParams.get("error");
+      
+      if (savedUser && savedRole && !isRevoked && !isInactive && !hasError) {
+        router.replace("/hub");
+      }
+    }
+  }, [searchParams, router]);
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -119,7 +135,7 @@ export default function LoginPage() {
         console.error("No se pudo guardar el historial de cuentas", e);
       }
 
-      router.push("/hub");
+      router.replace("/hub");
     } catch (err: any) {
       setError(err.message || "Error al iniciar sesión");
     } finally {
@@ -133,7 +149,7 @@ export default function LoginPage() {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}/hub`,
+          redirectTo: `${window.location.origin}/auth/callback`,
         },
       });
       if (error) throw error;

@@ -6,7 +6,8 @@ import { supabase } from "../../lib/supabase";
 import { computeNextDailyTicketNumber, formatTicketHash, parseInternalTicketNum, starsoftDocNumFromTicket } from "../../lib/ticket-sequence";
 import { useRole } from "../../context/RoleContext";
 import { useStore } from "../../context/StoreContext";
-import { silentPrintSaleReceipt } from "../../configuracion/utils/printerEngine";
+import { silentPrintSaleReceipt, silentPrintClosureReport } from "../../configuracion/utils/printerEngine";
+import { CheckCircle2, AlertTriangle, XCircle, Printer } from "lucide-react";
 
 export type Product = {
   id: string;
@@ -309,6 +310,7 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
         if (exists) return prev.map((i) => i.id === numpadProduct.id ? { ...i, quantity: qty, editedPrice: price } : i);
         return [...prev, { ...numpadProduct, quantity: qty, editedPrice: price }];
       });
+      setRightPanelMode("cart");
       setMobileTab("cart");
     }
     setNumpadProduct(null);
@@ -321,6 +323,8 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
   
   const addToCart = (product: Product, quantity: number, price: number) => {
     setCart(prev => [...prev, { ...product, quantity, editedPrice: price }]);
+    setRightPanelMode("cart");
+    setMobileTab("cart");
   };
 
   const total = cart.reduce((acc, item) => acc + item.editedPrice * item.quantity, 0);
@@ -380,6 +384,14 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
   };
 
   const confirmCloseCaja = async () => {
+    try {
+      if (activeStoreId && cajaSummary) {
+        await silentPrintClosureReport(cajaSummary, activeStoreId);
+      }
+    } catch (err: any) {
+      showToast("Error al imprimir reporte de caja: " + err.message, "warning");
+    }
+
     setIsCajaOpen(false);
     if (activeStoreId) localStorage.setItem(`isCajaOpen_${activeStoreId}`, "false");
     setCajaSummaryOpen(false);
@@ -475,10 +487,26 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
   
   useEffect(() => {
     async function loadPrinter() {
-      let query = supabase.from('printers').select('*').order('auto_print', { ascending: false }).limit(1);
-      if (activeStoreId) query = query.eq('store_id', activeStoreId);
-      const { data } = await query.maybeSingle();
-      if (data) setActivePrinter(data);
+      // 1. Carga inmediata desde memoria local (0 ms)
+      try {
+        const key = activeStoreId ? `cached_printer_config_${activeStoreId}` : 'cached_printer_config';
+        const cached = localStorage.getItem(key) || localStorage.getItem('cached_printer_config');
+        if (cached) setActivePrinter(JSON.parse(cached));
+      } catch (_) { }
+
+      // 2. Refresco en segundo plano
+      try {
+        let query = supabase.from('printers').select('*').eq('is_active', true).order('auto_print', { ascending: false }).limit(1);
+        if (activeStoreId) query = query.eq('store_id', activeStoreId);
+        const { data } = await query.maybeSingle();
+        if (data) {
+          setActivePrinter(data);
+          try {
+            if (activeStoreId) localStorage.setItem(`cached_printer_config_${activeStoreId}`, JSON.stringify(data));
+            localStorage.setItem('cached_printer_config', JSON.stringify(data));
+          } catch (_) { }
+        }
+      } catch (_) { }
     }
     loadPrinter();
   }, [activeStoreId]);
@@ -513,15 +541,19 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
         });
       } catch (e) { }
 
+      // Notificar de inmediato la emisión e inicio de impresión
+      showToast(`Proforma ${docNum} registrada. Imprimiendo 2 copias...`, 'success');
+
       setTimeout(async () => {
         const saleDataForPrint = { proforma_number: docNum, customer_name: sellerName, items: cartSnapshot, total: totalSnapshot };
         try {
-          await silentPrintSaleReceipt(saleDataForPrint, true);
+          await silentPrintSaleReceipt(saleDataForPrint, true, activeStoreId || undefined);
+          showToast(`Impresión finalizada con éxito (${docNum} — 2 copias).`, 'success');
         } catch (err: any) {
           if (err?.message === "NO_PRINTER_CONFIGURED") {
-            showToast("⚠️ No hay ninguna impresora por defecto configurada para esta tienda.", "warning");
+            showToast("No hay ninguna impresora por defecto configurada para esta tienda.", "warning");
           } else {
-            showToast("⚠️ Error de conexión con la impresora. Verifique que esté encendida.", "error");
+            showToast("Error de conexión con la impresora. Verifique que esté encendida.", "error");
           }
         }
       }, 50);
@@ -597,7 +629,7 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
     try {
       showToast("Conectando con la impresora térmica...", "success");
       const saleDataForPrint = { proforma_number: ticket.proforma_number || ticket.invoice_number || '', customer_name: "Cliente General", items: reconstructedItems, total: ticket.total };
-      await silentPrintSaleReceipt(saleDataForPrint, false);
+      await silentPrintSaleReceipt(saleDataForPrint, false, activeStoreId || undefined);
       showToast("¡Ticket impreso con éxito!", "success");
     } catch (err: any) {
       if (err?.message === "NO_PRINTER_CONFIGURED") {
@@ -638,13 +670,16 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
     }}>
       {children}
       {toast && (
-        <div className="fixed bottom-4 right-4 z-[9999] animate-in fade-in slide-in-from-bottom-4 duration-300">
-          <div className={`px-4 py-3 rounded-xl shadow-lg flex items-center gap-3 border ${
+        <div className="fixed bottom-4 right-4 z-[9999] animate-in fade-in slide-in-from-bottom-4 duration-300 pointer-events-none max-w-sm">
+          <div className={`px-4 py-3 rounded-2xl shadow-xl flex items-center gap-3 border ${
             toast.type === 'success' ? 'bg-emerald-600 text-white border-emerald-500' : 
             toast.type === 'warning' ? 'bg-amber-500 text-white border-amber-400' : 
             'bg-red-600 text-white border-red-500'
           }`}>
-            <div className="font-bold text-sm">{toast.message}</div>
+            {toast.type === 'success' && <CheckCircle2 className="w-5 h-5 shrink-0" />}
+            {toast.type === 'warning' && <AlertTriangle className="w-5 h-5 shrink-0" />}
+            {toast.type === 'error' && <XCircle className="w-5 h-5 shrink-0" />}
+            <div className="font-bold text-sm leading-tight">{toast.message}</div>
           </div>
         </div>
       )}

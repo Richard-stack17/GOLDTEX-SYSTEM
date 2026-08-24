@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { supabase } from '../../../lib/supabase';
 import {
   Users, UserPlus, ShieldAlert,
   RefreshCw, Plus,
@@ -10,8 +11,12 @@ import {
 import { Employee, Profile, Role } from '../types';
 
 import { usePersonal } from '../PersonalContext';
+import { ConfirmDialog } from '../../../../components/ConfirmDialog';
 
 export function PersonalUsersTab() {
+  const [unlinkingProfile, setUnlinkingProfile] = useState<Profile | null>(null);
+  const [isUnlinking, setIsUnlinking] = useState(false);
+
   const {
     activeProfiles, activeStoreId, activeTab, allProfiles, allRoles, availableStoreIds, availableStores, checkCanManageTarget, checkUsernameState, confirmDeleteEmployee, confirmDeleteRole, confirmGlobalAccess, createAccess, deletingEmployee, deletingRole, deletingUserId, deletingUsername, dni, editRoleDesc, editRoleName, editingEmployee, editingRole, editingUserId, email, empAccessScope, empEmail, empGlobalRole, empPassword, empStoreIds, empStoreRoleIds, empStoreRoles, empUsername, employeeById, employees, formatFriendlyErrorMessage, fullName, getRoleBadgeStyle, getValidStoreRole, globalRoles, handleCancelEdit, handleCreateEmployee, handleCreateRole, handleDeleteEmployeeClick, handleDeleteRole, handleDeleteUser, handleEditClick, handleEditEmployeeClick, handleExecuteRestoration, handleLinkExistingUser, handleLinkNewUser, handleRestoreEmployee, handleRestorePermissions, handleRestoreRole, handleRestoreUser, handleSaveCredentials, handleSaveEditRole, handleSavePermissions, handleTabChange, handleTogglePermission, hasUnsavedRoleChanges, isAdmin, isDeletingRole, isDeletingUser, isEditRoleModalOpen, isEmployeeModalOpen, isGlobalUser, isHydrated, isLinking, isRestoringUser, isRoleConfirmModalOpen, isRoleModalOpen, isRoleWarningModalOpen, isUserGlobalAdmin, isUserModalOpen, linkExistingUserId, linkMode, linkRoleId, linkingEmployee, loadData, loading, modalResetToken, newRoleDesc, newRoleName, newRoleScopeStoreId, originalRoles, password, pendingRestoration, pendingTab, permissions, phone, profileByEmployeeId, renderRoleOptions, renderStoreAndRoleBadges, renderStoreRoleList, role, roleAssignedUsers, roles, router, savingEditRole, savingEmployee, savingPermissions, savingRole, savingUser, selectedEmpId, selectedModalStoreId, selectedStoreIds, setActiveTab, setAllProfiles, setAllRoles, setConfirmGlobalAccess, setCreateAccess, setDeletingEmployee, setDeletingRole, setDeletingUserId, setDeletingUsername, setDni, setEditRoleDesc, setEditRoleName, setEditingEmployee, setEditingRole, setEditingUserId, setEmail, setEmpAccessScope, setEmpEmail, setEmpGlobalRole, setEmpPassword, setEmpStoreIds, setEmpStoreRoleIds, setEmpStoreRoles, setEmpUsername, setEmployees, setFullName, setHasUnsavedRoleChanges, setIsDeletingRole, setIsDeletingUser, setIsEditRoleModalOpen, setIsEmployeeModalOpen, setIsLinking, setIsRestoringUser, setIsRoleConfirmModalOpen, setIsRoleModalOpen, setIsRoleWarningModalOpen, setIsUserModalOpen, setLinkExistingUserId, setLinkMode, setLinkRoleId, setLinkingEmployee, setLoading, setModalResetToken, setNewRoleDesc, setNewRoleName, setNewRoleScopeStoreId, setOriginalRoles, setPassword, setPendingRestoration, setPendingTab, setPhone, setRoleAssignedUsers, setRoles, setSavingEditRole, setSavingEmployee, setSavingPermissions, setSavingRole, setSavingUser, setSelectedEmpId, setSelectedModalStoreId, setSelectedStoreIds, setShowEmpPassword, setShowInactiveEmployees, setShowInactiveRoles, setShowInactiveUsers, setShowRoleExitConfirm, setShowUserPassword, setToast, setUserAccessScope, setUserGlobalRole, setUserStoreRoleIds, setUserStoreRoles, setUsername, showEmpPassword, showInactiveEmployees, showInactiveRoles, showInactiveUsers, showRoleExitConfirm, showToast, showUserPassword, storeMap, syncEmployeeStoreAssignment, targetModalStoreId, toast, unlinkedEmployees, userAccessScope, userGlobalRole, userStoreRoleIds, userStoreRoles, username, visibleEmployees, visibleRoles
   , sortedProfiles, sortConfig, requestSort } = usePersonal();
@@ -150,6 +155,17 @@ export function PersonalUsersTab() {
                             </td>
                             <td className="px-5 py-3.5 text-center">
                               <div className="flex items-center justify-center gap-2">
+                                {isUserGlobalAdmin && profile.email && (
+                                  <button
+                                    onClick={() => setUnlinkingProfile(profile)}
+                                    className="p-1.5 text-amber-500 hover:text-amber-700 hover:bg-amber-50 rounded-lg transition-colors inline-flex"
+                                    title="Desvincular cuenta de Google (Gmail)"
+                                  >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                                    </svg>
+                                  </button>
+                                )}
                                 {isDeleted ? (
                                   !canManageUser ? null : (
                                     <button
@@ -201,6 +217,36 @@ export function PersonalUsersTab() {
 
         {/* ════ TAB 3: ROLES Y PERMISOS ════ */}
 
+        {/* Modal de Desvinculación */}
+        <ConfirmDialog
+          isOpen={!!unlinkingProfile}
+          title="Desvincular Gmail"
+          description={`¿Estás seguro que deseas desvincular el acceso de Gmail para el usuario @${unlinkingProfile?.username}? El usuario deberá ingresar con contraseña o vincular nuevamente.`}
+          confirmText="Desvincular"
+          isDestructive={true}
+          isLoading={isUnlinking}
+          onConfirm={async () => {
+            if (!unlinkingProfile) return;
+            setIsUnlinking(true);
+            try {
+              const { error } = await supabase
+                .from('profiles')
+                .update({ email: null })
+                .eq('id', unlinkingProfile.id);
+              if (error) throw error;
+              
+              showToast("Identidad de Google desvinculada exitosamente.", "success");
+              // Refresh data
+              await loadData();
+            } catch (e: any) {
+              showToast("Error al desvincular: " + e.message, "error");
+            } finally {
+              setIsUnlinking(false);
+              setUnlinkingProfile(null);
+            }
+          }}
+          onCancel={() => setUnlinkingProfile(null)}
+        />
     </>
   );
 }

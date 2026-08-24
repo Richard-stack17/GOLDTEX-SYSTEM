@@ -10,6 +10,7 @@ import { useTheme } from "../context/ThemeContext";
 import StoreSwitcher from "../components/StoreSwitcher";
 import { useRouter } from "next/navigation";
 import { useIsNativeAndroid } from "../lib/platform";
+import UserProfileModal from "./components/UserProfileModal";
 
 
 export default function HubPage() {
@@ -18,6 +19,7 @@ export default function HubPage() {
   const { theme, toggleTheme } = useTheme();
   const router = useRouter();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
   const isNativeAndroid = useIsNativeAndroid();
 
   useEffect(() => {
@@ -88,15 +90,29 @@ export default function HubPage() {
               {theme === 'dark' ? <Sun className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-400" /> : <Moon className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-400" />}
             </button>
           </div>
-          <button
-            onClick={() => setShowLogoutConfirm(true)}
-            className="flex items-center gap-2 bg-secondary/30 px-3 py-1.5 rounded-xl border border-border text-xs sm:text-sm font-semibold text-foreground hover:bg-secondary transition-colors"
-          >
-            <UserCircle className="w-4 h-4 sm:w-5 sm:h-5 text-muted-foreground" />
-            Cerrar Sesión
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setShowProfileModal(true)}
+              className="flex items-center gap-2 bg-secondary/30 px-3 py-1.5 rounded-xl border border-border text-xs sm:text-sm font-semibold text-foreground hover:bg-secondary transition-colors"
+            >
+              <UserCircle className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-400" />
+              Mi Perfil
+            </button>
+            <button
+              onClick={() => setShowLogoutConfirm(true)}
+              className="flex items-center gap-2 bg-secondary/30 px-3 py-1.5 rounded-xl border border-border text-xs sm:text-sm font-semibold text-foreground hover:bg-secondary transition-colors"
+            >
+              <Contact className="w-4 h-4 sm:w-5 sm:h-5 text-muted-foreground" />
+              Cerrar Sesión
+            </button>
+          </div>
         </div>
       </header>
+
+      <UserProfileModal 
+        isOpen={showProfileModal} 
+        onClose={() => setShowProfileModal(false)} 
+      />
 
       {!hasAnyModuleAccess ? (
         <div className="text-center py-16 bg-glass/30 rounded-2xl border border-white/10 p-8 space-y-3">

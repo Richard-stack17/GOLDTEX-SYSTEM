@@ -2,5 +2,11 @@
 include ':capacitor-android'
 project(':capacitor-android').projectDir = new File('../../../node_modules/.pnpm/@capacitor+android@6.2.1_@capacitor+core@6.2.1/node_modules/@capacitor/android/capacitor')
 
+include ':capacitor-app'
+project(':capacitor-app').projectDir = new File('../../../node_modules/.pnpm/@capacitor+app@6.0.3_@capacitor+core@6.2.1/node_modules/@capacitor/app/android')
+
 include ':e-is-capacitor-bluetooth-serial'
 project(':e-is-capacitor-bluetooth-serial').projectDir = new File('../../../node_modules/.pnpm/@e-is+capacitor-bluetooth-serial@6.0.3/node_modules/@e-is/capacitor-bluetooth-serial/android')
+
+include ':spryrocks-capacitor-socket-connection-plugin'
+project(':spryrocks-capacitor-socket-connection-plugin').projectDir = new File('../../../node_modules/.pnpm/@spryrocks+capacitor-socket-connection-plugin@6.3.0_@capacitor+core@6.2.1/node_modules/@spryrocks/capacitor-socket-connection-plugin/android')

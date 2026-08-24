@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { Star, Settings, ArrowLeft, Printer, Plus, ChevronRight, Loader2, Info, CreditCard, Save, Store, Edit2, Power, AlertTriangle, AlertCircle, CheckCircle2, Users } from 'lucide-react';
+import { Star, Settings, ArrowLeft, Printer, Plus, ChevronRight, Loader2, Info, CreditCard, Save, Store, Edit2, Power, AlertTriangle, AlertCircle, CheckCircle2, Users, Radio, Wifi, Cable } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useRole } from '../context/RoleContext';
@@ -169,17 +169,26 @@ export default function ConfiguracionPage() {
   const fetchPrinters = async () => {
     setIsLoading(true);
 
-    let query = supabase.from('printers').select('*').order('created_at', { ascending: false });
-    if (activeStoreId) query = query.eq('store_id', activeStoreId);
-    if (!showInactive) query = query.eq('is_active', true);
-    const { data, error } = await query;
-    
-    if (!error && data) {
-      setPrinters(data);
-    } else if (error) {
-      console.error("Error fetching printers:", error);
+    try {
+      const { data: storesData } = await supabase.from('stores').select('id, name');
+      if (storesData) setStores(storesData);
+
+      let query = supabase.from('printers').select('*, stores(id, name)').order('created_at', { ascending: false });
+      if (activeStoreId) query = query.eq('store_id', activeStoreId);
+      if (!showInactive) query = query.eq('is_active', true);
+      const { data, error } = await query;
+      
+      if (!error && data) {
+        setPrinters(data);
+      } else {
+        const { data: fallbackData } = await supabase.from('printers').select('*').order('created_at', { ascending: false });
+        setPrinters(fallbackData || []);
+      }
+    } catch (err) {
+      console.error("Error fetching printers:", err);
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   };
 
   const handleSetDefaultPrinter = async (printerId: string) => {
@@ -459,95 +468,166 @@ export default function ConfiguracionPage() {
             )}
           </div>
         ) : activeTab === 'PRINTERS' ? (
-          <div className="space-y-6">
+          <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <div />
+              <div>
+                <h2 className="text-base font-bold text-foreground">Impresoras Configuradas</h2>
+                <p className="text-xs text-muted-foreground">Dispositivos térmicos para emisión de tickets y comprobantes</p>
+              </div>
               <div className="flex items-center gap-3">
-                <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+                <label className="inline-flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
                   <input type="checkbox" className="sr-only" checked={showInactive} onChange={() => { setShowInactive(v => !v); }} />
-                  <span className="px-2 py-1 rounded-full border border-border bg-card text-xs font-bold">Mostrar Inactivas</span>
+                  <span className={`px-3 py-1 rounded-full border text-xs font-bold transition-colors ${
+                    showInactive 
+                      ? 'bg-primary/10 border-primary/30 text-primary' 
+                      : 'border-border bg-card text-muted-foreground hover:bg-secondary'
+                  }`}>
+                    Mostrar Inactivas
+                  </span>
                 </label>
               </div>
             </div>
-            {isLoading ? (
-          <div className="flex flex-col items-center justify-center mt-20 text-emerald-600">
-            <Loader2 className="w-8 h-8 animate-spin mb-2" />
-            <p className="text-sm font-medium text-gray-500">Cargando impresoras...</p>
-          </div>
-        ) : printers.length === 0 ? (
-          <div className="flex flex-col items-center justify-center mt-24 text-center px-6">
-            <div className="w-20 h-20 bg-gray-200 rounded-full flex items-center justify-center mb-4">
-              <Printer className="w-10 h-10 text-gray-400" />
-            </div>
-            <h2 className="text-lg font-bold text-gray-800 mb-2">No se encontraron impresoras</h2>
-            <p className="text-sm text-gray-500">Agrega una impresora térmica o de matriz para generar tickets.</p>
-          </div>
-        ) : (
-          <div className="divide-y divide-gray-100">
-            {printers.map(printer => {
-              const inactive = printer.is_active === false;
-              return (
-                <div 
-                  key={printer.id}
-                  onClick={() => router.push(`/configuracion/impresoras/editar?id=${printer.id}`)}
-                  className={`flex items-center px-4 py-4 hover:bg-gray-50 cursor-pointer transition-colors active:bg-gray-100 ${inactive ? 'opacity-60 grayscale' : ''}`}
-                >
-                  <div className="w-12 h-12 rounded-full bg-gray-100 flex flex-shrink-0 items-center justify-center mr-4 border border-gray-200">
-                    <Printer className="w-6 h-6 text-gray-600" />
-                  </div>
-                  
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-[17px] font-bold text-gray-900 truncate">{printer.name}</h3>
-                      {inactive && (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded border bg-zinc-100 text-zinc-600 border-zinc-200">INACTIVA</span>
-                      )}
-                    </div>
-                    <div className="flex items-center mt-0.5 text-[14px] text-gray-500 space-x-1">
-                      <span>{printer.type === 'wifi' ? 'WiFi' : printer.type === 'bluetooth' ? 'Bluetooth' : 'USB'}</span>
-                      <span>•</span>
-                      <span className="truncate">{printer.type === 'wifi' ? `${printer.ip_address}:${printer.port}` : printer.mac_address || 'Otro modelo'}</span>
-                    </div>
-                  </div>
 
-                  <div className="flex items-center ml-2 space-x-3">
-                                        <div className="flex items-center space-x-2">
-                      {printer.auto_print ? (
-                        <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-200 uppercase tracking-wider">
-                          Por Defecto
-                        </span>
-                      ) : (
-                        <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200 uppercase tracking-wider">
-                          Inactiva
-                        </span>
-                      )}
-                      {!inactive && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleSetDefaultPrinter(printer.id); }}
-                          className={`p-1.5 rounded-lg transition-colors border border-transparent ${printer.auto_print ? 'text-yellow-500 bg-yellow-50' : 'text-gray-400 hover:text-yellow-500 hover:bg-yellow-50 hover:border-yellow-200'}`}
-                          title="Fijar como Principal"
-                        >
-                          <Star className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-                    {inactive ? (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleReactivatePrinter(printer.id); }}
-                        className="px-3 py-1 rounded-lg border border-border bg-emerald-50 text-emerald-700 text-sm font-bold"
-                      >
-                        Reactivar
-                      </button>
-                    ) : (
-                      <ChevronRight className="w-5 h-5 text-gray-400 flex-shrink-0" />
-                    )}
-                  </div>
+            {isLoading ? (
+              <div className="flex flex-col items-center justify-center py-20 text-emerald-600">
+                <Loader2 className="w-8 h-8 animate-spin mb-2" />
+                <p className="text-sm font-medium text-muted-foreground">Cargando impresoras...</p>
+              </div>
+            ) : printers.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 text-center px-6 bg-card rounded-3xl border border-dashed border-border">
+                <div className="w-16 h-16 bg-secondary rounded-2xl flex items-center justify-center mb-4 text-muted-foreground">
+                  <Printer className="w-8 h-8" />
                 </div>
-              );
-            })}
+                <h2 className="text-base font-bold text-foreground mb-1">No se encontraron impresoras</h2>
+                <p className="text-xs text-muted-foreground max-w-sm">
+                  {activeStoreId ? 'No hay impresoras registradas para esta tienda.' : 'Agrega una impresora térmica para emitir tickets y recibos.'}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {printers.map(printer => {
+                  const inactive = printer.is_active === false;
+                  const storeName = printer.stores?.name || stores.find(s => s.id === printer.store_id)?.name || (printer.store_id ? 'Tienda asignada' : 'Todas las tiendas');
+                  const isDefault = Boolean(printer.auto_print);
+
+                  return (
+                    <div 
+                      key={printer.id}
+                      onClick={() => router.push(`/configuracion/impresoras/editar?id=${printer.id}`)}
+                      className={`p-4 sm:p-5 rounded-2xl border transition-all duration-200 cursor-pointer group flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+                        inactive 
+                          ? 'bg-card/40 border-border/50 opacity-60 grayscale' 
+                          : isDefault 
+                            ? 'bg-card border-emerald-500/40 shadow-sm hover:border-emerald-500/60 ring-1 ring-emerald-500/10'
+                            : 'bg-card border-border hover:border-primary/40 hover:shadow-sm'
+                      }`}
+                    >
+                      {/* Left: Icon + Main Details */}
+                      <div className="flex items-start sm:items-center gap-3.5 min-w-0 flex-1">
+                        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 transition-colors ${
+                          inactive 
+                            ? 'bg-secondary text-muted-foreground' 
+                            : isDefault 
+                              ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20' 
+                              : 'bg-secondary text-muted-foreground border border-border group-hover:text-foreground'
+                        }`}>
+                          <Printer className="w-6 h-6" />
+                        </div>
+
+                        <div className="min-w-0 flex-1 space-y-1.5">
+                          {/* Row 1: Name + Badges */}
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="text-base font-bold text-foreground truncate">{printer.name}</h3>
+
+                            {/* Store Badge */}
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 shrink-0">
+                              <Store className="w-3 h-3 shrink-0" />
+                              <span className="truncate max-w-[130px]">{storeName}</span>
+                            </span>
+
+                            {/* Inactive Badge */}
+                            {inactive && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-zinc-500/10 text-zinc-500 border border-zinc-500/20 shrink-0">
+                                Inactiva
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Row 2: Specs & Connection */}
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                            {printer.type === 'bluetooth' ? (
+                              <span className="inline-flex items-center gap-1 font-semibold text-indigo-500 bg-indigo-500/10 px-2 py-0.5 rounded-md border border-indigo-500/20">
+                                <Radio className="w-3 h-3 shrink-0" />
+                                Bluetooth
+                              </span>
+                            ) : printer.type === 'wifi' ? (
+                              <span className="inline-flex items-center gap-1 font-semibold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
+                                <Wifi className="w-3 h-3 shrink-0" />
+                                WiFi LAN
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 font-semibold text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
+                                <Cable className="w-3 h-3 shrink-0" />
+                                Cable USB
+                              </span>
+                            )}
+
+                            <span className="text-muted-foreground/60">•</span>
+
+                            <span className="font-medium">
+                              {printer.paper_width || 80}mm ({printer.max_chars || 48} col)
+                            </span>
+
+                            <span className="text-muted-foreground/60">•</span>
+
+                            <span className="font-mono text-[11px] truncate max-w-[160px]">
+                              {printer.type === 'wifi' 
+                                ? `${printer.ip_address}:${printer.port}` 
+                                : printer.mac_address || printer.model || 'Térmica'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right: Actions */}
+                      <div className="flex items-center justify-between sm:justify-end gap-2 pt-2 sm:pt-0 border-t sm:border-t-0 border-border/50 shrink-0">
+                        {!inactive && (
+                          isDefault ? (
+                            <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-xs font-bold">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              <span>Predeterminada</span>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleSetDefaultPrinter(printer.id); }}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-secondary hover:bg-emerald-500/10 hover:text-emerald-600 hover:border-emerald-500/20 text-muted-foreground border border-border text-xs font-bold transition-all active:scale-95 cursor-pointer"
+                              title="Fijar como impresora predeterminada"
+                            >
+                              <Star className="w-3.5 h-3.5 shrink-0" />
+                              <span>Hacer Predeterminada</span>
+                            </button>
+                          )
+                        )}
+
+                        {inactive ? (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleReactivatePrinter(printer.id); }}
+                            className="px-3 py-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 text-xs font-bold hover:bg-emerald-500/20 transition-colors"
+                          >
+                            Reactivar
+                          </button>
+                        ) : (
+                          <div className="w-8 h-8 rounded-xl bg-secondary/50 flex items-center justify-center text-muted-foreground group-hover:text-foreground group-hover:bg-secondary transition-colors shrink-0">
+                            <ChevronRight className="w-4 h-4" />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
-          )}
-        </div>
         ) : (
           <div className="w-full">
             {isLoading ? (

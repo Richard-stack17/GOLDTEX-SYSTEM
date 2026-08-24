@@ -73,7 +73,7 @@ function PosContent() {
 
       {/* RIGHT PANEL — Proforma + Emitir + Historial */}
       <div className={`w-full lg:w-[360px] xl:w-[440px] 2xl:w-[500px] flex flex-col h-full bg-surface shadow-xl z-20 shrink-0 border-t lg:border-t-0 lg:border-l border-border ${mobileTab === 'cart' ? 'flex' : 'hidden lg:flex'} ${!isCajaOpen ? 'pointer-events-none opacity-40 select-none' : ''}`}>
-        
+
         {/* Header en móvil para volver al catálogo */}
         <div className="lg:hidden flex items-center justify-between p-3 border-b border-border bg-card">
           <Button variant="ghost" size="sm" className="gap-2 font-bold text-xs" onClick={() => setMobileTab('catalog')}>
@@ -194,17 +194,20 @@ function PosContent() {
                   <span className="text-foreground">S/ {cajaSummary.izipay.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between items-center text-sm font-bold text-muted-foreground">
-                  <span>BCP (Transferencias/Yape)</span>
+                  <span>BCP</span>
                   <span className="text-foreground">S/ {cajaSummary.bcp.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between items-center text-sm font-bold text-muted-foreground">
-                  <span>BBVA (Plin/Transferencias)</span>
+                  <span>BBVA</span>
                   <span className="text-foreground">S/ {cajaSummary.bbva.toFixed(2)}</span>
                 </div>
                 <div className="pt-3 mt-3 border-t border-border flex justify-between items-center text-lg font-black">
                   <span>TOTAL FINAL</span>
                   <span className="text-emerald-500">S/ {cajaSummary.total.toFixed(2)}</span>
                 </div>
+              </div>
+              <div className="bg-amber-500/10 border border-amber-500/20 text-amber-500 p-3 rounded-xl text-xs font-semibold flex items-center justify-center text-center">
+                Al confirmar, se imprimirá automáticamente el ticket de arqueo de caja.
               </div>
               <div className="flex flex-col sm:flex-row gap-3 pt-4">
                 <Button variant="outline" className="flex-1 h-12 font-bold" onClick={() => setCajaSummaryOpen(false)}>
@@ -220,24 +223,24 @@ function PosContent() {
       </Dialog>
 
       <Dialog open={!!previewTicketData} onOpenChange={(open) => !open && setPreviewTicketData(null)}>
-        <DialogContent className="max-w-md bg-white text-slate-900 shadow-2xl rounded-xl border border-slate-200 p-3 sm:p-6">
-          <DialogHeader>
-            <DialogTitle className="text-xl font-bold flex items-center gap-2 text-slate-800">
-              <Eye className="w-5 h-5 text-emerald-700" />
-              Vista Previa de Impresión
+        <DialogContent className="max-w-md w-[95vw] sm:w-full bg-white text-slate-900 shadow-2xl rounded-2xl border border-slate-200 p-3.5 sm:p-6 overflow-hidden">
+          <DialogHeader className="mb-1">
+            <DialogTitle className="text-lg sm:text-xl font-bold flex items-center gap-2 text-slate-800">
+              <Eye className="w-5 h-5 text-emerald-700 shrink-0" />
+              <span>Vista Previa de Impresión</span>
             </DialogTitle>
           </DialogHeader>
-          <div className="py-2 w-full overflow-x-auto scrollbar-hide flex justify-center font-mono text-xs">
+          <div className="py-1 w-full overflow-x-auto font-mono text-xs">
             {previewTicketData && (
-              <ReceiptPreview 
-                maxChars={activePrinter?.max_chars || 48} 
+              <ReceiptPreview
+                maxChars={activePrinter?.max_chars || 48}
                 paperWidth={activePrinter?.paper_width || 80}
-                saleData={previewTicketData} 
+                saleData={previewTicketData}
               />
             )}
           </div>
           <div className="pt-2">
-            <Button variant="outline" className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium py-2.5 rounded-lg transition-colors border-0" onClick={() => setPreviewTicketData(null)}>
+            <Button variant="outline" className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl transition-colors border-0" onClick={() => setPreviewTicketData(null)}>
               Cerrar
             </Button>
           </div>

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { User, LogOut, ChevronDown, Plus, X, Lock, Loader2 } from "lucide-react";
+import { User, LogOut, ChevronDown, Plus, X, Lock, Loader2, Eye, EyeOff, AlertTriangle } from "lucide-react";
 import { useRole } from "../context/RoleContext";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase";
@@ -18,6 +18,7 @@ export default function AccountSwitcher() {
   
   const [selectedUser, setSelectedUser] = useState<any | null>(null);
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [isSwitching, setIsSwitching] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,7 +39,9 @@ export default function AccountSwitcher() {
       }
       setSelectedUser(null);
       setPassword("");
+      setShowPassword(false);
       setError(null);
+      setIsSwitching(false);
     }
   }, [isOpen]);
 
@@ -82,7 +85,6 @@ export default function AccountSwitcher() {
 
     setError(null);
     setLoading(true);
-    setIsSwitching(true);
 
     try {
       const { data: profileData, error: profileErr } = await supabase
@@ -92,12 +94,15 @@ export default function AccountSwitcher() {
         .maybeSingle();
 
       if (profileErr || !profileData) {
-        throw new Error("Usuario no encontrado.");
+        throw new Error("Usuario no encontrado en el sistema.");
       }
 
-      if (!bcrypt.compareSync(password, profileData.password_hash)) {
-        throw new Error("Contraseña incorrecta.");
+      if (!profileData.password_hash || !bcrypt.compareSync(password, profileData.password_hash)) {
+        throw new Error("La contraseña ingresada es incorrecta.");
       }
+
+      // Contraseña correcta -> activar pantalla de transición
+      setIsSwitching(true);
 
       // Purgar estado local (tiendas, permisos, etc.) del usuario anterior
       localStorage.removeItem("goltex_active_store_id");
@@ -115,7 +120,42 @@ export default function AccountSwitcher() {
         localStorage.removeItem("goltex_employee_id");
       }
 
-      
+      // Buscar la tienda por defecto del nuevo usuario para evitar que StoreContext
+      // active "Todas las Tiendas" al no encontrar nada guardado en localStorage
+      try {
+        const { data: fullProfile } = await supabase
+          .from("profiles")
+          .select("id, default_store_id, employee_id")
+          .eq("username", profileData.username)
+          .maybeSingle();
+
+        if (fullProfile?.id) {
+          localStorage.setItem("goltex_profile_id", fullProfile.id);
+        }
+
+        let resolvedStoreId: string | null = fullProfile?.default_store_id || null;
+
+        // Si no tiene default_store_id, buscar la primera tienda asignada vía employee_stores
+        if (!resolvedStoreId && fullProfile?.id) {
+          const { data: empStoreData } = await supabase
+            .from("employee_stores")
+            .select("store_id")
+            .eq("profile_id", fullProfile.id)
+            .limit(1)
+            .maybeSingle();
+          if (empStoreData?.store_id) {
+            resolvedStoreId = empStoreData.store_id;
+          }
+        }
+
+        if (resolvedStoreId) {
+          // Pre-set para que StoreContext arranque en SINGLE mode con la tienda correcta
+          localStorage.setItem("goltex_default_store_id", resolvedStoreId);
+          localStorage.setItem("goltex_active_store_id", resolvedStoreId);
+          localStorage.setItem("goltex_store_mode", "SINGLE");
+        }
+      } catch (_) { }
+
       // Update accounts order (bring to top)
       const newSaved = savedAccounts.filter(a => a.username !== profileData.username);
       newSaved.unshift({ 
@@ -128,7 +168,8 @@ export default function AccountSwitcher() {
       setIsOpen(false);
       window.location.reload(); // Recarga limpia del árbol de React para destruir caché en memoria
     } catch (err: any) {
-      setError(err.message || "Error al autenticar");
+      setError(err.message || "Error al autenticar credenciales");
+      setIsSwitching(false);
     } finally {
       setLoading(false);
     }
@@ -181,30 +222,42 @@ export default function AccountSwitcher() {
                   </div>
 
                   {error && (
-                    <div className="bg-red-500/10 text-red-500 p-3 rounded-xl text-sm font-semibold text-center border border-red-500/20">
-                      {error}
+                    <div className="bg-red-500/10 text-red-500 p-3.5 rounded-2xl text-xs font-bold border border-red-500/20 flex items-center gap-2.5 animate-in fade-in zoom-in-95">
+                      <AlertTriangle className="w-4 h-4 shrink-0 text-red-500" />
+                      <span>{error}</span>
                     </div>
                   )}
 
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider ml-1">Contraseña</label>
-                    <div className="relative">
+                    <div className="relative flex items-center">
                       <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
                       <input
-                        type="password"
+                        type={showPassword ? "text" : "password"}
                         autoFocus
                         value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        className="w-full h-14 bg-secondary/30 rounded-2xl pl-12 pr-4 border-2 border-transparent focus:border-primary outline-none transition-all font-bold text-lg tracking-widest"
+                        onChange={(e) => {
+                          setPassword(e.target.value);
+                          if (error) setError(null);
+                        }}
+                        className="w-full h-14 bg-secondary/30 rounded-2xl pl-12 pr-12 border-2 border-transparent focus:border-primary outline-none transition-all font-bold text-lg tracking-widest"
                         placeholder="••••••••"
                       />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-1"
+                        title={showPassword ? "Ocultar contraseña" : "Ver contraseña"}
+                      >
+                        {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                      </button>
                     </div>
                   </div>
 
                   <div className="flex gap-3 pt-2">
                     <button
                       type="button"
-                      onClick={() => { setSelectedUser(null); setPassword(""); setError(null); }}
+                      onClick={() => { setSelectedUser(null); setPassword(""); setShowPassword(false); setError(null); }}
                       className="flex-1 h-12 rounded-xl bg-secondary hover:bg-secondary/80 font-bold transition-all"
                     >
                       Atrás
@@ -231,7 +284,13 @@ export default function AccountSwitcher() {
                         <button
                           key={i}
                           disabled={!canSelect}
-                          onClick={() => canSelect && setSelectedUser(acc)}
+                          onClick={() => {
+                            if (canSelect) {
+                              setSelectedUser(acc);
+                              setShowPassword(false);
+                              setError(null);
+                            }
+                          }}
                           className={`w-full flex items-center justify-between p-4 rounded-2xl border-2 transition-all group ${
                             isCurrent 
                               ? 'border-primary/50 bg-primary/5 shadow-sm' 

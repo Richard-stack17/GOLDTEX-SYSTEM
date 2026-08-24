@@ -13,10 +13,12 @@
   },
   "dependencies": {
     "@capacitor/android": "^6.2.1",
+    "@capacitor/app": "^6.0.3",
     "@capacitor/core": "^6.2.1",
     "@e-is/capacitor-bluetooth-serial": "^6.0.3",
     "@goltex/ui": "workspace:*",
     "@radix-ui/react-slot": "^1.3.0",
+    "@spryrocks/capacitor-socket-connection-plugin": "6.3.0",
     "@supabase/supabase-js": "^2.110.0",
     "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.1",

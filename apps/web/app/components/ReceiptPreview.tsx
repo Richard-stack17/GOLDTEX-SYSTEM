@@ -17,32 +17,33 @@ export default function ReceiptPreview({
   const lines: TicketLine[] = generateTicketLines(saleData, safeCols);
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex justify-between items-center px-1">
-        <span className="text-muted-foreground font-bold text-xs uppercase tracking-wider">
-          Vista Previa del Ticket Térmico
+    <div className="flex flex-col gap-2.5 w-full">
+      {/* Encabezado con información del rollo */}
+      <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+        <span className="text-muted-foreground font-bold text-xs uppercase tracking-wider truncate">
+          Vista Previa del Ticket
         </span>
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-bold text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-border">
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-border">
             Rollo: {is58mm ? '58mm' : '80mm'}
           </span>
-          <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
+          <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
             {safeCols} columnas
           </span>
         </div>
       </div>
 
-      {/* Contenedor del área de calibración */}
-      <div className="bg-secondary/40 p-4 rounded-xl w-full flex justify-center border border-border overflow-x-auto">
-        {/* Bobina de papel físico con ancho fijo a escala real */}
+      {/* Contenedor del área de papel térmico (overflow-x-auto sin data-loss en la izquierda) */}
+      <div className="bg-secondary/30 p-2 sm:p-4 rounded-2xl w-full border border-border overflow-x-auto">
+        {/* Bobina de papel físico con ancho fijo y centrado seguro mx-auto */}
         <div 
-          className={`bg-white text-black font-mono text-[11px] leading-[1.3] py-5 px-3.5 rounded shadow-md border border-gray-300 relative transition-all select-none ${
-            is58mm ? 'w-[260px] min-w-[260px]' : 'w-[355px] min-w-[355px]'
+          className={`bg-white text-black font-mono text-[11px] leading-[1.3] py-5 px-3.5 rounded-xl shadow-md border border-gray-300 relative transition-all select-none mx-auto ${
+            is58mm ? 'w-[260px] min-w-[260px]' : 'w-[350px] min-w-[350px]'
           }`}
         >
           {/* Simulación del corte superior del papel */}
-          <div className="border-b-2 border-dashed border-gray-300 mb-3 pb-1 text-center text-[9px] text-gray-400 uppercase tracking-widest">
-            ✂ Corte de papel ({is58mm ? '58 mm' : '80 mm'})
+          <div className="border-b-2 border-dashed border-gray-300 mb-3 pb-1 text-center text-[9px] font-sans font-semibold text-gray-400 uppercase tracking-widest">
+            --- CORTE DE PAPEL ({is58mm ? '58 MM' : '80 MM'}) ---
           </div>
 
           {/* Bloque de impresión exacto acotado por los caracteres configurados */}
@@ -96,8 +97,8 @@ export default function ReceiptPreview({
           </div>
 
           {/* Simulación del corte inferior del papel */}
-          <div className="border-t-2 border-dashed border-gray-300 mt-4 pt-2 text-center text-[9px] text-gray-400 uppercase tracking-widest">
-            ✂ Fin del ticket
+          <div className="border-t-2 border-dashed border-gray-300 mt-4 pt-2 text-center text-[9px] font-sans font-semibold text-gray-400 uppercase tracking-widest">
+            --- FIN DEL TICKET ---
           </div>
         </div>
       </div>

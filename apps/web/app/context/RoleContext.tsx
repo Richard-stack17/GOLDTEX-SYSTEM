@@ -51,6 +51,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
         const finalPerms = new Proxy(adminPerms, { get: () => true }) as any;
         setPermissions(finalPerms);
         localStorage.setItem("goltex_permissions", JSON.stringify(adminPerms));
+        localStorage.setItem("goltex_permissions_user", "ADMIN");
         return;
       }
 
@@ -78,6 +79,8 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
         if (selectedRole && selectedRole.permissions) {
           setPermissions(selectedRole.permissions);
           localStorage.setItem("goltex_permissions", JSON.stringify(selectedRole.permissions));
+          const currentUsername = localStorage.getItem("goltex_username");
+          if (currentUsername) localStorage.setItem("goltex_permissions_user", currentUsername);
           return;
         }
       }
@@ -215,6 +218,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     const storedProfileId = localStorage.getItem("goltex_profile_id");
     const storedDefaultStoreId = localStorage.getItem("goltex_default_store_id");
     const localPerms = localStorage.getItem("goltex_permissions");
+    const localPermsUser = localStorage.getItem("goltex_permissions_user");
 
     if (storedRole) setRoleState(storedRole);
     if (storedUsername) setUsernameState(storedUsername);
@@ -222,11 +226,16 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     if (storedProfileId) setProfileIdState(storedProfileId);
     if (storedDefaultStoreId) setDefaultStoreIdState(storedDefaultStoreId);
 
-    if (localPerms) {
+    // Solo usar permisos si pertenecen exactamente al usuario autenticado
+    if (localPerms && (!localPermsUser || localPermsUser === storedUsername)) {
       try {
         const parsed = JSON.parse(localPerms);
         setPermissions(storedRole === 'ADMIN' ? new Proxy(parsed, { get: () => true }) : parsed);
       } catch (e) {}
+    } else {
+      setPermissions({});
+      localStorage.removeItem("goltex_permissions");
+      localStorage.removeItem("goltex_permissions_user");
     }
 
     // isHydrated se emite DESPUÉS de haber cargado todos los valores de localStorage,
@@ -366,6 +375,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem("goltex_profile_id");
     localStorage.removeItem("goltex_default_store_id");
     localStorage.removeItem("goltex_permissions");
+    localStorage.removeItem("goltex_permissions_user");
   };
 
   return (
