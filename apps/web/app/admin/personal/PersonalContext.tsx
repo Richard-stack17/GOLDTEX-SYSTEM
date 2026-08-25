@@ -240,6 +240,10 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
   const [isEditRoleModalOpen, setIsEditRoleModalOpen] = useState(false);
   const [savingEditRole, setSavingEditRole] = useState(false);
 
+  // ── Manage Perms state
+  const [isManagePermsModalOpen, setIsManagePermsModalOpen] = useState(false);
+  const [managingPermsRoleId, setManagingPermsRoleId] = useState<string | null>(null);
+
   // ── Role Deletion & Warning Modal state
   const [deletingRole, setDeletingRole] = useState<Role | null>(null);
   const [roleAssignedUsers, setRoleAssignedUsers] = useState<Profile[]>([]);
@@ -249,6 +253,9 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
 
   // ── Employee Deletion Modal state
   const [deletingEmployee, setDeletingEmployee] = useState<{ id: string; name: string } | null>(null);
+
+  // ── Employee Unlink Modal state
+  const [unlinkingEmployee, setUnlinkingEmployee] = useState<{ empId: string; name: string; profileId: string } | null>(null);
 
   // ── Draft Permissions State
   const [originalRoles, setOriginalRoles] = useState<Role[]>([]);
@@ -912,14 +919,33 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
       const { error } = await supabase.from('employees').update({ is_active: false }).eq('id', deletingEmployee.id);
       if (error) throw error;
 
-      // Desvincular perfiles asociados para que no queden referencias fantasma
-      await supabase.from('profiles').update({ employee_id: null }).eq('employee_id', deletingEmployee.id);
+      // Desvincular perfiles asociados para que no queden referencias fantasma y desactivarlos
+      await supabase.from('profiles').update({ employee_id: null, role: 'DELETED', role_id: null, default_store_id: null }).eq('employee_id', deletingEmployee.id);
 
       showToast('Empleado deshabilitado correctamente', 'success');
       setDeletingEmployee(null);
       loadData();
     } catch (err: any) {
       showToast(formatFriendlyErrorMessage(err, 'Error al deshabilitar empleado'), 'error');
+    }
+  };
+
+  const handleUnlinkEmployeeClick = (empId: string, empName: string, profileId: string) => {
+    setUnlinkingEmployee({ empId, name: empName, profileId });
+  };
+
+  const confirmUnlinkEmployee = async () => {
+    if (!unlinkingEmployee) return;
+    try {
+      // Desvincular perfil del empleado y desactivarlo (soft delete) usando role = 'DELETED'
+      const { error } = await supabase.from('profiles').update({ employee_id: null, role: 'DELETED', role_id: null, default_store_id: null }).eq('id', unlinkingEmployee.profileId);
+      if (error) throw error;
+
+      showToast('Acceso desvinculado correctamente', 'success');
+      setUnlinkingEmployee(null);
+      loadData();
+    } catch (err: any) {
+      showToast(formatFriendlyErrorMessage(err, 'Error al desvincular acceso'), 'error');
     }
   };
 
@@ -1369,8 +1395,8 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
                 </label>
 
                 {isChecked && (
-                  <div className="flex items-center gap-2 pl-7 sm:pl-0">
-                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Rol:</span>
+                  <div className="flex items-center gap-2 pl-7 sm:pl-0 mt-2 sm:mt-0 flex-1 sm:flex-initial sm:justify-end min-w-0">
+                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider shrink-0">Rol:</span>
                     <select
                       value={selectedValue}
                       disabled={isDisabled}
@@ -1380,7 +1406,7 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
                           onRoleChange(store.id, selectedRole.name, selectedRole.id);
                         }
                       }}
-                      className="h-9 px-3 text-xs font-bold rounded-xl border border-indigo-200 bg-white text-indigo-950 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm cursor-pointer"
+                      className="h-9 px-3 text-xs font-bold rounded-xl border border-indigo-200 bg-white text-indigo-950 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm cursor-pointer w-full max-w-[200px] sm:max-w-[240px] truncate"
                     >
                       {storeAvailableRoles.map(r => {
                         const scopeLabel = r.store_id ? ` (${storeMap.get(r.store_id) || r.stores?.name || 'Sucursal'})` : ' (Global)';
@@ -1675,7 +1701,9 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
 
   const value = {
     activeProfiles, activeStoreId, activeTab, allProfiles, allRoles, availableStoreIds, availableStores, checkCanManageTarget, checkUsernameState, confirmDeleteEmployee, confirmDeleteRole, confirmGlobalAccess, createAccess, deletingEmployee, deletingRole, deletingUserId, deletingUsername, dni, editRoleDesc, editRoleName, editingEmployee, editingRole, editingUserId, email, empAccessScope, empEmail, empGlobalRole, empPassword, empStoreIds, empStoreRoleIds, empStoreRoles, empUsername, employeeById, employees, formatFriendlyErrorMessage, fullName, getRoleBadgeStyle, getValidStoreRole, globalRoles, handleCancelEdit, handleCreateEmployee, handleCreateRole, handleDeleteEmployeeClick, handleDeleteRole, handleDeleteUser, handleEditClick, handleEditEmployeeClick, handleExecuteRestoration, handleLinkExistingUser, handleLinkNewUser, handleRestoreEmployee, handleRestorePermissions, handleRestoreRole, handleRestoreUser, handleSaveCredentials, handleSaveEditRole, handleSavePermissions, handleTabChange, handleTogglePermission, hasUnsavedRoleChanges, isAdmin, isDeletingRole, isDeletingUser, isEditRoleModalOpen, isEmployeeModalOpen, isGlobalUser, isHydrated, isLinking, isRestoringUser, isRoleConfirmModalOpen, isRoleModalOpen, isRoleWarningModalOpen, isUserGlobalAdmin, isUserModalOpen, linkExistingUserId, linkMode, linkRoleId, linkingEmployee, loadData, loading, modalResetToken, newRoleDesc, newRoleName, newRoleScopeStoreId, originalRoles, password, pendingRestoration, pendingTab, permissions, phone, profileByEmployeeId, renderRoleOptions, renderStoreAndRoleBadges, renderStoreRoleList, role, roleAssignedUsers, roles, router, savingEditRole, savingEmployee, savingPermissions, savingRole, savingUser, selectedEmpId, selectedModalStoreId, selectedStoreIds, setActiveTab, setAllProfiles, setAllRoles, setConfirmGlobalAccess, setCreateAccess, setDeletingEmployee, setDeletingRole, setDeletingUserId, setDeletingUsername, setDni, setEditRoleDesc, setEditRoleName, setEditingEmployee, setEditingRole, setEditingUserId, setEmail, setEmpAccessScope, setEmpEmail, setEmpGlobalRole, setEmpPassword, setEmpStoreIds, setEmpStoreRoleIds, setEmpStoreRoles, setEmpUsername, setEmployees, setFullName, setHasUnsavedRoleChanges, setIsDeletingRole, setIsDeletingUser, setIsEditRoleModalOpen, setIsEmployeeModalOpen, setIsLinking, setIsRestoringUser, setIsRoleConfirmModalOpen, setIsRoleModalOpen, setIsRoleWarningModalOpen, setIsUserModalOpen, setLinkExistingUserId, setLinkMode, setLinkRoleId, setLinkingEmployee, setLoading, setModalResetToken, setNewRoleDesc, setNewRoleName, setNewRoleScopeStoreId, setOriginalRoles, setPassword, setPendingRestoration, setPendingTab, setPhone, setRoleAssignedUsers, setRoles, setSavingEditRole, setSavingEmployee, setSavingPermissions, setSavingRole, setSavingUser, setSelectedEmpId, setSelectedModalStoreId, setSelectedStoreIds, setShowEmpPassword, setShowInactiveEmployees, setShowInactiveRoles, setShowInactiveUsers, setShowRoleExitConfirm, setShowUserPassword, setToast, setUserAccessScope, setUserGlobalRole, setUserStoreRoleIds, setUserStoreRoles, setUsername, showEmpPassword, showInactiveEmployees, showInactiveRoles, showInactiveUsers, showRoleExitConfirm, showToast, showUserPassword, storeMap, syncEmployeeStoreAssignment, targetModalStoreId, toast, unlinkedEmployees, userAccessScope, userGlobalRole, userStoreRoleIds, userStoreRoles, username, visibleEmployees, visibleRoles,
-    sortConfig, requestSort, sortedEmployees, sortedProfiles, sortedRoles
+    isManagePermsModalOpen, setIsManagePermsModalOpen, managingPermsRoleId, setManagingPermsRoleId,
+    sortConfig, requestSort, sortedEmployees, sortedProfiles, sortedRoles,
+    unlinkingEmployee, setUnlinkingEmployee, handleUnlinkEmployeeClick, confirmUnlinkEmployee
   };
 
   return (

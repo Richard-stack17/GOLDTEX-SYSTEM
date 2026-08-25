@@ -829,9 +829,7 @@ export default function CajaPage() {
       )
       .subscribe();
 
-    const interval = setInterval(() => fetchTickets(true), 5000);
     return () => {
-      clearInterval(interval);
       supabase.removeChannel(cajaChannel);
     };
   }, [activeStoreId, isLoadingStores, fetchTickets]);
@@ -898,23 +896,28 @@ export default function CajaPage() {
 
   // ── Desglose de totales por método de pago (Estilo Contabilidad) ──
   const breakdownTotals = useMemo(() => {
-    let total = 0;
+    let cobrado = 0;
+    let pendiente = 0;
     let efectivo = 0;
     let bcp = 0;
     let bbva = 0;
     let izipay = 0;
 
     enrichedFilteredTickets.forEach(t => {
-      total += (t.total || 0);
-      efectivo += (t.efectivo_amt || 0);
-      bcp += (t.bcp_amt || 0);
-      bbva += (t.bbva_amt || 0);
-      izipay += (t.izipay_amt || 0);
+      if (t.status === "COMPLETED") {
+        cobrado += (t.total || 0);
+        efectivo += (t.efectivo_amt || 0);
+        bcp += (t.bcp_amt || 0);
+        bbva += (t.bbva_amt || 0);
+        izipay += (t.izipay_amt || 0);
+      } else if (t.status === "PENDING") {
+        pendiente += (t.total || 0);
+      }
     });
 
-    const bancos = bcp + bbva;
+    const bancos = bcp + bbva + izipay;
 
-    return { total, bancos, efectivo, bcp, bbva, izipay };
+    return { cobrado, pendiente, bancos, efectivo, bcp, bbva, izipay };
   }, [enrichedFilteredTickets]);
 
   const renderSortIcon = (key: string) => {
@@ -1463,11 +1466,23 @@ export default function CajaPage() {
           <div className="flex flex-1 flex-wrap items-center justify-between lg:justify-end gap-3 w-full lg:w-auto">
             {/* Badges de Contabilidad */}
             <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-              <div className="flex items-center gap-1.5 text-xs text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/60 px-2.5 py-1 rounded-lg shadow-sm">
-                <Database className="w-3.5 h-3.5 shrink-0" />
-                <span className="font-extrabold text-[10px]">TOTAL:</span>
-                <span className="font-bold font-mono">S/ {breakdownTotals.total.toFixed(2)}</span>
-              </div>
+              {/* Badge Cobrado */}
+              {(statusFilter === "ALL" || statusFilter === "COMPLETED" || breakdownTotals.cobrado > 0) && (
+                <div className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/60 px-2.5 py-1 rounded-lg shadow-sm">
+                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                  <span className="font-extrabold text-[10px]">COBRADO:</span>
+                  <span className="font-bold font-mono">S/ {breakdownTotals.cobrado.toFixed(2)}</span>
+                </div>
+              )}
+
+              {/* Badge Por Cobrar */}
+              {(statusFilter === "ALL" || statusFilter === "PENDING" || breakdownTotals.pendiente > 0) && (
+                <div className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800/60 px-2.5 py-1 rounded-lg shadow-sm">
+                  <Clock className="w-3.5 h-3.5 shrink-0" />
+                  <span className="font-extrabold text-[10px]">POR COBRAR:</span>
+                  <span className="font-bold font-mono">S/ {breakdownTotals.pendiente.toFixed(2)}</span>
+                </div>
+              )}
 
               {breakdownTotals.bancos > 0 && (
                 <div className="flex items-center gap-1.5 text-xs text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-950/60 border border-violet-200 dark:border-violet-800/60 px-2.5 py-1 rounded-lg shadow-sm">
@@ -1569,9 +1584,7 @@ export default function CajaPage() {
               </div>
             )}
 
-            <div className="text-xs text-muted-foreground font-mono hidden xl:block shrink-0">
-              Auto-actualiza cada 5s
-            </div>
+
           </div>
         </div>
       </div>

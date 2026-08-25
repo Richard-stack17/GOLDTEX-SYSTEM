@@ -152,6 +152,14 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
     };
 
     let error;
+    if (autoPrint && storeId) {
+      let query = supabase.from('printers').update({ auto_print: false }).eq('store_id', storeId);
+      if (isEditing && printerId) {
+        query = query.neq('id', printerId);
+      }
+      await query;
+    }
+
     if (isEditing) {
       const res = await supabase.from('printers').update(payload).eq('id', printerId);
       error = res.error;

@@ -6,8 +6,8 @@ import { usePos } from "../context/PosContext";
 
 export default function PosNumpadModal() {
   const {
-    numpadProduct, setNumpadProduct, numpadField, setNumpadField, numpadQty, numpadPrice,
-    handleNumpadKey, previewPrice, previewQty, previewSubtotal, handleNumpadOk, cart
+    numpadProduct, numpadCartItemId, numpadField, setNumpadField, numpadQty, numpadPrice,
+    handleNumpadKey, previewPrice, previewQty, previewSubtotal, handleNumpadOk, closeNumpad
   } = usePos();
 
   if (!numpadProduct) return null;
@@ -21,7 +21,7 @@ export default function PosNumpadModal() {
             variant="ghost"
             size="icon"
             className="w-8 h-8 rounded-full sm:hidden"
-            onClick={() => setNumpadProduct(null)}
+            onClick={closeNumpad}
           >
             <ArrowLeft className="w-4 h-4" />
           </Button>
@@ -30,7 +30,7 @@ export default function PosNumpadModal() {
             <h3 className="text-sm sm:text-base font-black uppercase text-primary truncate max-w-[180px] sm:max-w-none">{numpadProduct.name}</h3>
           </div>
           <button
-            onClick={() => setNumpadProduct(null)}
+            onClick={closeNumpad}
             className="w-8 h-8 rounded-full bg-secondary/50 hover:bg-secondary text-muted-foreground hover:text-foreground flex items-center justify-center transition-colors shrink-0"
           >
             <X className="w-4 h-4" />
@@ -101,10 +101,10 @@ export default function PosNumpadModal() {
 
         {/* Action Buttons */}
         <div className="flex gap-2 sm:gap-3 shrink-0 pt-1 pb-1">
-          <Button variant="outline" className="h-11 flex-1 text-xs sm:text-sm font-bold uppercase rounded-xl border-2" onClick={() => setNumpadProduct(null)}>Cancelar</Button>
+          <Button variant="outline" className="h-11 flex-1 text-xs sm:text-sm font-bold uppercase rounded-xl border-2" onClick={closeNumpad}>Cancelar</Button>
           <Button className="h-11 flex-[2] text-sm sm:text-base font-black uppercase rounded-xl shadow-xl bg-primary text-primary-foreground hover:bg-primary/90" onClick={handleNumpadOk}
             disabled={(!numpadProduct.is_service && (!numpadQty || parseFloat(numpadQty) <= 0)) || !numpadPrice}>
-            {cart.find((c) => c.id === numpadProduct.id) ? "Actualizar" : "Agregar"}
+            {numpadCartItemId ? "Actualizar" : "Agregar"}
           </Button>
         </div>
       </div>

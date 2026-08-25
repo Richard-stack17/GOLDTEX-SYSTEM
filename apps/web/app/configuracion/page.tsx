@@ -193,8 +193,13 @@ export default function ConfiguracionPage() {
 
   const handleSetDefaultPrinter = async (printerId: string) => {
     try {
-      // Actualizamos una por una para evitar bloqueos de RLS en actualizaciones masivas
-      const printersToDisable = printers.filter(p => p.id !== printerId && p.auto_print);
+      const targetPrinter = printers.find(p => p.id === printerId);
+      // Solo deshabilitar las que pertenecen a la misma tienda
+      const printersToDisable = printers.filter(p => 
+        p.id !== printerId && 
+        p.auto_print && 
+        (!targetPrinter?.store_id || p.store_id === targetPrinter.store_id)
+      );
       if (printersToDisable.length > 0) {
         await Promise.all(
           printersToDisable.map(p => 
@@ -204,6 +209,18 @@ export default function ConfiguracionPage() {
       }
       const { error } = await supabase.from('printers').update({ auto_print: true }).eq('id', printerId);
       if (error) throw error;
+
+      // Actualizar caché de localStorage para POS/Caja
+      if (targetPrinter) {
+        const updated = { ...targetPrinter, auto_print: true };
+        try {
+          localStorage.setItem('cached_printer_config', JSON.stringify(updated));
+          if (targetPrinter.store_id) {
+            localStorage.setItem(`cached_printer_config_${targetPrinter.store_id}`, JSON.stringify(updated));
+          }
+        } catch (_) {}
+      }
+
       showToast('Impresora fijada como principal', 'success');
       fetchPrinters();
     } catch (err: any) {

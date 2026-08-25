@@ -4,16 +4,18 @@ import {
   RefreshCw, Plus,
   UserCog, X, Trash2, Check,
   Info, RotateCcw,
-  Eye, EyeOff, ShieldCheck, Edit2, KeyRound, Loader2
+  Eye, EyeOff, ShieldCheck, Edit2, KeyRound, Loader2, Save, Unlink
 } from 'lucide-react';
 import { ConfirmDialog } from '../../../../components/ConfirmDialog';
 import { Toast } from './Toast';
-import { Employee, Profile, Role } from '../types';
+import { Employee, Profile, Role, PERMISSION_GROUPS } from '../types';
 import { usePersonal } from '../PersonalContext';
 
 export function PersonalModals() {
   const {
-    activeProfiles, activeStoreId, activeTab, allProfiles, allRoles, availableStoreIds, availableStores, checkCanManageTarget, checkUsernameState, confirmDeleteEmployee, confirmDeleteRole, confirmGlobalAccess, createAccess, deletingEmployee, deletingRole, deletingUserId, deletingUsername, dni, editRoleDesc, editRoleName, editingEmployee, editingRole, editingUserId, email, empAccessScope, empEmail, empGlobalRole, empPassword, empStoreIds, empStoreRoleIds, empStoreRoles, empUsername, employeeById, employees, formatFriendlyErrorMessage, fullName, getRoleBadgeStyle, getValidStoreRole, globalRoles, handleCancelEdit, handleCreateEmployee, handleCreateRole, handleDeleteEmployeeClick, handleDeleteRole, handleDeleteUser, handleEditClick, handleEditEmployeeClick, handleExecuteRestoration, handleLinkExistingUser, handleLinkNewUser, handleRestoreEmployee, handleRestorePermissions, handleRestoreRole, handleRestoreUser, handleSaveCredentials, handleSaveEditRole, handleSavePermissions, handleTabChange, handleTogglePermission, hasUnsavedRoleChanges, isAdmin, isDeletingRole, isDeletingUser, isEditRoleModalOpen, isEmployeeModalOpen, isGlobalUser, isHydrated, isLinking, isRestoringUser, isRoleConfirmModalOpen, isRoleModalOpen, isRoleWarningModalOpen, isUserGlobalAdmin, isUserModalOpen, linkExistingUserId, linkMode, linkRoleId, linkingEmployee, loadData, loading, modalResetToken, newRoleDesc, newRoleName, newRoleScopeStoreId, originalRoles, password, pendingRestoration, pendingTab, permissions, phone, profileByEmployeeId, renderRoleOptions, renderStoreAndRoleBadges, renderStoreRoleList, role, roleAssignedUsers, roles, router, savingEditRole, savingEmployee, savingPermissions, savingRole, savingUser, selectedEmpId, selectedModalStoreId, selectedStoreIds, setActiveTab, setAllProfiles, setAllRoles, setConfirmGlobalAccess, setCreateAccess, setDeletingEmployee, setDeletingRole, setDeletingUserId, setDeletingUsername, setDni, setEditRoleDesc, setEditRoleName, setEditingEmployee, setEditingRole, setEditingUserId, setEmail, setEmpAccessScope, setEmpEmail, setEmpGlobalRole, setEmpPassword, setEmpStoreIds, setEmpStoreRoleIds, setEmpStoreRoles, setEmpUsername, setEmployees, setFullName, setHasUnsavedRoleChanges, setIsDeletingRole, setIsDeletingUser, setIsEditRoleModalOpen, setIsEmployeeModalOpen, setIsLinking, setIsRestoringUser, setIsRoleConfirmModalOpen, setIsRoleModalOpen, setIsRoleWarningModalOpen, setIsUserModalOpen, setLinkExistingUserId, setLinkMode, setLinkRoleId, setLinkingEmployee, setLoading, setModalResetToken, setNewRoleDesc, setNewRoleName, setNewRoleScopeStoreId, setOriginalRoles, setPassword, setPendingRestoration, setPendingTab, setPhone, setRoleAssignedUsers, setRoles, setSavingEditRole, setSavingEmployee, setSavingPermissions, setSavingRole, setSavingUser, setSelectedEmpId, setSelectedModalStoreId, setSelectedStoreIds, setShowEmpPassword, setShowInactiveEmployees, setShowInactiveRoles, setShowInactiveUsers, setShowRoleExitConfirm, setShowUserPassword, setToast, setUserAccessScope, setUserGlobalRole, setUserStoreRoleIds, setUserStoreRoles, setUsername, showEmpPassword, showInactiveEmployees, showInactiveRoles, showInactiveUsers, showRoleExitConfirm, showToast, showUserPassword, storeMap, syncEmployeeStoreAssignment, targetModalStoreId, toast, unlinkedEmployees, userAccessScope, userGlobalRole, userStoreRoleIds, userStoreRoles, username, visibleEmployees, visibleRoles
+    activeProfiles, activeStoreId, activeTab, allProfiles, allRoles, availableStoreIds, availableStores, checkCanManageTarget, checkUsernameState, confirmDeleteEmployee, confirmDeleteRole, confirmGlobalAccess, createAccess, deletingEmployee, deletingRole, deletingUserId, deletingUsername, dni, editRoleDesc, editRoleName, editingEmployee, editingRole, editingUserId, email, empAccessScope, empEmail, empGlobalRole, empPassword, empStoreIds, empStoreRoleIds, empStoreRoles, empUsername, employeeById, employees, formatFriendlyErrorMessage, fullName, getRoleBadgeStyle, getValidStoreRole, globalRoles, handleCancelEdit, handleCreateEmployee, handleCreateRole, handleDeleteEmployeeClick, handleDeleteRole, handleDeleteUser, handleEditClick, handleEditEmployeeClick, handleExecuteRestoration, handleLinkExistingUser, handleLinkNewUser, handleRestoreEmployee, handleRestorePermissions, handleRestoreRole, handleRestoreUser, handleSaveCredentials, handleSaveEditRole, handleSavePermissions, handleTabChange, handleTogglePermission, hasUnsavedRoleChanges, isAdmin, isDeletingRole, isDeletingUser, isEditRoleModalOpen, isEmployeeModalOpen, isGlobalUser, isHydrated, isLinking, isRestoringUser, isRoleConfirmModalOpen, isRoleModalOpen, isRoleWarningModalOpen, isUserGlobalAdmin, isUserModalOpen, linkExistingUserId, linkMode, linkRoleId, linkingEmployee, loadData, loading, modalResetToken, newRoleDesc, newRoleName, newRoleScopeStoreId, originalRoles, password, pendingRestoration, pendingTab, permissions, phone, profileByEmployeeId, renderRoleOptions, renderStoreAndRoleBadges, renderStoreRoleList, role, roleAssignedUsers, roles, router, savingEditRole, savingEmployee, savingPermissions, savingRole, savingUser, selectedEmpId, selectedModalStoreId, selectedStoreIds, setActiveTab, setAllProfiles, setAllRoles, setConfirmGlobalAccess, setCreateAccess, setDeletingEmployee, setDeletingRole, setDeletingUserId, setDeletingUsername, setDni, setEditRoleDesc, setEditRoleName, setEditingEmployee, setEditingRole, setEditingUserId, setEmail, setEmpAccessScope, setEmpEmail, setEmpGlobalRole, setEmpPassword, setEmpStoreIds, setEmpStoreRoleIds, setEmpStoreRoles, setEmpUsername, setEmployees, setFullName, setHasUnsavedRoleChanges, setIsDeletingRole, setIsDeletingUser, setIsEditRoleModalOpen, setIsEmployeeModalOpen, setIsLinking, setIsRestoringUser, setIsRoleConfirmModalOpen, setIsRoleModalOpen, setIsRoleWarningModalOpen, setIsUserModalOpen, setLinkExistingUserId, setLinkMode, setLinkRoleId, setLinkingEmployee, setLoading, setModalResetToken, setNewRoleDesc, setNewRoleName, setNewRoleScopeStoreId, setOriginalRoles, setPassword, setPendingRestoration, setPendingTab, setPhone, setRoleAssignedUsers, setRoles, setSavingEditRole, setSavingEmployee, setSavingPermissions, setSavingRole, setSavingUser, setSelectedEmpId, setSelectedModalStoreId, setSelectedStoreIds, setShowEmpPassword, setShowInactiveEmployees, setShowInactiveRoles, setShowInactiveUsers, setShowRoleExitConfirm, setShowUserPassword, setToast, setUserAccessScope, setUserGlobalRole, setUserStoreRoleIds, setUserStoreRoles, setUsername, showEmpPassword, showInactiveEmployees, showInactiveRoles, showInactiveUsers, showRoleExitConfirm, showToast, showUserPassword, storeMap, syncEmployeeStoreAssignment, targetModalStoreId, toast, unlinkedEmployees, userAccessScope, userGlobalRole, userStoreRoleIds, userStoreRoles, username, visibleEmployees, visibleRoles,
+    isManagePermsModalOpen, setIsManagePermsModalOpen, managingPermsRoleId, setManagingPermsRoleId,
+    unlinkingEmployee, setUnlinkingEmployee, confirmUnlinkEmployee
   } = usePersonal();
 
   return (
@@ -1199,6 +1201,186 @@ export function PersonalModals() {
           </div>
         </div>
       )}
+
+      {/* ── Employee Unlink Access Modal ── */}
+      {unlinkingEmployee && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-md bg-card rounded-2xl shadow-xl border border-border overflow-hidden p-6 space-y-4 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-3 text-amber-600">
+              <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                <Unlink className="w-6 h-6 text-amber-600" />
+              </div>
+              <div>
+                <h3 className="font-bold text-base text-foreground">Desvincular Acceso</h3>
+                <p className="text-xs text-muted-foreground">Revocar permisos del sistema</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Estás a punto de desvincular el acceso al sistema del empleado <strong>"{unlinkingEmployee.name}"</strong>. 
+              El usuario actual ya no podrá ingresar usando estas credenciales. ¿Deseas continuar?
+            </p>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                onClick={() => setUnlinkingEmployee(null)}
+                className="px-4 py-2 border border-border rounded-xl text-xs font-bold text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmUnlinkEmployee}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-md transition-colors flex items-center gap-2"
+              >
+                <Unlink className="w-4 h-4" />
+                Sí, desvincular
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ── Manage Permissions Modal ── */}
+      {isManagePermsModalOpen && managingPermsRoleId && (() => {
+        const currentRole = roles.find(r => r.id === managingPermsRoleId) || originalRoles.find(r => r.id === managingPermsRoleId);
+        if (!currentRole) return null;
+        
+        const isGlobalRole = !currentRole.store_id || currentRole.is_system;
+        const isReadOnly = isGlobalRole && role !== 'ADMIN';
+        const isLocked = currentRole.is_system || isReadOnly;
+
+        return (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60] overflow-y-auto">
+            <div className="bg-card w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 border border-border my-8">
+              <div className="px-6 py-4 border-b border-border flex justify-between items-center bg-muted/30 sticky top-0 z-10">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400 rounded-xl">
+                    <ShieldCheck className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold">Gestionar Permisos: {currentRole.name}</h3>
+                    <p className="text-sm text-muted-foreground">Configura los accesos por módulo para este rol</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => { setIsManagePermsModalOpen(false); setManagingPermsRoleId(null); }}
+                  className="p-2 hover:bg-secondary rounded-full transition-colors"
+                >
+                  <X className="w-5 h-5 text-muted-foreground" />
+                </button>
+              </div>
+
+              <div className="p-6 overflow-y-auto max-h-[60vh] space-y-6">
+                {isLocked && (
+                  <div className="p-4 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-xl flex items-start gap-3">
+                    <Info className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                    <p className="text-sm text-amber-800 dark:text-amber-200">
+                      Este es un rol de sistema o global. Sus permisos están protegidos y no pueden ser modificados.
+                    </p>
+                  </div>
+                )}
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {PERMISSION_GROUPS.map((group) => {
+                    const Icon = group.icon;
+                    const isMainEnabled = Boolean(currentRole.name === 'ADMIN' || (currentRole.permissions && currentRole.permissions[group.mainKey]));
+                    
+                    return (
+                      <div key={group.mainKey} className="border border-border rounded-xl overflow-hidden flex flex-col bg-card shadow-sm hover:shadow-md transition-shadow duration-200">
+                        <div className="p-4 border-b border-border bg-muted/10 flex items-start justify-between gap-4">
+                          <div className="flex items-center gap-3">
+                            <div className={`p-2 rounded-lg ${group.bgColor} border ${group.borderColor} shrink-0`}>
+                              <Icon className={`w-4 h-4 ${group.color}`} />
+                            </div>
+                            <div>
+                              <span className="font-bold text-sm block">{group.app}</span>
+                              {group.description && (
+                                <span className="text-[11px] text-muted-foreground font-normal leading-tight block mt-0.5">
+                                  {group.description}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <label className={`relative inline-flex items-center shrink-0 cursor-pointer ${isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                            <input
+                              type="checkbox"
+                              className="sr-only peer"
+                              checked={isMainEnabled}
+                              disabled={isLocked}
+                              onChange={(e) => handleTogglePermission(currentRole.id, currentRole.permissions || {}, group.mainKey, e.target.checked)}
+                            />
+                            <div className="w-10 h-6 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500"></div>
+                          </label>
+                        </div>
+                        
+                        {group.subPermissions.length > 0 && (
+                          <div className={`p-4 bg-muted/5 flex-1 flex flex-col gap-3 transition-opacity duration-200 ${!isMainEnabled ? 'opacity-40 grayscale-[50%]' : ''}`}>
+                            {group.subPermissions.map((sub) => {
+                              const isSubEnabled = Boolean(currentRole.name === 'ADMIN' || (currentRole.permissions && currentRole.permissions[sub.key]));
+                              const isDisabled = isLocked || !isMainEnabled;
+                              return (
+                                <div key={sub.key} className="flex items-center justify-between">
+                                  <span className="text-xs text-muted-foreground font-medium">{sub.label}</span>
+                                  <label className={`relative inline-flex items-center shrink-0 cursor-pointer ${isDisabled ? 'cursor-not-allowed' : ''}`}>
+                                    <input
+                                      type="checkbox"
+                                      className="sr-only peer"
+                                      checked={isMainEnabled && isSubEnabled}
+                                      disabled={isDisabled}
+                                      onChange={(e) => handleTogglePermission(currentRole.id, currentRole.permissions || {}, sub.key, e.target.checked)}
+                                    />
+                                    <div className={`w-8 h-4 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-border after:border after:rounded-full after:h-3 after:w-3 after:transition-all ${isMainEnabled ? 'peer-checked:bg-indigo-400' : 'peer-checked:bg-muted-foreground'}`}></div>
+                                  </label>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              
+              <div className="px-6 py-4 border-t border-border bg-muted/30 flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">
+                  {hasUnsavedRoleChanges ? (
+                    <span className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 font-medium bg-amber-50 dark:bg-amber-900/20 px-3 py-1.5 rounded-full border border-amber-200 dark:border-amber-800">
+                      <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></div>
+                      Tienes cambios sin guardar
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-medium">
+                      <Check className="w-3.5 h-3.5" /> Permisos al día
+                    </span>
+                  )}
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { setIsManagePermsModalOpen(false); setManagingPermsRoleId(null); }}
+                    className="px-4 py-2 border border-border text-foreground rounded-lg text-sm font-bold shadow-sm hover:bg-secondary transition-colors"
+                  >
+                    Cerrar
+                  </button>
+                  <button
+                    onClick={() => {
+                      handleSavePermissions();
+                      setIsManagePermsModalOpen(false);
+                      setManagingPermsRoleId(null);
+                    }}
+                    disabled={!hasUnsavedRoleChanges || savingPermissions}
+                    className={`h-9 px-4 flex items-center justify-center gap-2 rounded-lg font-bold text-sm transition-colors shadow-sm ${hasUnsavedRoleChanges ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'bg-secondary/50 text-muted-foreground cursor-not-allowed'
+                      }`}
+                  >
+                    {savingPermissions ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    Guardar Cambios
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </>
   );
 }

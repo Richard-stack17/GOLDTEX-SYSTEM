@@ -79,6 +79,37 @@ export function PersonalUsersTab() {
                   )}
                 </div>
               </div>
+
+              <div className="px-5 py-3 bg-muted/10 border-b border-border flex flex-col sm:flex-row flex-wrap items-center gap-x-6 gap-y-2 text-xs text-muted-foreground">
+                <span className="font-bold text-foreground">Guía de iconos:</span>
+                <div className="flex items-center gap-1.5" title="Desvincular cuenta de Google (Gmail)">
+                  <div className="p-1 bg-amber-50 dark:bg-amber-900/30 rounded">
+                    <svg className="w-3.5 h-3.5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                    </svg>
+                  </div>
+                  <span className="font-medium">Desvincular Google</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="p-1 bg-indigo-50 dark:bg-indigo-900/30 rounded">
+                    <Edit2 className="w-3.5 h-3.5 text-indigo-500" />
+                  </div>
+                  <span className="font-medium">Editar Usuario</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="p-1 bg-red-50 dark:bg-red-900/30 rounded">
+                    <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                  </div>
+                  <span className="font-medium">Desactivar</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="p-1 bg-emerald-50 dark:bg-emerald-900/30 rounded">
+                    <RotateCcw className="w-3.5 h-3.5 text-emerald-500" />
+                  </div>
+                  <span className="font-medium">Reactivar</span>
+                </div>
+              </div>
+
               {loading ? (
                 <div className="p-10 flex items-center justify-center gap-3 text-muted-foreground">
                   <RefreshCw className="w-5 h-5 animate-spin" />

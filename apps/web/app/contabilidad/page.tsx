@@ -312,84 +312,208 @@ export default function ContabilidadPage() {
   const handleExport = () => {
     if (!previewRows?.length) return;
 
-    const filteredExportRows = previewRows.filter(r => (r.BBVA || 0) + (r.BCP || 0) > 0);
+    // Use filtered rows that already respect UI filters
+    const filteredExportRows = previewRows.filter(r => showFullEfectivo || (r.BBVA || 0) > 0 || (r.BCP || 0) > 0);
     if (!filteredExportRows.length) {
-      alert('No hay transacciones con montos en BBVA o BCP para exportar.');
+      alert('No hay transacciones para exportar.');
       return;
     }
 
-    const aoa: any[][] = [];
+    // Helper to format month name
+    const getMonthName = (dateStr: string) => {
+      // dateStr is YYYY-MM-DD
+      const date = new Date(dateStr + 'T12:00:00Z');
+      const month = date.toLocaleString('es-ES', { month: 'long' }).toUpperCase();
+      const year = date.getFullYear();
+      return { month, year };
+    };
 
-    // Header row — DOCUMENTO spans two "lines" via newline char
-    aoa.push(['FECHA', 'DOCUMENTO\nNUMERO', 'NOMBRE Y (O) RAZON', 'DETALLE', 'BBVA', 'BCP', '']);
+    // Sort rows by Date
+    const sortedRows = [...filteredExportRows].sort((a, b) => new Date(a.FECHA).getTime() - new Date(b.FECHA).getTime());
 
-    for (const r of filteredExportRows) {
-      aoa.push([
-        excelDate(r.FECHA),
-        r.DOCUMENTO,
-        r['NOMBRE Y (O) RAZON'],
-        r.DETALLE === '—' || r.DETALLE === 'EFECTIVO' ? '' : r.DETALLE, // never write efectivo label
-        r.BBVA || 0,
-        r.BCP || 0,
-        r.COMENTARIO || '',
-      ]);
-    }
-
-    const excelBBVATotal = filteredExportRows.reduce((s, r) => s + (r.BBVA || 0), 0);
-    const excelBCPTotal = filteredExportRows.reduce((s, r) => s + (r.BCP || 0), 0);
-
-    // Totals row (Subtotals)
-    aoa.push([
-      '', '', '', '', // Empty first 4 cells
-      excelBBVATotal,
-      excelBCPTotal,
-      '', // Empty COMENTARIO
-    ]);
-
-    // General Total row (under BBVA)
-    aoa.push([
-      '', '', '', '', // Empty first 4 cells
-      excelBBVATotal + excelBCPTotal, // Green cell under BBVA
-      '', // Empty BCP
-      '', // Empty COMENTARIO
-    ]);
-
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = [{ wch: 10 }, { wch: 20 }, { wch: 36 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 30 }];
-
-    // Apply styles to cells
-    const range = XLSX.utils.decode_range(ws['!ref'] || "A1:G1");
-    for (let R = range.s.r; R <= range.e.r; ++R) {
-      for (let C = range.s.c; C <= range.e.c; ++C) {
-        const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
-        const cell = ws[cellRef];
-        if (!cell) continue;
-
-        let color = "000000"; // default black
-        if (C === 4) color = "0000FF"; // BBVA: Blue
-        else if (C === 5) color = "FF0000"; // BCP: Red
-
-        // Add boldness for header and totals rows, and alignment
-        const isHeader = R === 0;
-        const isSubTotals = R === range.e.r - 1;
-        const isGeneralTotal = R === range.e.r;
-
-        // Make the General Total cell (under BBVA) green
-        if (isGeneralTotal && C === 4) color = "008000"; // Green
-
-        cell.s = {
-          font: { color: { rgb: color }, bold: isHeader || isSubTotals || isGeneralTotal },
-          alignment: {
-            wrapText: isHeader && C === 1,
-            vertical: "center",
-            horizontal: (C >= 4 && C <= 5 || isHeader) ? "center" : "left"
-          }
-        };
-      }
+    // Group by YYYY-MM
+    const rowsByMonth: Record<string, typeof sortedRows> = {};
+    for (const r of sortedRows) {
+      const monthKey = r.FECHA.substring(0, 7); // YYYY-MM
+      if (!rowsByMonth[monthKey]) rowsByMonth[monthKey] = [];
+      rowsByMonth[monthKey].push(r);
     }
 
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Historial');
+
+    for (const [monthKey, monthRows] of Object.entries(rowsByMonth)) {
+      const { month, year } = getMonthName(monthRows[0].FECHA);
+      const sheetName = `${month} ${year}`.substring(0, 31);
+
+      const parts = monthKey.split('-');
+      const lastDayOfMonth = new Date(parseInt(parts[0]), parseInt(parts[1]), 0).getDate().toString().padStart(2, '0');
+      
+      const tabMonthStart = `${monthKey}-01`;
+      const tabMonthEnd = `${monthKey}-${lastDayOfMonth}`;
+
+      // Clip the global startDate/endDate filter to this specific month's boundaries
+      const actualStart = startDate > tabMonthStart ? startDate : tabMonthStart;
+      const actualEnd = endDate < tabMonthEnd ? endDate : tabMonthEnd;
+
+      const minDay = actualStart.substring(8, 10);
+      const maxDay = actualEnd.substring(8, 10);
+      
+      let title = '';
+      if (minDay === '01' && maxDay === lastDayOfMonth) {
+        title = `MES DE ${month} ${year}`;
+      } else {
+        title = `DEL ${minDay} AL ${maxDay} DE ${month} ${year}`;
+      }
+
+      const aoa: any[][] = [];
+
+      // Institutional Headers (Rows 1 to 3) - 8 columns total
+      aoa.push(["IT'S CORPORACION GOLDTEX S.A.C   CAL.ALEXANDER VON HUMBOLT 1550", '', '', '', '', '', '', '']);
+      aoa.push(["DEPOSITOS Y TRANSFERENCIAS VISA Y YAPE", '', '', '', '', '', '', '']);
+      aoa.push([title, '', '', '', '', '', '', '']);
+
+      // Table Header (Row 4)
+      aoa.push(['FECHA', 'DOCUMENTO\nNUMERO', 'NOMBRE Y (O) RAZON', 'DETALLE', 'BBVA', 'BCP', 'EFECTIVO', 'TOTAL']);
+
+      // Group daily rows within this month
+      const rowsByDate: Record<string, typeof monthRows> = {};
+      for (const r of monthRows) {
+        if (!rowsByDate[r.FECHA]) rowsByDate[r.FECHA] = [];
+        rowsByDate[r.FECHA].push(r);
+      }
+
+      let generalTotalBBVA = 0;
+      let generalTotalBCP = 0;
+      let generalTotalEfectivo = 0;
+      let generalTotalSum = 0;
+
+      const subtotalRowIndices: number[] = [];
+      let totalRowIndex = -1;
+
+      for (const [date, dailyRows] of Object.entries(rowsByDate)) {
+        let dailyBBVA = 0;
+        let dailyBCP = 0;
+        let dailyEfectivo = 0;
+        let dailyTotal = 0;
+
+        for (const r of dailyRows) {
+          const bbva = r.BBVA || 0;
+          const bcp = r.BCP || 0;
+          const efectivo = r.EFECTIVO || 0;
+          const total = r.TOTAL || (bbva + bcp + efectivo);
+          
+          dailyBBVA += bbva;
+          dailyBCP += bcp;
+          dailyEfectivo += efectivo;
+          dailyTotal += total;
+
+          aoa.push([
+            excelDate(r.FECHA),
+            r.DOCUMENTO,
+            r['NOMBRE Y (O) RAZON'],
+            r.DETALLE === '—' || r.DETALLE === 'EFECTIVO' ? '' : r.DETALLE,
+            bbva,
+            bcp,
+            efectivo,
+            total,
+          ]);
+        }
+
+        generalTotalBBVA += dailyBBVA;
+        generalTotalBCP += dailyBCP;
+        generalTotalEfectivo += dailyEfectivo;
+        generalTotalSum += dailyTotal;
+
+        aoa.push([
+          '', '', '', '', // Empty first 4 cells
+          dailyBBVA,
+          dailyBCP,
+          dailyEfectivo,
+          dailyTotal,
+        ]);
+        subtotalRowIndices.push(aoa.length - 1);
+      }
+
+      // Add General Total row
+      aoa.push([
+        '', '', '', '', // Empty first 4 cells
+        generalTotalBBVA,
+        generalTotalBCP,
+        generalTotalEfectivo,
+        generalTotalSum,
+      ]);
+      totalRowIndex = aoa.length - 1;
+
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws['!cols'] = [{ wch: 12 }, { wch: 20 }, { wch: 36 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }];
+
+      // Merge header rows (0-indexed)
+      ws['!merges'] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 7 } }, // Fila 1
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 7 } }, // Fila 2
+        { s: { r: 2, c: 0 }, e: { r: 2, c: 7 } }, // Fila 3
+      ];
+
+      // Apply styles to cells
+      const range = XLSX.utils.decode_range(ws['!ref'] || "A1:H1");
+      for (let R = range.s.r; R <= range.e.r; ++R) {
+        for (let C = range.s.c; C <= range.e.c; ++C) {
+          const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
+          let cell = ws[cellRef];
+          
+          if (!cell) {
+            cell = { t: 's', v: '' };
+            ws[cellRef] = cell;
+          }
+
+          const isInstHeader = R >= 0 && R <= 2;
+          const isTableHeader = R === 3;
+          const isSubTotal = subtotalRowIndices.includes(R);
+          const isGeneralTotal = R === totalRowIndex;
+
+          let fontColor = "000000";
+          let bgColor: string | undefined = undefined;
+          let isBold = isInstHeader || isTableHeader || isSubTotal || isGeneralTotal;
+          let numFmt: string | undefined = undefined;
+
+          if (isGeneralTotal) {
+            bgColor = "003366"; // Dark Blue
+            fontColor = "FFFFFF"; // White
+          } else if (isSubTotal) {
+            bgColor = "99CCFF"; // Light Blue
+          }
+
+          // Column specific colors for amount columns
+          if (!isGeneralTotal && !isInstHeader && !isTableHeader) {
+            if (C === 4) fontColor = "0000FF"; // BBVA: Blue
+            else if (C === 5) fontColor = "FF0000"; // BCP: Red
+            else if (C === 6) fontColor = "FF00FF"; // EFECTIVO: Fucsia
+            else if (C === 7) fontColor = "008000"; // TOTAL: Green
+          }
+
+          if (C >= 4 && C <= 7 && !isInstHeader && !isTableHeader) {
+            numFmt = '#,##0.00';
+            if (typeof cell.v === 'number') {
+              cell.t = 'n';
+            }
+          }
+
+          cell.s = {
+            font: { color: { rgb: fontColor }, bold: isBold },
+            fill: bgColor ? { fgColor: { rgb: bgColor } } : undefined,
+            alignment: {
+              wrapText: isTableHeader && C === 1,
+              vertical: "center",
+              horizontal: isInstHeader ? "center" : (C >= 4 && C <= 7 || isTableHeader) ? "center" : "left"
+            },
+            numFmt: numFmt
+          };
+        }
+      }
+
+      XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    }
+
     XLSX.writeFile(wb, `GSYSTEM_Contabilidad_${startDate}_al_${endDate}.xlsx`);
   };
 

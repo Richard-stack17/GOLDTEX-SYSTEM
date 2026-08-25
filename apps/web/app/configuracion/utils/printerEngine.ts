@@ -60,6 +60,9 @@ export function generateTicketLines(saleData: any, maxChars: number): TicketLine
   const separator = '='.repeat(maxChars);
   const separatorThin = '-'.repeat(maxChars);
 
+  // Margen superior mínimo para guillotina
+  center('');
+
   // Layout Estricto
   center('PROFORMA');
   left(`Empleado: Propietario`);
@@ -120,17 +123,17 @@ export function generateTicketLines(saleData: any, maxChars: number): TicketLine
   const total2XLine = `TOTAL${' '.repeat(spaces2X)}${totalNumStr}`;
   left(total2XLine);
 
+  center('');
+
   const dateObj = new Date();
   const dateStr = `${String(dateObj.getDate()).padStart(2, '0')}/${String(dateObj.getMonth() + 1).padStart(2, '0')}/${dateObj.getFullYear()} ${String(dateObj.getHours()).padStart(2, '0')}:${String(dateObj.getMinutes()).padStart(2, '0')}`;
-
-  center(dateStr);
   const docNum = saleData.proforma_number || saleData.invoice_number || saleData.document_number || 'N/A';
   // Limpiamos el prefijo TKT- y cualquier formato de fecha YYYYMMDD- (ej. TKT-20260816-0001 -> 0001)
   const cleanDocNum = docNum.replace(/^TKT-/, '').replace(/^\d{8}-/, '');
   const isConsolidated = saleData.source_type === 'CONSOLIDATED' || (Array.isArray(saleData._consolidated_tickets) && saleData._consolidated_tickets.length > 0) || (Array.isArray(saleData.children) && saleData.children.length > 0);
 
   if (isConsolidated) {
-    center('--- VENTA UNIFICADA ---');
+    left(formatLR(dateStr, 'UNIFICADO'));
     const subTickets = Array.isArray(saleData._consolidated_tickets) && saleData._consolidated_tickets.length > 0
       ? saleData._consolidated_tickets
       : (Array.isArray(saleData.children) ? saleData.children : []);
@@ -139,18 +142,14 @@ export function generateTicketLines(saleData: any, maxChars: number): TicketLine
       const ticketNums = subTickets.map((t: any) => t.internal_ticket_number ? `#${t.internal_ticket_number}` : (t.proforma_number || '')).filter(Boolean);
       center(`TICKETS: ${ticketNums.join(' + ')}`);
     } else {
-      const docHeader = `TKT-${cleanDocNum}`;
-      if (docHeader.length <= maxChars) {
-        center(docHeader);
-      } else {
-        const parts = cleanDocNum.split(' + ');
-        center('TICKETS UNIFICADOS:');
-        parts.forEach((p: string) => center(p.trim()));
-      }
+      center(`TKT-${cleanDocNum}`);
     }
   } else {
-    center(`TKT-${cleanDocNum}`);
+    left(formatLR(dateStr, `TKT-${cleanDocNum}`));
   }
+
+  center('');
+  center('NO ES BOLETA NI COMPROBANTE DE PAGO');
 
   return lines;
 }
@@ -233,8 +232,8 @@ export function buildEscPosBytes(lines: TicketLine[], maxChars: number = 48): Ui
     }
   }
 
-  // Feed 4 lines & Cut
-  escpos.push(0x1B, 0x64, 0x04);
+  // Feed 1 line & Cut
+  escpos.push(0x1B, 0x64, 0x01);
   escpos.push(0x1D, 0x56, 0x41, 0x00);
 
   return new Uint8Array(escpos);

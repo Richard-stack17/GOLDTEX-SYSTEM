@@ -27,7 +27,7 @@ export type Family = {
   color?: string;
 };
 
-export type CartItem = Product & { quantity: number; editedPrice: number; is_service?: boolean };
+export type CartItem = Product & { cartItemId: string; quantity: number; editedPrice: number; is_service?: boolean };
 
 export type SaleStatus = "PENDING" | "COMPLETED" | "CANCELLED";
 export type VoucherType = "TICKET" | "BOLETA" | "FACTURA";
@@ -97,6 +97,8 @@ interface PosContextProps {
   // Numpad Modal
   numpadProduct: Product | null;
   setNumpadProduct: React.Dispatch<React.SetStateAction<Product | null>>;
+  numpadCartItemId: string | null;
+  setNumpadCartItemId: React.Dispatch<React.SetStateAction<string | null>>;
   numpadField: "qty" | "price";
   setNumpadField: React.Dispatch<React.SetStateAction<"qty" | "price">>;
   numpadQty: string;
@@ -104,6 +106,7 @@ interface PosContextProps {
   numpadPrice: string;
   setNumpadPrice: React.Dispatch<React.SetStateAction<string>>;
   openNumpad: (product: Product, existing?: CartItem) => void;
+  closeNumpad: () => void;
   handleNumpadKey: (key: string) => void;
   handleNumpadOk: () => void;
   previewQty: number;
@@ -267,12 +270,14 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
   };
 
   const [numpadProduct, setNumpadProduct] = useState<Product | null>(null);
+  const [numpadCartItemId, setNumpadCartItemId] = useState<string | null>(null);
   const [numpadField, setNumpadField] = useState<"qty" | "price">("qty");
   const [numpadQty, setNumpadQty] = useState<string>("");
   const [numpadPrice, setNumpadPrice] = useState<string>("");
 
   const openNumpad = (product: Product, existing?: CartItem) => {
     setNumpadProduct(product);
+    setNumpadCartItemId(existing?.cartItemId ?? null);
     if (product.is_service) {
       setNumpadField("price");
       setNumpadQty("1");
@@ -282,6 +287,11 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
       setNumpadQty(existing?.quantity.toString() ?? "");
       setNumpadPrice(existing?.editedPrice.toString() ?? product.price.toString());
     }
+  };
+
+  const closeNumpad = () => {
+    setNumpadProduct(null);
+    setNumpadCartItemId(null);
   };
 
   const handleNumpadKey = (key: string) => {
@@ -306,23 +316,36 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
     const price = parseFloat(numpadPrice);
     if (!isNaN(qty) && qty > 0 && !isNaN(price) && price >= 0) {
       setCart((prev) => {
-        const exists = prev.find((i) => i.id === numpadProduct.id);
-        if (exists) return prev.map((i) => i.id === numpadProduct.id ? { ...i, quantity: qty, editedPrice: price } : i);
-        return [...prev, { ...numpadProduct, quantity: qty, editedPrice: price }];
+        if (numpadCartItemId) {
+          return prev.map((i) => i.cartItemId === numpadCartItemId ? { ...i, quantity: qty, editedPrice: price } : i);
+        } else {
+          const exists = prev.find((i) => i.id === numpadProduct.id && i.editedPrice === price);
+          if (exists) {
+            return prev.map((i) => i.cartItemId === exists.cartItemId ? { ...i, quantity: i.quantity + qty } : i);
+          }
+          return [...prev, { ...numpadProduct, cartItemId: crypto.randomUUID(), quantity: qty, editedPrice: price }];
+        }
       });
       setRightPanelMode("cart");
       setMobileTab("cart");
     }
     setNumpadProduct(null);
+    setNumpadCartItemId(null);
   };
 
-  const removeFromCart = (id: string, e: React.MouseEvent) => {
+  const removeFromCart = (cartItemId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setCart((prev) => prev.filter((i) => i.id !== id));
+    setCart((prev) => prev.filter((i) => i.cartItemId !== cartItemId));
   };
   
   const addToCart = (product: Product, quantity: number, price: number) => {
-    setCart(prev => [...prev, { ...product, quantity, editedPrice: price }]);
+    setCart(prev => {
+      const exists = prev.find((i) => i.id === product.id && i.editedPrice === price);
+      if (exists) {
+        return prev.map((i) => i.cartItemId === exists.cartItemId ? { ...i, quantity: i.quantity + quantity } : i);
+      }
+      return [...prev, { ...product, cartItemId: crypto.randomUUID(), quantity, editedPrice: price }];
+    });
     setRightPanelMode("cart");
     setMobileTab("cart");
   };
@@ -363,7 +386,10 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
     setCajaSummaryOpen(true);
     try {
       const todayStr = getLimaTodayStr();
-      const { data, error } = await supabase.from('sales').select('transactions(payment_method, amount)').eq('record_date', todayStr).eq('status', 'COMPLETED');
+      let query = supabase.from('sales').select('transactions(payment_method, amount)').eq('record_date', todayStr).eq('status', 'COMPLETED');
+      if (activeStoreId) query = query.eq('store_id', activeStoreId);
+      
+      const { data, error } = await query;
       if (error) throw error;
       let efe = 0, bcp = 0, bbva = 0, izi = 0;
       data?.forEach(sale => {
@@ -422,7 +448,12 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
   const fetchHistory = useCallback(async () => {
     if (!activeStoreId) return;
     const todayStr = getLimaTodayStr();
-    let query = supabase.from("sales").select("*, transactions(payment_method, amount, surcharge_amount)").eq("record_date", todayStr).eq("source_type", "POS").eq("store_id", activeStoreId).order("created_at", { ascending: false });
+    let query = supabase.from("sales")
+      .select("id, proforma_number, invoice_number, internal_ticket_number, total, detail, status, created_at, seller_id, cashier_id, source_type, store_id")
+      .eq("record_date", todayStr)
+      .eq("source_type", "POS")
+      .eq("store_id", activeStoreId)
+      .order("created_at", { ascending: false });
     const { data, error } = await query;
     if (data) {
       try {
@@ -472,7 +503,6 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
 
     const pollInterval = setInterval(() => {
       syncCajaStateFromCloud();
-      fetchHistory();
       fetchTodayTicketNumber();
     }, 5000);
 
@@ -661,8 +691,8 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
       familyPage, setFamilyPage, servicesPage, setServicesPage, familyPagePills,
       searchFamiliesInPage, searchProductsInPage, combinedSearchResults, totalSearchPages, matchedProducts,
       activeFamily, setActiveFamily,
-      numpadProduct, setNumpadProduct, numpadField, setNumpadField, numpadQty, setNumpadQty, numpadPrice, setNumpadPrice,
-      openNumpad, handleNumpadKey, handleNumpadOk, previewQty, previewPrice, previewSubtotal,
+      numpadProduct, setNumpadProduct, numpadCartItemId, setNumpadCartItemId, numpadField, setNumpadField, numpadQty, setNumpadQty, numpadPrice, setNumpadPrice,
+      openNumpad, closeNumpad, handleNumpadKey, handleNumpadOk, previewQty, previewPrice, previewSubtotal,
       isCajaOpen, setIsCajaOpen, handleOpenCaja, handleCloseCajaAttempt, confirmCloseCaja, closingCajaLoading, cajaSummaryOpen, setCajaSummaryOpen, cajaSummary,
       isClearCartModalOpen, setIsClearCartModalOpen, exitGuardOpen, setExitGuardOpen, previewTicketData, setPreviewTicketData, activePrinter,
       ticketNumber, isEmitting, handleEmitTicket, deleteDraftTicket, handleReprint, historyTickets, pendingSales, fetchHistory,

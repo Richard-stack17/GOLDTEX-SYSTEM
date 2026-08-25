@@ -14,7 +14,9 @@ import { usePersonal } from '../PersonalContext';
 export function PersonalRolesTab() {
   const {
     activeProfiles, activeStoreId, activeTab, allProfiles, allRoles, availableStoreIds, availableStores, checkCanManageTarget, checkUsernameState, confirmDeleteEmployee, confirmDeleteRole, confirmGlobalAccess, createAccess, deletingEmployee, deletingRole, deletingUserId, deletingUsername, dni, editRoleDesc, editRoleName, editingEmployee, editingRole, editingUserId, email, empAccessScope, empEmail, empGlobalRole, empPassword, empStoreIds, empStoreRoleIds, empStoreRoles, empUsername, employeeById, employees, formatFriendlyErrorMessage, fullName, getRoleBadgeStyle, getValidStoreRole, globalRoles, handleCancelEdit, handleCreateEmployee, handleCreateRole, handleDeleteEmployeeClick, handleDeleteRole, handleDeleteUser, handleEditClick, handleEditEmployeeClick, handleExecuteRestoration, handleLinkExistingUser, handleLinkNewUser, handleRestoreEmployee, handleRestorePermissions, handleRestoreRole, handleRestoreUser, handleSaveCredentials, handleSaveEditRole, handleSavePermissions, handleTabChange, handleTogglePermission, hasUnsavedRoleChanges, isAdmin, isDeletingRole, isDeletingUser, isEditRoleModalOpen, isEmployeeModalOpen, isGlobalUser, isHydrated, isLinking, isRestoringUser, isRoleConfirmModalOpen, isRoleModalOpen, isRoleWarningModalOpen, isUserGlobalAdmin, isUserModalOpen, linkExistingUserId, linkMode, linkRoleId, linkingEmployee, loadData, loading, modalResetToken, newRoleDesc, newRoleName, newRoleScopeStoreId, originalRoles, password, pendingRestoration, pendingTab, permissions, phone, profileByEmployeeId, renderRoleOptions, renderStoreAndRoleBadges, renderStoreRoleList, role, roleAssignedUsers, roles, router, savingEditRole, savingEmployee, savingPermissions, savingRole, savingUser, selectedEmpId, selectedModalStoreId, selectedStoreIds, setActiveTab, setAllProfiles, setAllRoles, setConfirmGlobalAccess, setCreateAccess, setDeletingEmployee, setDeletingRole, setDeletingUserId, setDeletingUsername, setDni, setEditRoleDesc, setEditRoleName, setEditingEmployee, setEditingRole, setEditingUserId, setEmail, setEmpAccessScope, setEmpEmail, setEmpGlobalRole, setEmpPassword, setEmpStoreIds, setEmpStoreRoleIds, setEmpStoreRoles, setEmpUsername, setEmployees, setFullName, setHasUnsavedRoleChanges, setIsDeletingRole, setIsDeletingUser, setIsEditRoleModalOpen, setIsEmployeeModalOpen, setIsLinking, setIsRestoringUser, setIsRoleConfirmModalOpen, setIsRoleModalOpen, setIsRoleWarningModalOpen, setIsUserModalOpen, setLinkExistingUserId, setLinkMode, setLinkRoleId, setLinkingEmployee, setLoading, setModalResetToken, setNewRoleDesc, setNewRoleName, setNewRoleScopeStoreId, setOriginalRoles, setPassword, setPendingRestoration, setPendingTab, setPhone, setRoleAssignedUsers, setRoles, setSavingEditRole, setSavingEmployee, setSavingPermissions, setSavingRole, setSavingUser, setSelectedEmpId, setSelectedModalStoreId, setSelectedStoreIds, setShowEmpPassword, setShowInactiveEmployees, setShowInactiveRoles, setShowInactiveUsers, setShowRoleExitConfirm, setShowUserPassword, setToast, setUserAccessScope, setUserGlobalRole, setUserStoreRoleIds, setUserStoreRoles, setUsername, showEmpPassword, showInactiveEmployees, showInactiveRoles, showInactiveUsers, showRoleExitConfirm, showToast, showUserPassword, storeMap, syncEmployeeStoreAssignment, targetModalStoreId, toast, unlinkedEmployees, userAccessScope, userGlobalRole, userStoreRoleIds, userStoreRoles, username, visibleEmployees, visibleRoles
-  , sortedRoles, sortConfig, requestSort } = usePersonal();
+  , sortedRoles, sortConfig, requestSort,
+    isManagePermsModalOpen, setIsManagePermsModalOpen, managingPermsRoleId, setManagingPermsRoleId
+  } = usePersonal();
 
   return (
     <>
@@ -67,6 +69,43 @@ export function PersonalRolesTab() {
                 </button>
               </div>
             </div>
+            
+            <div className="px-5 py-3 bg-muted/10 border-b border-border flex flex-col gap-3">
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-muted-foreground">
+                <span className="font-bold text-foreground">Guía de iconos:</span>
+                <div className="flex items-center gap-1.5" title="Abre un panel para encender/apagar permisos">
+                  <div className="p-1 bg-indigo-50 dark:bg-indigo-900/30 rounded">
+                    <ShieldCheck className="w-3.5 h-3.5 text-indigo-500" />
+                  </div>
+                  <span className="font-medium">Gestionar Permisos</span>
+                </div>
+                <div className="flex items-center gap-1.5" title="Solo permite cambiar el nombre y descripción del rol">
+                  <div className="p-1 bg-amber-50 dark:bg-amber-900/30 rounded">
+                    <Edit2 className="w-3.5 h-3.5 text-amber-600" />
+                  </div>
+                  <span className="font-medium">Renombrar Rol</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="p-1 bg-red-50 dark:bg-red-900/30 rounded">
+                    <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                  </div>
+                  <span className="font-medium">Desactivar</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="p-1 bg-emerald-50 dark:bg-emerald-900/30 rounded">
+                    <RotateCcw className="w-3.5 h-3.5 text-emerald-500" />
+                  </div>
+                  <span className="font-medium">Reactivar</span>
+                </div>
+              </div>
+              <div className="flex items-start gap-2 text-xs text-muted-foreground">
+                <Info className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
+                <p className="leading-relaxed">
+                  <strong>Nota:</strong> Los roles con candado (<Lock className="w-3 h-3 inline-block text-purple-400 mx-0.5" />) son de sistema y sus permisos están protegidos.
+                </p>
+              </div>
+            </div>
+
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-muted/10 border-b border-border">
@@ -122,6 +161,17 @@ export function PersonalRolesTab() {
                                   </button>
                                 ) : (
                                   <>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setManagingPermsRoleId(r.id);
+                                        setIsManagePermsModalOpen(true);
+                                      }}
+                                      title="Gestionar Permisos del Rol"
+                                      className="p-1 text-muted-foreground hover:text-indigo-500 transition-colors rounded"
+                                    >
+                                      <ShieldCheck className="w-3 h-3" />
+                                    </button>
                                     <button
                                       type="button"
                                       onClick={() => {
@@ -242,14 +292,8 @@ export function PersonalRolesTab() {
                 </tbody>
               </table>
             </div>
-            <div className="p-5 bg-muted/20 border-t border-border flex items-center justify-between">
-              <p className="text-xs text-muted-foreground font-medium">
-                Nota: Los roles marcados con el escudo azul son roles de sistema y sus permisos no pueden ser modificados.
-              </p>
-            </div>
           </div>
         )}
-
     </>
   );
 }

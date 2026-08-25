@@ -29,7 +29,7 @@ export default function PosCart() {
                 openNumpad(item, item);
               };
               return (
-                <div key={item.id}>
+                <div key={item.cartItemId}>
                   <Card className="bg-background border-border shadow-sm rounded-2xl overflow-hidden cursor-pointer hover:border-primary/50 transition-colors active:scale-[0.98]"
                     onClick={handleCardClick}>
                     <CardContent className="px-2 py-1.5">
@@ -41,8 +41,8 @@ export default function PosCart() {
                           <span className="font-mono text-primary shrink-0 mt-px">{item.code}</span>
                           <span className="whitespace-normal text-left flex-1">{item.name} {!isService && <span className="text-[10px] text-muted-foreground ml-1 inline-block">(S/ {item.price.toFixed(2)})</span>}</span>
                         </div>
-                        <button className="min-h-[44px] min-w-[44px] flex items-center justify-center p-1.5 text-red-500 bg-red-500/10 hover:bg-red-500/20 rounded-md transition-colors shrink-0"
-                          onClick={(e) => removeFromCart(item.id, e)}>
+                        <button className="w-7 h-7 flex items-center justify-center text-red-500 bg-red-500/10 hover:bg-red-500/20 rounded-lg transition-colors shrink-0"
+                          onClick={(e) => removeFromCart(item.cartItemId, e)}>
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>

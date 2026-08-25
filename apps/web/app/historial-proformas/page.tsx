@@ -129,9 +129,9 @@ export default function HistorialProformasPage() {
         .is('parent_sale_id', null)
         .gte('issue_date', startDate)
         .lte('issue_date', endDate)
-        .order('created_at', { ascending: false })
-        .order('internal_ticket_number', { ascending: false })
-        .order('id', { ascending: false });
+        .order('created_at', { ascending: true })
+        .order('internal_ticket_number', { ascending: true })
+        .order('id', { ascending: true });
 
       if (statusFilter !== 'ALL') {
         query = query.eq('status', statusFilter);
@@ -199,7 +199,7 @@ export default function HistorialProformasPage() {
   }, [sales, searchTerm]);
 
   const { items: sortedSales, requestSort, sortConfig } = useTableSort(enrichedFilteredSales, {
-    key: 'internal_ticket_number',
+    key: 'created_at',
     direction: 'asc'
   });
 
@@ -399,13 +399,23 @@ export default function HistorialProformasPage() {
 
         {/* Table */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-          <div className="w-full overflow-x-auto scrollbar-hide">
-            <table className="w-full text-sm text-left min-w-[1000px]">
-              <thead className="bg-gray-50 border-b border-gray-200 text-gray-600">
+          <div className="w-full overflow-x-auto">
+            <table className="w-full text-xs text-left min-w-[900px]">
+              <thead className="bg-gray-50/80 border-b border-gray-200 text-gray-600">
                 <tr>
                   <th
+                    onClick={() => requestSort('created_at')}
+                    className="px-3 py-3 font-extrabold uppercase tracking-wider text-[11px] cursor-pointer select-none hover:bg-gray-100/80 transition-colors group w-24"
+                    title="Ordenar por fecha"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Fecha</span>
+                      {renderSortIcon('created_at')}
+                    </div>
+                  </th>
+                  <th
                     onClick={() => requestSort('internal_ticket_number')}
-                    className="px-4 py-3 font-extrabold uppercase tracking-wider text-xs cursor-pointer select-none hover:bg-gray-100/80 transition-colors group"
+                    className="px-2.5 py-3 font-extrabold uppercase tracking-wider text-[11px] cursor-pointer select-none hover:bg-gray-100/80 transition-colors group w-20"
                     title="Ordenar por número de ticket"
                   >
                     <div className="flex items-center gap-1">
@@ -415,7 +425,7 @@ export default function HistorialProformasPage() {
                   </th>
                   <th
                     onClick={() => requestSort('proforma_number')}
-                    className="px-4 py-3 font-extrabold uppercase tracking-wider text-xs cursor-pointer select-none hover:bg-gray-100/80 transition-colors group"
+                    className="px-3 py-3 font-extrabold uppercase tracking-wider text-[11px] cursor-pointer select-none hover:bg-gray-100/80 transition-colors group min-w-[140px]"
                     title="Ordenar por documento"
                   >
                     <div className="flex items-center gap-1">
@@ -423,14 +433,14 @@ export default function HistorialProformasPage() {
                       {renderSortIcon('proforma_number')}
                     </div>
                   </th>
-                  <th className="px-4 py-3 font-extrabold uppercase tracking-wider text-xs">Efectivo</th>
-                  <th className="px-4 py-3 font-extrabold uppercase tracking-wider text-xs">Servicios</th>
-                  <th className="px-4 py-3 font-extrabold uppercase tracking-wider text-xs">BCP</th>
-                  <th className="px-4 py-3 font-extrabold uppercase tracking-wider text-xs">BBVA</th>
-                  <th className="px-4 py-3 font-extrabold uppercase tracking-wider text-xs">Izipay</th>
+                  <th className="px-2.5 py-3 font-extrabold uppercase tracking-wider text-[11px] text-right">Efectivo</th>
+                  <th className="px-2.5 py-3 font-extrabold uppercase tracking-wider text-[11px] text-right">Servicios</th>
+                  <th className="px-2.5 py-3 font-extrabold uppercase tracking-wider text-[11px] text-right">BCP</th>
+                  <th className="px-2.5 py-3 font-extrabold uppercase tracking-wider text-[11px] text-right">BBVA</th>
+                  <th className="px-2.5 py-3 font-extrabold uppercase tracking-wider text-[11px] text-right">Izipay</th>
                   <th
                     onClick={() => requestSort('total')}
-                    className="px-4 py-3 font-extrabold uppercase tracking-wider text-xs text-right cursor-pointer select-none hover:bg-gray-100/80 transition-colors group"
+                    className="px-3 py-3 font-extrabold uppercase tracking-wider text-[11px] text-right cursor-pointer select-none hover:bg-gray-100/80 transition-colors group"
                     title="Ordenar por monto total"
                   >
                     <div className="flex items-center justify-end gap-1">
@@ -438,20 +448,20 @@ export default function HistorialProformasPage() {
                       {renderSortIcon('total')}
                     </div>
                   </th>
-                  <th className="px-4 py-3 font-extrabold uppercase tracking-wider text-xs text-center">Estado</th>
-                  <th className="px-4 py-3 font-extrabold uppercase tracking-wider text-xs text-center">Acciones</th>
+                  <th className="px-2.5 py-3 font-extrabold uppercase tracking-wider text-[11px] text-center w-24">Estado</th>
+                  <th className="px-3 py-3 font-extrabold uppercase tracking-wider text-[11px] text-center w-24">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {isLoading ? (
                   <tr>
-                    <td colSpan={10} className="px-4 py-8 text-center text-gray-400 font-bold">
+                    <td colSpan={11} className="px-4 py-8 text-center text-gray-400 font-bold">
                       Cargando historial...
                     </td>
                   </tr>
                 ) : paginatedSales.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="px-4 py-8 text-center text-gray-400 font-bold">
+                    <td colSpan={11} className="px-4 py-8 text-center text-gray-400 font-bold">
                       No se encontraron resultados.
                     </td>
                   </tr>
@@ -483,7 +493,7 @@ export default function HistorialProformasPage() {
                       }, 0);
                     }
 
-                    const montoAmt = rawEfectivoAmt; // No deductimos los servicios del efectivo, mostramos la realidad.
+                    const montoAmt = rawEfectivoAmt; 
 
                     const fmtAmt = (n: number, color: string) => {
                       if (sale.status === "PENDING" || n === 0) return <span className="text-gray-300 font-medium">—</span>;
@@ -493,7 +503,12 @@ export default function HistorialProformasPage() {
                     return (
                       <React.Fragment key={sale.id}>
                         <tr className={`hover:bg-gray-50/50 transition-colors ${isExpanded ? 'bg-gray-50' : ''}`}>
-                          <td className="px-4 py-3 font-mono font-bold text-gray-700 whitespace-nowrap">
+                          <td className="px-3 py-2.5 font-mono text-gray-600 whitespace-nowrap text-xs">
+                            {new Date(sale.created_at).toLocaleString('es-PE', {
+                              day: '2-digit', month: '2-digit', year: 'numeric'
+                            })}
+                          </td>
+                          <td className="px-2.5 py-2.5 font-mono font-bold text-gray-700 whitespace-nowrap">
                             {(() => {
                               const isConsolidated = sale.source_type === 'CONSOLIDATED' || (Array.isArray(sale.children) && sale.children.length > 0);
                               const childNums = Array.isArray(sale.children) && sale.children.length > 0
@@ -532,18 +547,31 @@ export default function HistorialProformasPage() {
                               );
                             })()}
                           </td>
-                          <td className="px-4 py-3 font-mono text-gray-600 whitespace-nowrap">
+                          <td className="px-3 py-2.5 font-mono text-gray-600">
                             {(() => {
                               const isConsolidated = sale.source_type === 'CONSOLIDATED' || (Array.isArray(sale.children) && sale.children.length > 0);
                               const childDocs = Array.isArray(sale.children) && sale.children.length > 0
                                 ? sale.children.map((c: any) => c.proforma_number || (c.internal_ticket_number ? `TKT-${String(c.internal_ticket_number).padStart(4, '0')}` : '')).filter(Boolean)
                                 : [];
 
-                              const ticketCode = isConsolidated && childDocs.length > 0
-                                ? childDocs.join(' + ')
-                                : (sale.proforma_number && sale.proforma_number.startsWith("TKT"))
-                                  ? sale.proforma_number
-                                  : (formatTicketHash(ticketNo) || sale.proforma_number || "---");
+                              const ticketCodeElement = isConsolidated && childDocs.length > 0
+                                ? (
+                                  <div className="flex flex-wrap gap-1 items-center max-w-[170px]">
+                                    {childDocs.map((doc: string, i: number) => (
+                                      <React.Fragment key={i}>
+                                        <span>{doc}</span>
+                                        {i < childDocs.length - 1 && <span className="text-[10px] text-gray-400">+</span>}
+                                      </React.Fragment>
+                                    ))}
+                                  </div>
+                                )
+                                : (
+                                  <span>
+                                    {(sale.proforma_number && sale.proforma_number.startsWith("TKT"))
+                                      ? sale.proforma_number
+                                      : (formatTicketHash(ticketNo) || sale.proforma_number || "---")}
+                                  </span>
+                                );
 
                               const fiscalDoc = sale.invoice_number
                                 || (sale.proforma_number && !sale.proforma_number.startsWith("TKT") ? sale.proforma_number : null);
@@ -552,24 +580,24 @@ export default function HistorialProformasPage() {
 
                               return (
                                 <div>
-                                  <div className="font-extrabold text-slate-900 text-xs">{ticketCode}</div>
-                                  <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                                  <div className="font-extrabold text-slate-900 text-xs whitespace-normal">{ticketCodeElement}</div>
+                                  <div className="flex items-center gap-1 flex-wrap mt-1">
                                     {isAllStoresMode && sale.stores?.name && (
-                                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-200">
                                         {sale.stores.name}
                                       </span>
                                     )}
                                     {rawVoucher === "BOLETA" ? (
-                                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-extrabold bg-blue-50 text-blue-700 border border-blue-200">
+                                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-blue-50 text-blue-700 border border-blue-200">
                                         BOLETA
                                       </span>
                                     ) : rawVoucher === "FACTURA" ? (
-                                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200">
                                         FACTURA
                                       </span>
                                     ) : (
-                                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-extrabold bg-slate-100 text-slate-600 border border-slate-200">
-                                        TICKET / SIMPLE
+                                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-slate-100 text-slate-600 border border-slate-200">
+                                        TICKET
                                       </span>
                                     )}
                                   </div>
@@ -577,12 +605,12 @@ export default function HistorialProformasPage() {
                               );
                             })()}
                           </td>
-                          <td className="px-4 py-3 font-mono whitespace-nowrap">{fmtAmt(montoAmt, "text-emerald-600")}</td>
-                          <td className="px-4 py-3 font-mono whitespace-nowrap">{fmtAmt(confeccionAmt, "text-fuchsia-600")}</td>
-                          <td className="px-4 py-3 font-mono whitespace-nowrap">{fmtAmt(bcpAmt, "text-orange-600")}</td>
-                          <td className="px-4 py-3 font-mono whitespace-nowrap">{fmtAmt(bbvaAmt, "text-sky-600")}</td>
-                          <td className="px-4 py-3 font-mono whitespace-nowrap">{fmtAmt(izipayAmt, "text-rose-600")}</td>
-                          <td className="px-4 py-3 text-right whitespace-nowrap">
+                          <td className="px-2.5 py-2.5 font-mono whitespace-nowrap text-right">{fmtAmt(montoAmt, "text-emerald-600")}</td>
+                          <td className="px-2.5 py-2.5 font-mono whitespace-nowrap text-right">{fmtAmt(confeccionAmt, "text-fuchsia-600")}</td>
+                          <td className="px-2.5 py-2.5 font-mono whitespace-nowrap text-right">{fmtAmt(bcpAmt, "text-orange-600")}</td>
+                          <td className="px-2.5 py-2.5 font-mono whitespace-nowrap text-right">{fmtAmt(bbvaAmt, "text-sky-600")}</td>
+                          <td className="px-2.5 py-2.5 font-mono whitespace-nowrap text-right">{fmtAmt(izipayAmt, "text-rose-600")}</td>
+                          <td className="px-3 py-2.5 text-right whitespace-nowrap">
                             {sale.status === "PENDING" ? (
                               <span className="text-gray-300 font-medium">—</span>
                             ) : (
@@ -591,7 +619,7 @@ export default function HistorialProformasPage() {
                               </span>
                             )}
                           </td>
-                          <td className="px-4 py-3 text-center">
+                          <td className="px-2.5 py-2.5 text-center">
                             <span className={`inline-flex px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase tracking-wider ${sale.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-700' :
                               sale.status === 'PENDING' ? 'bg-amber-100 text-amber-700' :
                                 'bg-red-100 text-red-700'
@@ -599,14 +627,14 @@ export default function HistorialProformasPage() {
                               {sale.status === 'COMPLETED' ? 'Completado' : sale.status === 'PENDING' ? 'Pendiente' : 'Anulado'}
                             </span>
                           </td>
-                          <td className="px-4 py-3 text-center">
-                            <div className="flex items-center justify-center gap-2">
+                          <td className="px-3 py-2.5 text-center">
+                            <div className="flex items-center justify-center gap-1">
                               <button
                                 onClick={() => toggleRow(sale.id)}
                                 className="p-1.5 text-gray-400 hover:text-teal-600 hover:bg-teal-50 rounded-lg transition-colors"
                                 title="Ver Detalles"
                               >
-                                {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                                {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                               </button>
                               {!isCancelled && permissions?.history_cancel_proforma && (
                                 <button
@@ -622,7 +650,7 @@ export default function HistorialProformasPage() {
                         </tr>
                         {isExpanded && (
                           <tr className="bg-gray-50/80 border-b border-gray-200">
-                            <td colSpan={10} className="px-8 py-4">
+                            <td colSpan={11} className="px-6 py-4">
                               <div className="bg-white border rounded-xl p-4 shadow-sm">
                                 <div className="flex justify-between items-center mb-3">
                                   <h4 className="text-xs font-extrabold text-gray-500 uppercase tracking-wider flex items-center gap-2">

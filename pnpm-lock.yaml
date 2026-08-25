@@ -163,6 +163,9 @@ importers:
       '@capacitor/android':
         specifier: ^6.2.1
         version: 6.2.1(@capacitor/core@6.2.1)
+      '@capacitor/app':
+        specifier: ^6.0.3
+        version: 6.0.3(@capacitor/core@6.2.1)
       '@capacitor/core':
         specifier: ^6.2.1
         version: 6.2.1
@@ -175,6 +178,9 @@ importers:
       '@radix-ui/react-slot':
         specifier: ^1.3.0
         version: 1.3.0(@types/react@19.2.2)(react@19.2.0)
+      '@spryrocks/capacitor-socket-connection-plugin':
+        specifier: 6.3.0
+        version: 6.3.0(@capacitor/core@6.2.1)
       '@supabase/supabase-js':
         specifier: ^2.110.0
         version: 2.110.0
@@ -376,6 +382,11 @@ packages:
     resolution: {integrity: sha512-8gd4CIiQO5LAIlPIfd5mCuodBRxMMdZZEdj8qG8m+dQ1sQ2xyemVpzHmRK8qSCHorsBUCg3D62j2cp6bEBAkdw==}
     peerDependencies:
       '@capacitor/core': ^6.2.0
+
+  '@capacitor/app@6.0.3':
+    resolution: {integrity: sha512-4gFUCbcVz0N/YYN32OBFerocWXslIv3Nc90gDiRsBkJc0plwK6kIUT6PKa5WtW2kfhteUeCVXQbvArH2fH+0Ug==}
+    peerDependencies:
+      '@capacitor/core': ^6.0.0
 
   '@capacitor/cli@6.2.1':
     resolution: {integrity: sha512-JKl0FpFge8PgQNInw12kcKieQ4BmOyazQ4JGJOfEpVXlgrX1yPhSZTPjngupzTCiK3I7q7iGG5kjun0fDqgSCA==}
@@ -741,6 +752,29 @@ packages:
         optional: true
       react-redux:
         optional: true
+
+  '@spryrocks/capacitor-socket-connection-plugin@6.3.0':
+    resolution: {integrity: sha512-/lOSnWFXfFezyhdKmppDQQnFH/3EDBbRKXQXzHLrrTJsLa/Jmxtkqd1mdgWUdGAPiwEpvEkQGMHGGZMrmw24gw==}
+    peerDependencies:
+      '@capacitor/core': ^6.1.2
+
+  '@spryrocks/logger-core@0.1.17-alpha.0':
+    resolution: {integrity: sha512-m2vY5EhOv8rz8vyIh0agioKm5W/ETMvq0gmAEM+Jg2V8ciK+UTyT7dAkXnZelscuaB+tLDWqS/J2cnaNhQc2lA==}
+
+  '@spryrocks/logger-observer@0.1.17-alpha.2':
+    resolution: {integrity: sha512-NlrVcCTOhTXaheye3U6dyhlqoN3SkZVQycBZJ5r4oqiL3ziiTAjTJ/DRS4PiwixE1yugaUfKZW02o5cQ41RqNQ==}
+
+  '@spryrocks/logger-plugin-core@0.1.17-alpha.0':
+    resolution: {integrity: sha512-bgQcfWn+eYpff1Gsof/Pm8aQchZhBhm4ctKh9c4otkwpOVvW6ob3guyUBkV/xAeEzdPdeYTtqSBiOB2xzvVRsw==}
+
+  '@spryrocks/logger-plugin-observer@0.1.17-alpha.2':
+    resolution: {integrity: sha512-veZXAEQy0txmMCMOAr0nB4E3fN1Qa9waGcM5VUW9Rzq2/3NLQXPGCu1DTjVRSktbCbf7BgQOlqHWXlBRrd9qCw==}
+
+  '@spryrocks/logger-plugin@0.1.17-alpha.2':
+    resolution: {integrity: sha512-meq63XwkpMv9LdIsoOxIby1bi8BciSd3dAo60sD0dLB9FeB7GDP38FAYsSi09sN7+FxZq5uqn8Ug7TYk+Fdxdg==}
+
+  '@spryrocks/logger@0.1.17-alpha.2':
+    resolution: {integrity: sha512-HRVz+JDqAQ0N8D9rp93tV3gGyhwN6ZdI2vBWKftgXPCd0cle/GkSL3Wjj8P3F6kNcky2/xv0dyROGWIcLQoxSQ==}
 
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
@@ -2637,6 +2671,10 @@ snapshots:
     dependencies:
       '@capacitor/core': 6.2.1
 
+  '@capacitor/app@6.0.3(@capacitor/core@6.2.1)':
+    dependencies:
+      '@capacitor/core': 6.2.1
+
   '@capacitor/cli@6.2.1':
     dependencies:
       '@ionic/cli-framework-output': 2.2.8
@@ -3016,6 +3054,35 @@ snapshots:
     optionalDependencies:
       react: 19.2.0
       react-redux: 9.3.0(@types/react@19.2.2)(react@19.2.0)(redux@5.0.1)
+
+  '@spryrocks/capacitor-socket-connection-plugin@6.3.0(@capacitor/core@6.2.1)':
+    dependencies:
+      '@capacitor/core': 6.2.1
+      '@spryrocks/logger-plugin': 0.1.17-alpha.2
+
+  '@spryrocks/logger-core@0.1.17-alpha.0': {}
+
+  '@spryrocks/logger-observer@0.1.17-alpha.2':
+    dependencies:
+      '@spryrocks/logger-core': 0.1.17-alpha.0
+
+  '@spryrocks/logger-plugin-core@0.1.17-alpha.0':
+    dependencies:
+      '@spryrocks/logger-core': 0.1.17-alpha.0
+
+  '@spryrocks/logger-plugin-observer@0.1.17-alpha.2':
+    dependencies:
+      '@spryrocks/logger-observer': 0.1.17-alpha.2
+      '@spryrocks/logger-plugin-core': 0.1.17-alpha.0
+
+  '@spryrocks/logger-plugin@0.1.17-alpha.2':
+    dependencies:
+      '@spryrocks/logger': 0.1.17-alpha.2
+      '@spryrocks/logger-plugin-observer': 0.1.17-alpha.2
+
+  '@spryrocks/logger@0.1.17-alpha.2':
+    dependencies:
+      '@spryrocks/logger-observer': 0.1.17-alpha.2
 
   '@standard-schema/spec@1.1.0': {}
 
