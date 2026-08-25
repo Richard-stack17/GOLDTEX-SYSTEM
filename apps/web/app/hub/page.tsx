@@ -127,7 +127,7 @@ export default function HubPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {/* POS - Acceso: access_pos */}
           {isModuleAllowed("pos", permissions?.access_pos) && (
-            <Link prefetch={true} href="/pos" className="block group">
+            <Link prefetch={true} href="/pos/" className="block group">
               <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-blue-500/50 hover:shadow-[0_0_30px_rgba(59,130,246,0.2)]">
                 <CardHeader>
                   <div className="w-14 h-14 rounded-xl bg-blue-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
@@ -144,7 +144,7 @@ export default function HubPage() {
 
           {/* Inventario - Acceso: access_inventory */}
           {isModuleAllowed("inventory", permissions?.access_inventory) && (
-            <Link prefetch={true} href="/inventario" className="block group">
+            <Link prefetch={true} href="/inventario/" className="block group">
               <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-purple-500/50 hover:shadow-[0_0_30px_rgba(168,85,186,0.2)]">
                 <CardHeader>
                   <div className="w-14 h-14 rounded-xl bg-purple-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
@@ -161,7 +161,7 @@ export default function HubPage() {
 
           {/* Dashboard - Acceso: access_dashboard */}
           {isModuleAllowed("dashboard", permissions?.access_dashboard) && (
-            <Link prefetch={true} href="/dashboard" className="block group">
+            <Link prefetch={true} href="/dashboard/" className="block group">
               <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-emerald-500/50 hover:shadow-[0_0_30px_rgba(16,185,129,0.2)]">
                 <CardHeader>
                   <div className="w-14 h-14 rounded-xl bg-emerald-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
@@ -178,7 +178,7 @@ export default function HubPage() {
 
           {/* Caja - Acceso: access_caja */}
           {isModuleAllowed("caja", permissions?.access_caja) && (
-            <Link prefetch={true} href="/caja" className="block group">
+            <Link prefetch={true} href="/caja/" className="block group">
               <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-cyan-500/50 hover:shadow-[0_0_30px_rgba(6,182,212,0.2)]">
                 <CardHeader>
                   <div className="w-14 h-14 rounded-xl bg-cyan-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
@@ -195,7 +195,7 @@ export default function HubPage() {
 
           {/* Contabilidad - Acceso: access_contabilidad */}
           {isModuleAllowed("contabilidad", permissions?.access_contabilidad) && (
-            <Link prefetch={true} href="/contabilidad" className="block group w-full">
+            <Link prefetch={true} href="/contabilidad/" className="block group w-full">
               <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-amber-500/50 hover:shadow-[0_0_30px_rgba(245,158,11,0.2)] cursor-pointer">
                 <CardHeader>
                   <div className="w-14 h-14 rounded-xl bg-amber-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
@@ -212,7 +212,7 @@ export default function HubPage() {
 
           {/* Clientes Frecuentes - Acceso: access_clientes */}
           {isModuleAllowed("clientes", permissions?.access_clientes) && (
-            <Link prefetch={true} href="/clientes" className="block group w-full">
+            <Link prefetch={true} href="/clientes/" className="block group w-full">
               <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-pink-500/50 hover:shadow-[0_0_30px_rgba(236,72,153,0.2)] cursor-pointer">
                 <CardHeader>
                   <div className="w-14 h-14 rounded-xl bg-pink-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
@@ -229,7 +229,7 @@ export default function HubPage() {
 
           {/* Personal - Acceso: access_personal */}
           {isModuleAllowed("personal", permissions?.access_personal) && (
-            <Link prefetch={true} href="/admin/personal" className="block group">
+            <Link prefetch={true} href="/admin/personal/" className="block group">
               <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-indigo-500/50 hover:shadow-[0_0_30px_rgba(99,102,241,0.2)]">
                 <CardHeader>
                   <div className="w-14 h-14 rounded-xl bg-indigo-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
@@ -246,7 +246,7 @@ export default function HubPage() {
 
           {/* Historial de Proformas - Acceso: access_proformas */}
           {isModuleAllowed("proformas", permissions?.access_proformas) && (
-            <Link prefetch={true} href="/historial-proformas" className="block group">
+            <Link prefetch={true} href="/historial-proformas/" className="block group">
               <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-teal-500/50 hover:shadow-[0_0_30px_rgba(20,184,166,0.2)]">
                 <CardHeader>
                   <div className="w-14 h-14 rounded-xl bg-teal-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
@@ -263,7 +263,7 @@ export default function HubPage() {
 
           {/* Configuración - Acceso: access_settings */}
           {isModuleAllowed("settings", permissions?.access_settings) && (
-            <Link prefetch={true} href="/configuracion" className="block group">
+            <Link prefetch={true} href="/configuracion/" className="block group">
               <Card className="h-full bg-glass hover:bg-white/5 border-white/10 transition-all duration-300 hover:border-emerald-500/50 hover:shadow-[0_0_30px_rgba(16,185,129,0.2)]">
                 <CardHeader>
                   <div className="w-14 h-14 rounded-xl bg-emerald-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
