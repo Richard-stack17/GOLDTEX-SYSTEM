@@ -153,6 +153,7 @@ export const PERMISSION_GROUPS = [
     subPermissions: [
       { key: 'settings_manage_stores', label: 'Gestionar Tiendas (Crear, Editar y Desactivar Sucursales)' },
       { key: 'settings_printers_manage', label: 'Crear y Editar Impresoras y Ticketeras' },
+      { key: 'settings_printers_set_default', label: 'Asignar Impresora Predeterminada de Tienda (Web / Móvil)' },
       { key: 'settings_printers_delete', label: 'Eliminar Impresoras Registradas' },
       { key: 'settings_finance', label: 'Modificar Tarifas y Comisiones Izipay' }
     ]

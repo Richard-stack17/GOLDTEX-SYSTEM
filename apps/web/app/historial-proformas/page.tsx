@@ -504,9 +504,9 @@ export default function HistorialProformasPage() {
                       <React.Fragment key={sale.id}>
                         <tr className={`hover:bg-gray-50/50 transition-colors ${isExpanded ? 'bg-gray-50' : ''}`}>
                           <td className="px-3 py-2.5 font-mono text-gray-600 whitespace-nowrap text-xs">
-                            {new Date(sale.created_at).toLocaleString('es-PE', {
+                            {sale.created_at ? new Date(sale.created_at).toLocaleString('es-PE', {
                               day: '2-digit', month: '2-digit', year: 'numeric'
-                            })}
+                            }) : '-'}
                           </td>
                           <td className="px-2.5 py-2.5 font-mono font-bold text-gray-700 whitespace-nowrap">
                             {(() => {

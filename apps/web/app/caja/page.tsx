@@ -26,7 +26,7 @@ import { useRole } from "../context/RoleContext";
 import { AccessDeniedView } from "../components/AccessDeniedView";
 import { useTheme } from "../context/ThemeContext";
 import { useStore } from "../context/StoreContext";
-import { requestBluetoothDevice, printSaleReceipt, silentPrintSaleReceipt } from '../configuracion/utils/printerEngine';
+import { requestBluetoothDevice, printSaleReceipt, silentPrintSaleReceipt, resolveActivePrinter } from '../configuracion/utils/printerEngine';
 import { useIsNativeAndroid } from '../lib/platform';
 
 // ─────────────── Types ───────────────
@@ -573,12 +573,9 @@ export default function CajaPage() {
   useEffect(() => {
     async function loadPrinter() {
       try {
-        let query = supabase.from('printers').select('*').order('auto_print', { ascending: false }).limit(1);
-        if (activeStoreId) query = query.eq('store_id', activeStoreId);
-        const { data } = await query.maybeSingle();
+        const data = await resolveActivePrinter(activeStoreId);
         if (data) {
           setActivePrinter(data);
-          try { localStorage.setItem('cached_printer_config', JSON.stringify(data)); } catch (_) { }
           if (data.type === 'bluetooth') {
             const nav = navigator as any;
             if (nav.bluetooth && nav.bluetooth.getDevices) {
@@ -594,11 +591,7 @@ export default function CajaPage() {
           }
         }
       } catch (e) {
-        console.warn('📌 [Modo Avión / Offline] No se pudo cargar impresora de Supabase en Caja, usando caché:', e);
-        try {
-          const cached = localStorage.getItem('cached_printer_config');
-          if (cached) setActivePrinter(JSON.parse(cached));
-        } catch (_) { }
+        console.warn('Error resolviendo impresora en Caja:', e);
       }
     }
     loadPrinter();

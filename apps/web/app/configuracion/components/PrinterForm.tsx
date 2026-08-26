@@ -16,7 +16,8 @@ import {
   generateTicketLines,
   buildEscPosBytes,
   DEFAULT_TEST_SALE_DATA,
-  androidWifiAdapter
+  androidWifiAdapter,
+  setActiveDevicePrinter
 } from '../utils/printerEngine';
 import ReceiptPreview from '../../components/ReceiptPreview';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
@@ -47,6 +48,7 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
   const [name, setName] = useState('Caja');
   const [model, setModel] = useState('Otro modelo');
   const [type, setType] = useState('bluetooth');
+  const [platform, setPlatform] = useState<'WEB' | 'MOBILE' | 'ALL'>('ALL');
   const [paperWidth, setPaperWidth] = useState(80);
   const [macAddress, setMacAddress] = useState('');
   const [ipAddress, setIpAddress] = useState('192.168.1.100');
@@ -91,6 +93,7 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
     if (data) {
       setName(data.name);
       setType(data.type);
+      setPlatform(data.platform || 'ALL');
       setPaperWidth(data.paper_width);
       setMacAddress(data.mac_address || '');
       setIpAddress(data.ip_address || '192.168.1.100');
@@ -102,6 +105,36 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
         setMaxChars(data.max_chars);
         if (![32, 42, 48, 64].includes(data.max_chars)) {
           setIsCustomChars(true);
+        }
+      }
+      if (data.type === 'usb' && typeof window !== 'undefined') {
+        const nav = navigator as any;
+        if (nav?.usb?.getDevices) {
+          nav.usb.getDevices().then((devices: any[]) => {
+            if (devices && devices.length > 0) {
+              const matched = devices.find((d: any) => d.productName === data.mac_address) || devices[0];
+              setUsbDeviceObj({ device: matched, name: matched.productName || data.mac_address || 'USB' });
+              setUsbName(matched.productName || data.mac_address || 'USB');
+            }
+          }).catch(() => {});
+        } else if (nav?.serial?.getPorts) {
+          nav.serial.getPorts().then((ports: any[]) => {
+            if (ports && ports.length > 0) {
+              setUsbDeviceObj({ port: ports[0], name: data.mac_address || 'Puerto Serie USB' });
+              setUsbName(data.mac_address || 'Puerto Serie USB');
+            }
+          }).catch(() => {});
+        }
+      }
+      if (data.type === 'bluetooth' && typeof window !== 'undefined' && !isNativeAndroid) {
+        const nav = navigator as any;
+        if (nav?.bluetooth?.getDevices) {
+          nav.bluetooth.getDevices().then((devices: any[]) => {
+            if (devices && devices.length > 0) {
+              const matched = devices.find((d: any) => d.id === data.mac_address || d.name === data.mac_address) || devices[0];
+              if (matched) setBtDeviceObj(matched);
+            }
+          }).catch(() => {});
         }
       }
     }
@@ -142,6 +175,7 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
     const payload: any = {
       name,
       type,
+      platform,
       paper_width: paperWidth,
       mac_address: (type === 'bluetooth' || type === 'usb') ? (macAddress || usbName) : null,
       ip_address: type === 'wifi' ? ipAddress : null,
@@ -153,20 +187,26 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
 
     let error;
     if (autoPrint && storeId) {
+      // Desmarcar solo las de la misma tienda y la misma plataforma para no pisar otras plataformas
       let query = supabase.from('printers').update({ auto_print: false }).eq('store_id', storeId);
+      if (platform !== 'ALL') {
+        query = query.in('platform', [platform, 'ALL']);
+      }
       if (isEditing && printerId) {
         query = query.neq('id', printerId);
       }
       await query;
     }
 
+    let savedId = printerId;
     if (isEditing) {
       const res = await supabase.from('printers').update(payload).eq('id', printerId);
       error = res.error;
     } else {
       payload.is_active = true;
-      const res = await supabase.from('printers').insert(payload);
+      const res = await supabase.from('printers').insert(payload).select('id').single();
       error = res.error;
+      if (res.data?.id) savedId = res.data.id;
     }
 
     setIsLoading(false);
@@ -176,9 +216,8 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
     } else {
       setHasUnsavedChanges(false);
       try {
-        const savedData = { ...payload, id: printerId || 'local', is_active: true };
-        localStorage.setItem('cached_printer_config', JSON.stringify(savedData));
-        if (storeId) localStorage.setItem(`cached_printer_config_${storeId}`, JSON.stringify(savedData));
+        const savedData = { ...payload, id: savedId || 'local', is_active: true };
+        setActiveDevicePrinter(savedData, storeId);
       } catch (_) { }
       showToast('Impresora guardada correctamente', 'success');
       setTimeout(() => router.push('/configuracion'), 800);
@@ -218,13 +257,14 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
   };
 
   const runBtScan = async () => {
+    setDiscoveredBtDevices([]); // Limpiar memoria previa antes de escanear
     setIsBtScanning(true);
     setBtScanError(null);
     try {
       const devices = await scanBluetoothPrinters();
       setDiscoveredBtDevices(devices);
       if (devices.length === 0) {
-        setBtScanError('No se encontraron dispositivos Bluetooth. Asegúrate de que la impresora esté encendida o vinculada en los ajustes del teléfono.');
+        setBtScanError('No se encontraron dispositivos Bluetooth encendidos cerca.');
       }
     } catch (err: any) {
       setBtScanError(err.message || 'Error al buscar dispositivos Bluetooth');
@@ -235,6 +275,7 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
 
   const handleBuscarBT = async () => {
     if (isNativeAndroid) {
+      setDiscoveredBtDevices([]); // Limpiar caché al abrir modal
       setIsBtModalOpen(true);
       void runBtScan();
     } else {
@@ -275,14 +316,35 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
     const currentCols = Number(maxChars) || (paperWidth <= 58 ? 32 : 48);
 
     if (type === 'bluetooth') {
-      if (!btDeviceObj) {
+      let activeBt = btDeviceObj;
+      if (isNativeAndroid && macAddress) {
+        activeBt = { address: macAddress, name: name || 'Impresora Bluetooth' };
+      }
+
+      if (!activeBt && typeof window !== 'undefined' && !isNativeAndroid) {
+        const nav = navigator as any;
+        if (nav?.bluetooth?.getDevices) {
+          try {
+            const devices = await nav.bluetooth.getDevices();
+            if (devices && devices.length > 0) {
+              const matched = devices.find((d: any) => d.id === macAddress || d.name === macAddress) || devices[0];
+              if (matched) {
+                activeBt = matched;
+                setBtDeviceObj(matched);
+              }
+            }
+          } catch (_) {}
+        }
+      }
+
+      if (!activeBt) {
         showToast('Por favor, busca y empareja la impresora Bluetooth con el botón BUSCAR primero.', 'error');
         return;
       }
 
       try {
         showToast('Conectando con la impresora Bluetooth...', 'success');
-        await printTestReceipt(btDeviceObj, paperWidth, currentCols);
+        await printTestReceipt(activeBt, paperWidth, currentCols);
         showToast('¡Impresión Bluetooth enviada con éxito!', 'success');
       } catch (error: any) {
         showToast(error.message, 'error');
@@ -291,8 +353,34 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
     }
 
     if (type === 'usb') {
-      if (!usbDeviceObj) {
-        showToast('Por favor, selecciona la impresora USB con el botón BUSCAR primero.', 'error');
+      let activeUsb = usbDeviceObj;
+
+      // Auto-recuperar si el navegador ya otorgó permisos previos a este dominio
+      if (!activeUsb && typeof window !== 'undefined') {
+        const nav = navigator as any;
+        if (nav?.usb?.getDevices) {
+          try {
+            const devices = await nav.usb.getDevices();
+            if (devices && devices.length > 0) {
+              const matched = devices.find((d: any) => d.productName === macAddress) || devices[0];
+              activeUsb = { device: matched, name: matched.productName || macAddress || 'USB' };
+              setUsbDeviceObj(activeUsb);
+            }
+          } catch (_) {}
+        }
+        if (!activeUsb && nav?.serial?.getPorts) {
+          try {
+            const ports = await nav.serial.getPorts();
+            if (ports && ports.length > 0) {
+              activeUsb = { port: ports[0], name: macAddress || 'Puerto Serie USB' };
+              setUsbDeviceObj(activeUsb);
+            }
+          } catch (_) {}
+        }
+      }
+
+      if (!activeUsb) {
+        showToast('Para conectar por USB en el navegador, presiona el botón BUSCAR arriba.', 'error');
         return;
       }
 
@@ -300,7 +388,7 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
         showToast('Enviando datos al puerto USB...', 'success');
         const lines = generateTicketLines(DEFAULT_TEST_SALE_DATA, currentCols);
         const uint8 = buildEscPosBytes(lines, currentCols);
-        await usbSerialAdapter.printEscPos(usbDeviceObj, uint8);
+        await usbSerialAdapter.printEscPos(activeUsb, uint8);
         showToast('Datos enviados al puerto USB con éxito.', 'success');
       } catch (error: any) {
         showToast(error.message, 'error');
@@ -455,6 +543,25 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
               </select>
               <ChevronDown className="absolute right-0 w-4 h-4 text-muted-foreground pointer-events-none shrink-0" />
             </div>
+          </div>
+
+          <div className="px-5 py-4">
+            <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Plataforma de Compatibilidad</label>
+            <div className="relative flex items-center">
+              <select
+                value={platform}
+                onChange={e => { setPlatform(e.target.value as any); setHasUnsavedChanges(true); }}
+                className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer pr-7"
+              >
+                <option value="ALL">Universal (PC / Web y Teléfonos Móviles APK)</option>
+                <option value="WEB">Exclusiva para PC / Web</option>
+                <option value="MOBILE">Exclusiva para Teléfonos Móviles (APK Android)</option>
+              </select>
+              <ChevronDown className="absolute right-0 w-4 h-4 text-muted-foreground pointer-events-none shrink-0" />
+            </div>
+            <p className="text-xs text-muted-foreground/70 mt-1.5">
+              Determina si esta impresora servirá de respaldo por defecto para PC, para celulares o para ambos.
+            </p>
           </div>
         </div>
 

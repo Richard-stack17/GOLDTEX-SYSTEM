@@ -6,7 +6,7 @@ import { supabase } from "../../lib/supabase";
 import { computeNextDailyTicketNumber, formatTicketHash, parseInternalTicketNum, starsoftDocNumFromTicket } from "../../lib/ticket-sequence";
 import { useRole } from "../../context/RoleContext";
 import { useStore } from "../../context/StoreContext";
-import { silentPrintSaleReceipt, silentPrintClosureReport } from "../../configuracion/utils/printerEngine";
+import { silentPrintSaleReceipt, silentPrintClosureReport, resolveActivePrinter } from "../../configuracion/utils/printerEngine";
 import { CheckCircle2, AlertTriangle, XCircle, Printer } from "lucide-react";
 
 export type Product = {
@@ -517,25 +517,9 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
   
   useEffect(() => {
     async function loadPrinter() {
-      // 1. Carga inmediata desde memoria local (0 ms)
       try {
-        const key = activeStoreId ? `cached_printer_config_${activeStoreId}` : 'cached_printer_config';
-        const cached = localStorage.getItem(key) || localStorage.getItem('cached_printer_config');
-        if (cached) setActivePrinter(JSON.parse(cached));
-      } catch (_) { }
-
-      // 2. Refresco en segundo plano
-      try {
-        let query = supabase.from('printers').select('*').eq('is_active', true).order('auto_print', { ascending: false }).limit(1);
-        if (activeStoreId) query = query.eq('store_id', activeStoreId);
-        const { data } = await query.maybeSingle();
-        if (data) {
-          setActivePrinter(data);
-          try {
-            if (activeStoreId) localStorage.setItem(`cached_printer_config_${activeStoreId}`, JSON.stringify(data));
-            localStorage.setItem('cached_printer_config', JSON.stringify(data));
-          } catch (_) { }
-        }
+        const printer = await resolveActivePrinter(activeStoreId);
+        if (printer) setActivePrinter(printer);
       } catch (_) { }
     }
     loadPrinter();

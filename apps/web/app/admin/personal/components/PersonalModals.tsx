@@ -1241,7 +1241,7 @@ export function PersonalModals() {
       )}
       {/* ── Manage Permissions Modal ── */}
       {isManagePermsModalOpen && managingPermsRoleId && (() => {
-        const currentRole = roles.find(r => r.id === managingPermsRoleId) || originalRoles.find(r => r.id === managingPermsRoleId);
+        const currentRole = roles.find((r: any) => r.id === managingPermsRoleId) || originalRoles.find((r: any) => r.id === managingPermsRoleId);
         if (!currentRole) return null;
         
         const isGlobalRole = !currentRole.store_id || currentRole.is_system;

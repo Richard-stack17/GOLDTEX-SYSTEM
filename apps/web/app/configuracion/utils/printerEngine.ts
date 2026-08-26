@@ -8,6 +8,106 @@ export interface TicketLine {
   text: string;
 }
 
+// ── Helpers de Almacenamiento Local (Modelo Híbrido: Dispositivo First + Plataforma Fallback) ──
+
+export function getActivePrinterStorageKey(storeId?: string | null): string {
+  return storeId ? `goltex_active_printer_${storeId}` : 'goltex_active_printer';
+}
+
+export function getActiveDevicePrinter(storeId?: string | null): any | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const isMobile = isNativeAndroidApp();
+    const targetPlatform = isMobile ? 'MOBILE' : 'WEB';
+
+    let cachedStr: string | null = null;
+
+    if (storeId) {
+      cachedStr = localStorage.getItem(`goltex_active_printer_${storeId}`)
+        || localStorage.getItem(`cached_printer_config_${storeId}`);
+    }
+
+    if (!cachedStr) {
+      cachedStr = localStorage.getItem('goltex_active_printer')
+        || localStorage.getItem('cached_printer_config');
+    }
+
+    if (cachedStr) {
+      const printer = JSON.parse(cachedStr);
+      // 1. Validar que pertenezca a la tienda solicitada si se especificó una
+      if (storeId && printer.store_id && printer.store_id !== storeId) {
+        return null;
+      }
+      // 2. Validar que la plataforma coincida con el entorno actual (no usar móvil en web ni web en móvil)
+      if (printer.platform && printer.platform !== 'ALL' && printer.platform !== targetPlatform) {
+        return null;
+      }
+      // 3. Validar que no esté desactivada
+      if (printer.is_active === false) {
+        return null;
+      }
+      return printer;
+    }
+  } catch (_) {}
+  return null;
+}
+
+export function setActiveDevicePrinter(printer: any, storeId?: string | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const dataStr = JSON.stringify(printer);
+    const targetStoreId = storeId || printer?.store_id;
+    const key = getActivePrinterStorageKey(targetStoreId);
+    
+    localStorage.setItem(key, dataStr);
+    localStorage.setItem('goltex_active_printer', dataStr);
+    
+    // Legacy compatibility keys
+    localStorage.setItem('cached_printer_config', dataStr);
+    if (targetStoreId) {
+      localStorage.setItem(`cached_printer_config_${targetStoreId}`, dataStr);
+    }
+  } catch (_) {}
+}
+
+export async function resolveActivePrinter(storeId?: string | null): Promise<any | null> {
+  // 1. Local-First: Preferencia guardada en este dispositivo
+  let activePrinter = getActiveDevicePrinter(storeId);
+  if (activePrinter && activePrinter.is_active !== false) {
+    return activePrinter;
+  }
+
+  // 2. Cloud Fallback: Si no hay en localStorage, consultar Supabase por plataforma
+  try {
+    const targetPlatform = isNativeAndroidApp() ? 'MOBILE' : 'WEB';
+    let query = supabase
+      .from('printers')
+      .select('*')
+      .eq('is_active', true);
+    
+    if (storeId) {
+      query = query.eq('store_id', storeId);
+    }
+    
+    // Filtrar por plataforma (MOBILE o ALL si es Android, WEB o ALL si es Web)
+    query = query.in('platform', [targetPlatform, 'ALL']);
+    
+    const { data: printers } = await query.order('auto_print', { ascending: false });
+    
+    if (printers && printers.length > 0) {
+      activePrinter = printers.find((p: any) => p.auto_print) || printers[0];
+      if (activePrinter) {
+        setActiveDevicePrinter(activePrinter, storeId);
+        return activePrinter;
+      }
+    }
+  } catch (err) {
+    console.error('Error resolving fallback printer from Supabase:', err);
+  }
+
+  return activePrinter || null;
+}
+
 export const DEFAULT_TEST_SALE_DATA = {
   proforma_number: 'T001-00001234',
   customer_name: 'Cliente Prueba',
@@ -280,7 +380,7 @@ export class WebBluetoothAdapter implements IPrinterAdapter {
       };
     } catch (err: any) {
       if (err.name === 'NotFoundError') {
-        throw new Error('Emparejamiento cancelado por el usuario.');
+        throw new Error('Selección Bluetooth cancelada.');
       }
       throw err;
     }
@@ -405,25 +505,7 @@ export class WebBluetoothAdapter implements IPrinterAdapter {
   }
 
   async silentPrintSaleReceipt(saleData: any, doubleCopy: boolean = false) {
-    let activePrinter: any = null;
-    try {
-      const { data: printers } = await supabase
-        .from('printers')
-        .select('*')
-        .eq('is_active', true)
-        .order('auto_print', { ascending: false });
-      if (printers && printers.length > 0) {
-        activePrinter = printers.find((p: any) => p.auto_print) || printers[0];
-        try { localStorage.setItem('cached_printer_config', JSON.stringify(activePrinter)); } catch (_) { }
-      }
-    } catch (_) { }
-
-    if (!activePrinter) {
-      try {
-        const cached = localStorage.getItem('cached_printer_config');
-        if (cached) activePrinter = JSON.parse(cached);
-      } catch (_) { }
-    }
+    let activePrinter: any = await resolveActivePrinter();
 
     if (!activePrinter) {
       throw new Error("NO_PRINTER_CONFIGURED");
@@ -548,19 +630,28 @@ export class AndroidBluetoothSerialAdapter implements IPrinterAdapter {
     const { BluetoothSerial } = await import('@e-is/capacitor-bluetooth-serial');
     const address = await this.resolveValidMacAddress(addressOrName);
 
+    // 1. Limpieza de socket previo para evitar bloqueos
+    try { await BluetoothSerial.disconnect({ address }); } catch (_) {}
+
+    // 2. Conectar directamente por RFCOMM Insecure (estándar nativo para impresoras térmicas ESC/POS)
     try {
-      await BluetoothSerial.connect({ address });
-    } catch (err: any) {
-      throw new Error(`Error al conectar con la impresora Bluetooth (${address}). Verifique que esté encendida.`);
+      await BluetoothSerial.connectInsecure({ address });
+    } catch (_) {
+      try {
+        await BluetoothSerial.connect({ address });
+      } catch (err: any) {
+        throw new Error(`Error al conectar con la impresora Bluetooth (${address}). Verifique que esté encendida.`);
+      }
     }
 
     try {
-      // BluetoothWriteOptions: { address: string, value: string }
-      // value debe ser la cadena de bytes codificada en latin1 (ISO-8859-1)
+      // Pequeña pausa para estabilizar el canal de datos
+      await new Promise(r => setTimeout(r, 100));
+
       const value = Array.from(uint8).map(b => String.fromCharCode(b)).join('');
       await BluetoothSerial.write({ address, value });
       // Pausa para que la impresora procese los bytes antes de desconectar
-      await new Promise(r => setTimeout(r, 1200));
+      await new Promise(r => setTimeout(r, 1000));
     } finally {
       try { await BluetoothSerial.disconnect({ address }); } catch (_) { }
     }
@@ -586,25 +677,8 @@ export class AndroidBluetoothSerialAdapter implements IPrinterAdapter {
     const { BluetoothSerial } = await import('@e-is/capacitor-bluetooth-serial');
 
     let activePrinter: any = printerConfig;
-    if (!activePrinter && typeof window !== 'undefined') {
-      try {
-        const cached = localStorage.getItem('cached_printer_config');
-        if (cached) activePrinter = JSON.parse(cached);
-      } catch (_) { }
-    }
-
     if (!activePrinter) {
-      try {
-        const { data: printers } = await supabase
-          .from('printers')
-          .select('*')
-          .eq('is_active', true)
-          .order('auto_print', { ascending: false });
-        if (printers && printers.length > 0) {
-          activePrinter = printers.find((p: any) => p.auto_print) || printers[0];
-          try { localStorage.setItem('cached_printer_config', JSON.stringify(activePrinter)); } catch (_) { }
-        }
-      } catch (_) { }
+      activePrinter = await resolveActivePrinter();
     }
 
     if (!activePrinter) throw new Error('NO_PRINTER_CONFIGURED');
@@ -617,14 +691,22 @@ export class AndroidBluetoothSerialAdapter implements IPrinterAdapter {
     const lines = generateTicketLines(saleData, maxCharsConfig);
     const uint8 = buildEscPosBytes(lines, maxCharsConfig);
 
+    // 1. Limpieza preventiva
+    try { await BluetoothSerial.disconnect({ address }); } catch (_) {}
+
+    // 2. Conexión rápida Insecure / Secure
     try {
-      await BluetoothSerial.connect({ address });
-    } catch (err: any) {
-      throw new Error(`Error al conectar con la impresora Bluetooth (${address}). Verifique que esté encendida.`);
+      await BluetoothSerial.connectInsecure({ address });
+    } catch (_) {
+      try {
+        await BluetoothSerial.connect({ address });
+      } catch (err: any) {
+        throw new Error(`Error al conectar con la impresora Bluetooth (${address}). Verifique que esté encendida.`);
+      }
     }
 
     try {
-      // BluetoothWriteOptions: { address: string, value: string }
+      await new Promise(r => setTimeout(r, 100));
       const value = Array.from(uint8).map(b => String.fromCharCode(b)).join('');
       await BluetoothSerial.write({ address, value });
       await new Promise(r => setTimeout(r, 600));
@@ -906,9 +988,10 @@ export const scanBluetoothPrinters = async (): Promise<Array<{ name: string; add
       }
     } catch (_) { }
 
-    let scanRes: any = null;
+    let scanDevices: any[] = [];
     try {
-      scanRes = await BluetoothSerial.scan();
+      const scanRes = await BluetoothSerial.scan();
+      scanDevices = scanRes?.devices || [];
     } catch (err: any) {
       const errMsg = err?.message || (typeof err === 'string' ? err : JSON.stringify(err)) || '';
       if (errMsg.toLowerCase().includes('disabled')) {
@@ -917,12 +1000,22 @@ export const scanBluetoothPrinters = async (): Promise<Array<{ name: string; add
       if (errMsg.toLowerCase().includes('permission') || errMsg.toLowerCase().includes('denied')) {
         throw new Error('Se requieren permisos de Bluetooth. Concede los permisos solicitados por Android para buscar impresoras.');
       }
-      throw new Error(`Asegúrate de tener el Bluetooth encendido y la impresora vinculada o encendida.`);
+      throw new Error('Asegúrate de tener el Bluetooth encendido y la impresora vinculada o encendida.');
     }
 
-    const devices = scanRes?.devices || [];
-    return devices.map((d: any) => ({
-      name: d.name || d.address || 'Impresora Bluetooth',
+    // Deduplicar por dirección MAC manteniendo todos los dispositivos detectados en vivo
+    const allDevices: any[] = [];
+    const seenAddresses = new Set<string>();
+    for (const d of scanDevices) {
+      const addr = d.address || d.id;
+      if (addr && !seenAddresses.has(addr)) {
+        seenAddresses.add(addr);
+        allDevices.push(d);
+      }
+    }
+
+    return allDevices.map((d: any) => ({
+      name: d.name || d.address || 'Dispositivo Bluetooth',
       address: d.address || d.id || '',
       device: d,
     }));
@@ -939,38 +1032,9 @@ export const printTestReceipt = (device: any, paperWidth: number, maxChars: numb
 export const printSaleReceipt = (device: any, saleData: any, paperWidth: number, maxChars: number = 48) => getBluetoothAdapter().printSaleReceipt(device, saleData, paperWidth, maxChars);
 
 export const silentPrintSaleReceipt = async (saleData: any, doubleCopy: boolean = false, storeId?: string): Promise<void> => {
-  let activePrinter: any = null;
-
-  // 1. Lectura instantánea desde memoria local (0 ms)
-  if (typeof window !== 'undefined') {
-    try {
-      const key = storeId ? `cached_printer_config_${storeId}` : 'cached_printer_config';
-      const cached = localStorage.getItem(key) || localStorage.getItem('cached_printer_config');
-      if (cached) activePrinter = JSON.parse(cached);
-    } catch (_) { }
-  }
-
-  // 2. Si no hay en memoria local, consultar Supabase como respaldo
-  if (!activePrinter) {
-    try {
-      let query = supabase.from('printers').select('*').eq('is_active', true);
-      if (storeId) {
-        query = query.eq('store_id', storeId);
-      }
-      const { data: printers } = await query.order('auto_print', { ascending: false });
-      if (printers && printers.length > 0) {
-        activePrinter = printers.find((p: any) => p.auto_print) || printers[0];
-        if (typeof window !== 'undefined' && activePrinter) {
-          try {
-            if (storeId) localStorage.setItem(`cached_printer_config_${storeId}`, JSON.stringify(activePrinter));
-            localStorage.setItem('cached_printer_config', JSON.stringify(activePrinter));
-          } catch (_) { }
-        }
-      }
-    } catch (_) { }
-  }
-
+  const activePrinter = await resolveActivePrinter(storeId);
   if (!activePrinter) throw new Error('NO_PRINTER_CONFIGURED');
+
   const type = activePrinter.type || activePrinter.connection_type || 'bluetooth';
 
   if (type === 'wifi') {
@@ -986,7 +1050,7 @@ export const silentPrintSaleReceipt = async (saleData: any, doubleCopy: boolean 
 
   if (type === 'usb') {
     if (isNativeAndroidApp()) {
-      throw new Error('La impresora por defecto de esta tienda está conectada por cable USB a la PC. Para imprimir desde este teléfono, utiliza una impresora Bluetooth o WiFi.');
+      throw new Error('La impresora seleccionada está conectada por cable USB a la PC. Para imprimir desde este teléfono, utiliza una impresora Bluetooth o WiFi.');
     }
 
     const nav = typeof window !== 'undefined' ? (navigator as any) : null;
@@ -1035,24 +1099,9 @@ export const silentPrintSaleReceipt = async (saleData: any, doubleCopy: boolean 
 };
 
 export const silentPrintClosureReport = async (cajaSummary: any, storeId?: string): Promise<void> => {
-  let activePrinter: any = null;
-  try {
-    let query = supabase.from('printers').select('*').eq('is_active', true);
-    if (storeId) query = query.eq('store_id', storeId);
-    const { data: printers } = await query.order('auto_print', { ascending: false });
-    if (printers && printers.length > 0) {
-      activePrinter = printers.find((p: any) => p.auto_print) || printers[0];
-    }
-  } catch (_) { }
-
-  if (!activePrinter) {
-    try {
-      const cached = localStorage.getItem('cached_printer_config');
-      if (cached) activePrinter = JSON.parse(cached);
-    } catch (_) { }
-  }
-
+  const activePrinter = await resolveActivePrinter(storeId);
   if (!activePrinter) throw new Error('NO_PRINTER_CONFIGURED');
+
   const type = activePrinter.type || activePrinter.connection_type || 'bluetooth';
 
   if (type === 'wifi') {
@@ -1073,7 +1122,7 @@ export const silentPrintClosureReport = async (cajaSummary: any, storeId?: strin
 
   if (type === 'usb') {
     if (isNativeAndroidApp()) {
-      throw new Error('La impresora por defecto de esta tienda está conectada por cable USB a la PC. Para imprimir desde este teléfono, utiliza una impresora Bluetooth o WiFi.');
+      throw new Error('La impresora seleccionada está conectada por cable USB a la PC. Para imprimir desde este teléfono, utiliza una impresora Bluetooth o WiFi.');
     }
 
     const nav = typeof window !== 'undefined' ? (navigator as any) : null;
@@ -1145,14 +1194,14 @@ export const silentPrintClosureReport = async (cajaSummary: any, storeId?: strin
 // Alias de compatibilidad — mantiene la referencia legacy para imports existentes
 export const printerEngine: IPrinterAdapter = webBluetoothAdapter;
 
-export async function safePrint(saleData: any, doubleCopy = false): Promise<{ success: boolean; error?: string }> {
+export async function safePrint(saleData: any, doubleCopy = false, storeId?: string): Promise<{ success: boolean; error?: string }> {
   try {
-    await silentPrintSaleReceipt(saleData, doubleCopy);
+    await silentPrintSaleReceipt(saleData, doubleCopy, storeId);
     return { success: true };
   } catch (err: any) {
     const msg = err?.message?.includes('NO_PRINTER_CONFIGURED')
       ? 'No hay impresora configurada por defecto.'
-      : 'Error de conexión con la impresora. Verifique que esté encendida.';
+      : (err?.message || 'Error de conexión con la impresora. Verifique que esté encendida.');
     return { success: false, error: msg };
   }
 }

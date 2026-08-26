@@ -342,11 +342,15 @@ export default function ContabilidadPage() {
     const wb = XLSX.utils.book_new();
 
     for (const [monthKey, monthRows] of Object.entries(rowsByMonth)) {
-      const { month, year } = getMonthName(monthRows[0].FECHA);
+      const firstRow = monthRows[0];
+      if (!firstRow) continue;
+      const { month, year } = getMonthName(firstRow.FECHA);
       const sheetName = `${month} ${year}`.substring(0, 31);
 
       const parts = monthKey.split('-');
-      const lastDayOfMonth = new Date(parseInt(parts[0]), parseInt(parts[1]), 0).getDate().toString().padStart(2, '0');
+      const yearNum = parseInt(parts[0] || '2026', 10);
+      const monthNum = parseInt(parts[1] || '1', 10);
+      const lastDayOfMonth = new Date(yearNum, monthNum, 0).getDate().toString().padStart(2, '0');
       
       const tabMonthStart = `${monthKey}-01`;
       const tabMonthEnd = `${monthKey}-${lastDayOfMonth}`;
@@ -379,7 +383,7 @@ export default function ContabilidadPage() {
       const rowsByDate: Record<string, typeof monthRows> = {};
       for (const r of monthRows) {
         if (!rowsByDate[r.FECHA]) rowsByDate[r.FECHA] = [];
-        rowsByDate[r.FECHA].push(r);
+        rowsByDate[r.FECHA]!.push(r);
       }
 
       let generalTotalBBVA = 0;
