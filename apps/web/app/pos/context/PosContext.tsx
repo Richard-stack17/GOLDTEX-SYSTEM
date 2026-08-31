@@ -515,16 +515,30 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
     const pollInterval = setInterval(() => {
       syncCajaStateFromCloud();
       fetchTodayTicketNumber();
-    }, 10000);
+      fetchHistory();
+    }, 3000);
 
-    return () => clearInterval(pollInterval);
+    const handleWindowFocus = () => {
+      syncCajaStateFromCloud();
+      fetchTodayTicketNumber();
+      fetchHistory();
+    };
+
+    window.addEventListener('focus', handleWindowFocus);
+    document.addEventListener('visibilitychange', handleWindowFocus);
+
+    return () => {
+      clearInterval(pollInterval);
+      window.removeEventListener('focus', handleWindowFocus);
+      document.removeEventListener('visibilitychange', handleWindowFocus);
+    };
   }, [activeStoreId, fetchHistory, fetchTodayTicketNumber]);
 
   // Suscripción WebSocket en Tiempo Real (< 200ms) para Proformas, Cobros y Caja
   useEffect(() => {
     if (!activeStoreId) return;
 
-    const channelName = `pos_realtime_${activeStoreId}`;
+    const channelName = `pos_realtime_${activeStoreId}_${Date.now()}`;
     const posChannel = supabase
       .channel(channelName)
       .on(
@@ -566,7 +580,12 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
           syncCaja();
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          fetchHistory();
+          fetchTodayTicketNumber();
+        }
+      });
 
     return () => {
       supabase.removeChannel(posChannel);
