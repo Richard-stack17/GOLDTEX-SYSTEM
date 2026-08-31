@@ -5,6 +5,9 @@ project(':capacitor-android').projectDir = new File('../../../node_modules/.pnpm
 include ':capacitor-app'
 project(':capacitor-app').projectDir = new File('../../../node_modules/.pnpm/@capacitor+app@6.0.3_@capacitor+core@6.2.1/node_modules/@capacitor/app/android')
 
+include ':capacitor-network'
+project(':capacitor-network').projectDir = new File('../../../node_modules/.pnpm/@capacitor+network@6.0.4_@capacitor+core@6.2.1/node_modules/@capacitor/network/android')
+
 include ':e-is-capacitor-bluetooth-serial'
 project(':e-is-capacitor-bluetooth-serial').projectDir = new File('../../../node_modules/.pnpm/@e-is+capacitor-bluetooth-serial@6.0.3/node_modules/@e-is/capacitor-bluetooth-serial/android')
 

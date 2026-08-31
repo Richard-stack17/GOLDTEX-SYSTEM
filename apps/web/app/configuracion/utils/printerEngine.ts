@@ -808,9 +808,13 @@ export class AndroidBluetoothSerialAdapter implements IPrinterAdapter {
   async printSaleReceipt(device: any, saleData: any, paperWidth: number, maxChars: number = 48): Promise<void> {
     const lines = generateTicketLines(saleData, maxChars);
     const uint8 = buildEscPosBytes(lines, maxChars);
-    const address = device?.address || device?.name;
+    const address = device?.address || device?.mac_address || device?.macAddress || device?.name;
     if (!address) throw new Error('Dispositivo Bluetooth sin dirección MAC.');
     await this.writeBytes(address, uint8);
+  }
+
+  async writeRawBytes(addressOrName: string, uint8: Uint8Array): Promise<void> {
+    await this.writeBytes(addressOrName, uint8);
   }
 
   async silentPrintSaleReceipt(saleData: any, doubleCopy: boolean = false, printerConfig?: any): Promise<void> {
@@ -1401,7 +1405,9 @@ export const silentPrintClosureReport = async (cajaSummary: any, storeId?: strin
   const uint8 = buildEscPosBytes(lines, maxCharsConfig);
 
   if (isNativeAndroidApp()) {
-    return androidBluetoothAdapter.printSaleReceipt(activePrinter, { items: [], total: cajaSummary?.totalSales || 0 }, activePrinter.paper_width || 80, maxCharsConfig);
+    const address = activePrinter.mac_address || activePrinter.address || activePrinter.name;
+    if (!address) throw new Error('Dispositivo Bluetooth sin dirección MAC.');
+    return androidBluetoothAdapter.writeRawBytes(address, uint8);
   } else {
     // Web Bluetooth API
     const nav = typeof window !== 'undefined' ? (navigator as any) : null;

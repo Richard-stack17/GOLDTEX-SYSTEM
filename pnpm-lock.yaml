@@ -169,6 +169,9 @@ importers:
       '@capacitor/core':
         specifier: ^6.2.1
         version: 6.2.1
+      '@capacitor/network':
+        specifier: ^6.0.4
+        version: 6.0.4(@capacitor/core@6.2.1)
       '@e-is/capacitor-bluetooth-serial':
         specifier: ^6.0.3
         version: 6.0.3
@@ -395,6 +398,11 @@ packages:
 
   '@capacitor/core@6.2.1':
     resolution: {integrity: sha512-urZwxa7hVE/BnA18oCFAdizXPse6fCKanQyEqpmz6cBJ2vObwMpyJDG5jBeoSsgocS9+Ax+9vb4ducWJn0y2qQ==}
+
+  '@capacitor/network@6.0.4':
+    resolution: {integrity: sha512-ywtlM3wJ3evci0T9zl3aGXGvd96pkiQDeoxrGR3rAqcBpf9DQubMGdFRmHma3frn2Fd/MBDYlgleu+nWDXunAg==}
+    peerDependencies:
+      '@capacitor/core': ^6.0.0
 
   '@e-is/capacitor-bluetooth-serial@6.0.3':
     resolution: {integrity: sha512-YmoM9M2wkl5kvxFUlF39+bErSWCOkIyI7mVJfOxA2trC8acxKJKKMMulGc978R2QoiccQRhqVqpPPfVF30ZPBw==}
@@ -2700,6 +2708,10 @@ snapshots:
   '@capacitor/core@6.2.1':
     dependencies:
       tslib: 2.8.1
+
+  '@capacitor/network@6.0.4(@capacitor/core@6.2.1)':
+    dependencies:
+      '@capacitor/core': 6.2.1
 
   '@e-is/capacitor-bluetooth-serial@6.0.3': {}
 

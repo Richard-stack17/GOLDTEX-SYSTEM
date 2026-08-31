@@ -665,7 +665,10 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
 
       if (saleError || !rpcResult?.success) {
         console.error("Error al emitir proforma en Supabase:", saleError);
-        const errMsg = saleError?.message || "Error de red: No se pudo registrar la proforma en la nube. Verifica tu conexión.";
+        let errMsg = saleError?.message || "No se pudo registrar la proforma en la nube.";
+        if (errMsg.toLowerCase().includes('failed to fetch') || errMsg.toLowerCase().includes('network') || errMsg.toLowerCase().includes('fetch') || errMsg.toLowerCase().includes('timeout') || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+          errMsg = "Sin conexión a internet: No se pudo registrar la proforma en la nube. Verifica tu red WiFi o datos móviles.";
+        }
         showToast(errMsg, "error");
         setIsEmitting(false);
         return; // ABORTAR: El carrito queda intacto, no se imprime y no avanza el número
@@ -708,7 +711,11 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
 
     } catch (err: any) {
       console.error("Error de conexión emitiendo ticket:", err);
-      showToast("Error de conexión: No se pudo comunicar con el servidor. La proforma no fue emitida.", "error");
+      let errMsg = err?.message || "Error al emitir la proforma.";
+      if (errMsg.toLowerCase().includes('failed to fetch') || errMsg.toLowerCase().includes('network') || errMsg.toLowerCase().includes('fetch') || errMsg.toLowerCase().includes('timeout') || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+        errMsg = "Sin conexión a internet: No se pudo registrar la proforma en la nube. Verifica tu red WiFi o datos móviles.";
+      }
+      showToast(errMsg, "error");
     } finally {
       setIsEmitting(false);
     }
