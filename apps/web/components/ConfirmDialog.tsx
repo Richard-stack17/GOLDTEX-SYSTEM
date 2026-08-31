@@ -48,7 +48,7 @@ export function ConfirmDialog({
           </Button>
           <Button
             variant={isDestructive ? "destructive" : "default"}
-            className="flex-1 h-11 font-bold"
+            className={`flex-1 h-11 font-bold ${isDestructive ? 'bg-red-600 hover:bg-red-700 text-white shadow-sm' : ''}`}
             onClick={onConfirm}
             disabled={isLoading}
           >

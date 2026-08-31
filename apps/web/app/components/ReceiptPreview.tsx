@@ -7,10 +7,10 @@ interface ReceiptPreviewProps {
   saleData?: any;
 }
 
-export default function ReceiptPreview({ 
-  maxChars, 
-  paperWidth = 80, 
-  saleData = DEFAULT_TEST_SALE_DATA 
+export default function ReceiptPreview({
+  maxChars,
+  paperWidth = 80,
+  saleData = DEFAULT_TEST_SALE_DATA
 }: ReceiptPreviewProps) {
   const safeCols = Math.min(90, Math.max(20, Number(maxChars) || (paperWidth <= 58 ? 32 : 48)));
   const is58mm = paperWidth <= 58;
@@ -36,10 +36,9 @@ export default function ReceiptPreview({
       {/* Contenedor del área de papel térmico (overflow-x-auto sin data-loss en la izquierda) */}
       <div className="bg-secondary/30 p-2 sm:p-4 rounded-2xl w-full border border-border overflow-x-auto">
         {/* Bobina de papel físico con ancho fijo y centrado seguro mx-auto */}
-        <div 
-          className={`bg-white text-black font-mono text-[11px] leading-[1.3] py-5 px-3.5 rounded-xl shadow-md border border-gray-300 relative transition-all select-none mx-auto ${
-            is58mm ? 'w-[260px] min-w-[260px]' : 'w-[350px] min-w-[350px]'
-          }`}
+        <div
+          className={`bg-white text-black font-mono text-[11px] leading-[1.3] py-5 px-3.5 rounded-xl shadow-md border border-gray-300 relative transition-all select-none mx-auto ${is58mm ? 'w-[260px] min-w-[260px]' : 'w-[350px] min-w-[350px]'
+            }`}
         >
           {/* Simulación del corte superior del papel */}
           <div className="border-b-2 border-dashed border-gray-300 mb-3 pb-1 text-center text-[9px] font-sans font-semibold text-gray-400 uppercase tracking-widest">
@@ -47,7 +46,7 @@ export default function ReceiptPreview({
           </div>
 
           {/* Bloque de impresión exacto acotado por los caracteres configurados */}
-          <div 
+          <div
             style={{ width: `${safeCols}ch`, maxWidth: '100%' }}
             className="flex flex-col font-mono text-[11px] leading-[1.3] text-black"
           >
@@ -69,8 +68,8 @@ export default function ReceiptPreview({
                 const amount = parts[1] ? `S/ ${parts[1].trim()}` : '';
 
                 return (
-                  <div 
-                    key={index} 
+                  <div
+                    key={index}
                     className="w-full my-2 py-1.5 border-y border-dashed border-gray-400 font-black text-xs sm:text-sm tracking-tight text-black flex justify-between items-center whitespace-nowrap select-none"
                   >
                     <span>{label}</span>
@@ -80,15 +79,14 @@ export default function ReceiptPreview({
               }
 
               return (
-                <div 
-                  key={index} 
-                  className={`whitespace-pre ${
-                    line.align === 'center' 
-                      ? 'text-center' 
-                      : line.align === 'right' 
-                        ? 'text-right' 
+                <div
+                  key={index}
+                  className={`whitespace-pre ${line.align === 'center'
+                      ? 'text-center'
+                      : line.align === 'right'
+                        ? 'text-right'
                         : 'text-left'
-                  } ${line.text.startsWith('TKT-') ? 'font-bold mt-1 text-center' : ''}`}
+                    } ${line.text.startsWith('TKT-') ? 'font-bold mt-1 text-center' : ''}`}
                 >
                   {line.text}
                 </div>

@@ -2,13 +2,23 @@
 
 import React, { useState } from 'react';
 import { createPortal } from "react-dom";
+import { usePathname } from 'next/navigation';
 import { Store as StoreIcon, ChevronDown, Check, Building2, LayoutGrid, Loader2 } from 'lucide-react';
 import { useStore, Store as StoreType } from '../context/StoreContext';
 
 export default function StoreSwitcher() {
+  const pathname = usePathname();
   const { activeStore, availableStores, setActiveStore, setAllStoresMode, isLoadingStores, isAllStoresMode, isGlobalUser, availableStoreIds } = useStore();
   const [isOpen, setIsOpen] = useState(false);
   const [isSwitching, setIsSwitching] = useState(false);
+
+  const cleanPath = (pathname || '').replace(/\/$/, '') || '/';
+  const isSingleStoreRoute =
+    cleanPath === '/hub' ||
+    cleanPath.startsWith('/pos') ||
+    cleanPath.startsWith('/caja');
+
+  const showAllStoresOption = !isSingleStoreRoute && availableStores.length >= 2;
 
   if (isLoadingStores) {
     return (
@@ -31,10 +41,11 @@ export default function StoreSwitcher() {
   }
 
   // Texto del botón según el modo
-  const buttonLabel = isAllStoresMode
+  const isDisplayingAllMode = isAllStoresMode && !isSingleStoreRoute;
+  const buttonLabel = isDisplayingAllMode
     ? (isGlobalUser ? "Todas las Tiendas" : "Mis Tiendas (Todas)")
-    : activeStore?.name || "Seleccionar tienda";
-  const ButtonIcon = isAllStoresMode ? LayoutGrid : Building2;
+    : activeStore?.name || availableStores[0]?.name || "Seleccionar tienda";
+  const ButtonIcon = isDisplayingAllMode ? LayoutGrid : Building2;
 
   const handleSelectStore = async (store: StoreType) => {
     setIsOpen(false);
@@ -81,7 +92,7 @@ export default function StoreSwitcher() {
             </div>
             <div className="space-y-0.5 max-h-60 overflow-y-auto">
               {/* Opción "Todas las Tiendas" o "Mis Tiendas" según acceso */}
-              {(isGlobalUser || availableStores.length >= 2) && (
+              {showAllStoresOption && (
                 <>
                   <button
                     onClick={handleSelectAll}
@@ -118,7 +129,7 @@ export default function StoreSwitcher() {
 
               {/* Tiendas individuales */}
               {availableStores.map(store => {
-                const isSelected = !isAllStoresMode && store.id === activeStore?.id;
+                const isSelected = !isDisplayingAllMode && (store.id === activeStore?.id || (!activeStore && store.id === availableStores[0]?.id));
                 return (
                   <button
                     key={store.id}

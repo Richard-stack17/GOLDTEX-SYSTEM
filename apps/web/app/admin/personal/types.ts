@@ -16,6 +16,7 @@ export type Profile = {
   role_id?: string | null;
   employee_id: string | null;
   email: string | null;
+  is_owner?: boolean;
   default_store_id?: string | null;
   stores?: { name: string }[] | null;
   employee_stores?: any[];
@@ -76,7 +77,6 @@ export const PERMISSION_GROUPS = [
     subPermissions: [
       { key: 'delete_sales', label: 'Anular/Eliminar Ventas reales' },
       { key: 'caja_cobro_consolidado', label: 'Cobrar múltiples proformas (Consolidado)' },
-      { key: 'view_cashier_name', label: 'Ver nombre del cajero que cobró' },
     ]
   },
   {
@@ -151,7 +151,6 @@ export const PERMISSION_GROUPS = [
     borderColor: 'border-slate-500/20',
     description: 'Acceso base al módulo e impresoras registradas.',
     subPermissions: [
-      { key: 'settings_manage_stores', label: 'Gestionar Tiendas (Crear, Editar y Desactivar Sucursales)' },
       { key: 'settings_printers_manage', label: 'Crear y Editar Impresoras y Ticketeras' },
       { key: 'settings_printers_set_default', label: 'Asignar Impresora Predeterminada de Tienda (Web / Móvil)' },
       { key: 'settings_printers_delete', label: 'Eliminar Impresoras Registradas' },

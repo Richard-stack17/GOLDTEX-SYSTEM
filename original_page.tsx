@@ -223,14 +223,14 @@ export default function PersonalPage() {
     if (isTargetProtected) return false;
 
     const isSameStoreTarget = activeStoreId
-      ? (targetProfile?.default_store_id === activeStoreId || 
-         targetProfile?.employee_stores?.some((es: any) => es.store_id === activeStoreId) ||
-         targetEmp?.employee_stores?.some(es => es.store_id === activeStoreId))
+      ? (targetProfile?.default_store_id === activeStoreId ||
+        targetProfile?.employee_stores?.some((es: any) => es.store_id === activeStoreId) ||
+        targetEmp?.employee_stores?.some(es => es.store_id === activeStoreId))
       : Boolean(
-          (targetProfile?.default_store_id && availableStoreIds.includes(targetProfile.default_store_id)) ||
-          targetProfile?.employee_stores?.some((es: any) => availableStoreIds.includes(es.store_id)) ||
-          targetEmp?.employee_stores?.some(es => availableStoreIds.includes(es.store_id))
-        );
+        (targetProfile?.default_store_id && availableStoreIds.includes(targetProfile.default_store_id)) ||
+        targetProfile?.employee_stores?.some((es: any) => availableStoreIds.includes(es.store_id)) ||
+        targetEmp?.employee_stores?.some(es => availableStoreIds.includes(es.store_id))
+      );
 
     return Boolean(isSameStoreTarget);
   }, [isAdmin, activeStoreId, availableStoreIds]);
@@ -1642,7 +1642,7 @@ export default function PersonalPage() {
       if (!activeStoreId) return baseEmployees;
       return baseEmployees.filter(emp => {
         const profile = profileByEmployeeId[emp.id];
-        const isGlobalAccount = profile?.role === 'ADMIN' || 
+        const isGlobalAccount = profile?.role === 'ADMIN' ||
           (!profile?.default_store_id && (!profile?.employee_stores || profile.employee_stores.length === 0) && (!emp.employee_stores || emp.employee_stores.length === 0));
         if (isGlobalAccount) return true;
         return emp.employee_stores?.some(es => es.store_id === activeStoreId);
@@ -1651,7 +1651,7 @@ export default function PersonalPage() {
       const targetStoreIds = activeStoreId ? [activeStoreId] : availableStoreIds;
       return baseEmployees.filter(emp => {
         const profile = profileByEmployeeId[emp.id];
-        const isGlobalAccount = profile?.role === 'ADMIN' || 
+        const isGlobalAccount = profile?.role === 'ADMIN' ||
           (!profile?.default_store_id && (!profile?.employee_stores || profile.employee_stores.length === 0) && (!emp.employee_stores || emp.employee_stores.length === 0));
         if (isGlobalAccount) return false;
 
@@ -1667,7 +1667,7 @@ export default function PersonalPage() {
       if (!activeStoreId) return baseProfiles;
       return baseProfiles.filter(p => {
         const linkedEmp = p.employee_id ? employeeById[p.employee_id] : null;
-        const isGlobalAccount = p.role === 'ADMIN' || 
+        const isGlobalAccount = p.role === 'ADMIN' ||
           (!p.default_store_id && (!p.employee_stores || p.employee_stores.length === 0) && (!linkedEmp?.employee_stores || linkedEmp.employee_stores.length === 0));
         if (isGlobalAccount) return true;
         if (p.default_store_id === activeStoreId) return true;
@@ -1679,7 +1679,7 @@ export default function PersonalPage() {
       const targetStoreIds = activeStoreId ? [activeStoreId] : availableStoreIds;
       return baseProfiles.filter(p => {
         const linkedEmp = p.employee_id ? employeeById[p.employee_id] : null;
-        const isGlobalAccount = p.role === 'ADMIN' || 
+        const isGlobalAccount = p.role === 'ADMIN' ||
           (!p.default_store_id && (!p.employee_stores || p.employee_stores.length === 0) && (!linkedEmp?.employee_stores || linkedEmp.employee_stores.length === 0));
         if (isGlobalAccount) return false;
 
@@ -1691,8 +1691,8 @@ export default function PersonalPage() {
     }
   }, [allProfiles, showInactiveUsers, activeStoreId, employeeById, isGlobalUser, availableStoreIds]);
 
-  const unlinkedEmployees = (isGlobalUser ? employees : visibleEmployees).filter((emp: Employee) => 
-    emp.is_active !== false && 
+  const unlinkedEmployees = (isGlobalUser ? employees : visibleEmployees).filter((emp: Employee) =>
+    emp.is_active !== false &&
     (!profileByEmployeeId[emp.id] || profileByEmployeeId[emp.id]?.id === editingUserId)
   );
 
@@ -2690,7 +2690,7 @@ export default function PersonalPage() {
                         : 'text-muted-foreground hover:text-foreground'
                         }`}
                     >
-                      Acceso Global (Admin)
+                      Acceso Global
                     </button>
                   </div>
                 </div>
@@ -3198,7 +3198,7 @@ export default function PersonalPage() {
                         : 'text-muted-foreground hover:text-foreground'
                         }`}
                     >
-                      Acceso Global (Admin)
+                      Acceso Global
                     </button>
                   </div>
                 </div>

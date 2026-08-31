@@ -8,50 +8,15 @@ import {
   CheckCircle2, RefreshCw, KeyRound, Plus,
   ShieldCheck, UserCog, Edit2, X, Trash2, Check, XCircle,
   ShoppingCart, PackageSearch, BarChart3, Banknote, FileSpreadsheet, Contact, ScrollText, Settings, Shield, Save, Loader2, Lock, Info, RotateCcw,
-  Eye, EyeOff, ArrowUpDown
+  Eye, EyeOff, ArrowUpDown, ChevronDown
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useRole } from '../../context/RoleContext';
 import { useStore } from '../../context/StoreContext';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
 import bcrypt from 'bcryptjs';
-import { PERMISSION_GROUPS } from './types';
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-type Employee = {
-  id: string;
-  full_name: string;
-  dni: string;
-  phone?: string;
-  is_active?: boolean;
-  created_at: string;
-  employee_stores?: { store_id: string; role?: string; role_id?: string | null; stores: { name: string } }[];
-};
-
-type Profile = {
-  id: string;
-  username: string;
-  role: string;
-  role_id?: string | null;
-  employee_id: string | null;
-  email: string | null;
-  default_store_id?: string | null;
-  stores?: { name: string }[] | null;
-  employee_stores?: any[];
-};
-
-type Tab = 'empleados' | 'usuarios' | 'roles';
-
-type Role = {
-  id: string;
-  name: string;
-  description: string | null;
-  permissions: any;
-  is_system: boolean;
-  store_id?: string | null;
-  is_active?: boolean;
-  stores?: { name: string; is_active: boolean };
-};
+import { PERMISSION_GROUPS, Employee, Profile, Tab, Role } from './types';
+import { StoreRoleDropdown } from './components/StoreRoleDropdown';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -77,7 +42,7 @@ function Toast({ message, type }: { message: string; type: 'success' | 'error' }
 const PersonalContext = createContext<any>(null);
 
 export function PersonalProvider({ children }: { children: ReactNode }) {
-  const { role, isHydrated, permissions } = useRole();
+  const { role, isHydrated, permissions, profileId: currentProfileId, employeeId: currentEmployeeId, username: currentUsername, isOwner } = useRole();
   const { availableStores, activeStoreId, isGlobalUser, availableStoreIds } = useStore();
   const router = useRouter();
 
@@ -93,29 +58,44 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
     return new Map(availableStores.map(s => [s.id, s.name]));
   }, [availableStores]);
 
-  const checkCanManageTarget = useCallback((targetProfile?: Profile | null, targetEmp?: Employee | null): boolean => {
-    if (isAdmin) return true;
+  const checkCanManageTarget = useCallback((
+    targetProfile?: Profile | null,
+    targetEmp?: Employee | null,
+    options?: { requireFullCoverage?: boolean }
+  ): boolean => {
+    // 👑 La Cuenta Propietario (is_owner) es 100% inmune; solo el dueño mismo puede gestionarse
+    if (targetProfile?.is_owner) {
+      return Boolean(isOwner);
+    }
 
-    const isTargetAdmin = targetProfile?.role === 'ADMIN';
-    const targetStoreCount = (targetProfile?.employee_stores?.length || 0) + (targetEmp?.employee_stores?.length || 0);
-    const hasSpecificStore = Boolean(targetProfile?.default_store_id || targetStoreCount > 0);
-    const isTargetGlobalScope = !hasSpecificStore;
-    const isTargetProtected = isTargetAdmin || isTargetGlobalScope;
+    // 🛡️ Si el objetivo es un ADMIN (y no es el dueño):
+    if (targetProfile?.role === 'ADMIN') {
+      if (isOwner) return true; // Solo el dueño puede eliminar o dar de baja a otros administradores
+      if (options?.requireFullCoverage) return false; // Los administradores secundarios no pueden eliminar a otros administradores
+      return Boolean(isAdmin);
+    }
+
+    if (isAdmin || isGlobalUser) return true;
+
+    const profileStores = (targetProfile?.employee_stores || []).map((es: any) => es.store_id).filter(Boolean);
+    const empStores = (targetEmp?.employee_stores || []).map((es: any) => es.store_id).filter(Boolean);
+    const defaultStore = targetProfile?.default_store_id ? [targetProfile.default_store_id] : [];
+
+    const allTargetStores = [...new Set([...profileStores, ...empStores, ...defaultStore])];
+
+    const isTargetGlobalScope = allTargetStores.length === 0;
+    const isTargetProtected = isTargetGlobalScope;
 
     if (isTargetProtected) return false;
 
-    const isSameStoreTarget = activeStoreId
-      ? (targetProfile?.default_store_id === activeStoreId || 
-         targetProfile?.employee_stores?.some((es: any) => es.store_id === activeStoreId) ||
-         targetEmp?.employee_stores?.some(es => es.store_id === activeStoreId))
-      : Boolean(
-          (targetProfile?.default_store_id && availableStoreIds.includes(targetProfile.default_store_id)) ||
-          targetProfile?.employee_stores?.some((es: any) => availableStoreIds.includes(es.store_id)) ||
-          targetEmp?.employee_stores?.some(es => availableStoreIds.includes(es.store_id))
-        );
+    const userStores = activeStoreId ? [activeStoreId] : availableStoreIds;
 
-    return Boolean(isSameStoreTarget);
-  }, [isAdmin, activeStoreId, availableStoreIds]);
+    if (options?.requireFullCoverage) {
+      return allTargetStores.length > 0 && allTargetStores.every(storeId => userStores.includes(storeId));
+    }
+
+    return allTargetStores.some(storeId => userStores.includes(storeId));
+  }, [isAdmin, isGlobalUser, isOwner, activeStoreId, availableStoreIds]);
   const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [allRoles, setAllRoles] = useState<Role[]>([]);  // includes inactive
@@ -166,6 +146,7 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
   const [userAccessScope, setUserAccessScope] = useState<'stores' | 'global'>('stores');
   const [userGlobalRole, setUserGlobalRole] = useState('ADMIN');
   const [confirmGlobalAccess, setConfirmGlobalAccess] = useState(false);
+  const [empConfirmGlobalAdmin, setEmpConfirmGlobalAdmin] = useState(false);
 
   const globalRoles = useMemo(() => {
     const list = roles.filter(r => r.store_id === null || r.is_system || r.name === 'ADMIN');
@@ -268,8 +249,34 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
     if (!deletingUserId) return;
     const targetProfile = allProfiles.find(p => p.id === deletingUserId);
     const targetEmp = targetProfile?.employee_id ? employeeById[targetProfile.employee_id] : null;
-    if (!checkCanManageTarget(targetProfile, targetEmp)) {
-      showToast('Solo puedes modificar personal asignado a tu misma sucursal local', 'error');
+
+    if (targetProfile?.is_owner) {
+      showToast('La Cuenta Principal / Propietaria del sistema es intocable y no puede ser desactivada', 'error');
+      setDeletingUserId(null);
+      return;
+    }
+
+    if (deletingUserId === currentProfileId || (targetProfile?.username && targetProfile.username === currentUsername)) {
+      showToast('No puedes desactivar tu propia cuenta de usuario en sesión activa', 'error');
+      setDeletingUserId(null);
+      return;
+    }
+
+    if (targetProfile?.role === 'ADMIN' && !isOwner) {
+      showToast('Solo la Cuenta Propietaria tiene autorización para dar de baja a usuarios con rol Administrador', 'error');
+      setDeletingUserId(null);
+      return;
+    }
+
+    const activeAdmins = allProfiles.filter(p => p.role === 'ADMIN');
+    if (targetProfile?.role === 'ADMIN' && activeAdmins.length <= 1) {
+      showToast('No se puede dar de baja al único Administrador Global activo del sistema', 'error');
+      setDeletingUserId(null);
+      return;
+    }
+
+    if (!checkCanManageTarget(targetProfile, targetEmp, { requireFullCoverage: true })) {
+      showToast('Solo puedes dar de baja a usuarios que pertenezcan exclusivamente a tus sucursales autorizadas', 'error');
       return;
     }
     setIsDeletingUser(true);
@@ -303,14 +310,23 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
   const handleRestoreUser = async (profileId: string) => {
     const targetProfile = allProfiles.find(p => p.id === profileId);
     const targetEmp = targetProfile?.employee_id ? employeeById[targetProfile.employee_id] : null;
-    if (!checkCanManageTarget(targetProfile, targetEmp)) {
-      showToast('Solo puedes modificar personal asignado a tu misma sucursal local', 'error');
+    if (!checkCanManageTarget(targetProfile, targetEmp, { requireFullCoverage: true })) {
+      showToast('Solo puedes reactivar usuarios asignados exclusivamente a tus sucursales autorizadas', 'error');
       return;
     }
     try {
-      const { error } = await supabase.from('profiles').update({ role: 'CAJERO' }).eq('id', profileId);
+      const userStores = targetProfile?.employee_stores || [];
+      const restoredRole = userStores[0]?.role
+        || (targetProfile?.default_store_id ? getValidStoreRole(null, targetProfile.default_store_id) : 'MOSTRADOR');
+      const matchedRole = roles.find(r => r.name === restoredRole && (r.store_id === userStores[0]?.store_id || !r.store_id));
+      const roleId = matchedRole?.id || null;
+
+      const { error } = await supabase.from('profiles').update({
+        role: restoredRole,
+        role_id: roleId
+      }).eq('id', profileId);
       if (error) throw error;
-      showToast('Acceso reactivado correctamente. Puedes asignarle un rol específico desde Editar.', 'success');
+      showToast('Acceso reactivado correctamente', 'success');
       loadData();
     } catch (err: any) {
       showToast(formatFriendlyErrorMessage(err, 'Error al reactivar el usuario'), 'error');
@@ -320,8 +336,8 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
   const handleRestoreEmployee = async (empId: string) => {
     const targetEmp = employeeById[empId] || employees.find(e => e.id === empId);
     const targetProfile = allProfiles.find(p => p.employee_id === empId);
-    if (!checkCanManageTarget(targetProfile, targetEmp)) {
-      showToast('Solo puedes modificar personal asignado a tu misma sucursal local', 'error');
+    if (!checkCanManageTarget(targetProfile, targetEmp, { requireFullCoverage: true })) {
+      showToast('Solo puedes reactivar empleados asignados exclusivamente a tus sucursales autorizadas', 'error');
       return;
     }
     try {
@@ -340,7 +356,7 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
     try {
       const [{ data: empData, error: empErr }, { data: profData, error: profErr }, { data: rolesData, error: rolesErr }] = await Promise.all([
         supabase.from('employees').select('*, employee_stores(store_id, role, stores(name))').order('full_name', { ascending: true }),
-        supabase.from('profiles').select('id, username, role, employee_id, email, default_store_id, stores(name), employee_stores(store_id, role, stores(name))'),
+        supabase.from('profiles').select('id, username, role, employee_id, email, is_owner, default_store_id, stores(name), employee_stores(store_id, role, stores(name))'),
         supabase.from('roles').select('*, stores(name, is_active)').order('created_at', { ascending: true }),
       ]);
 
@@ -377,13 +393,19 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
       msg.includes('roles_name_store_id_key') ||
       msg.includes('duplicate key value')
     ) {
-      if (msg.includes('roles') || msg.includes('roles_name_store_id_key') || msg.includes('rol')) {
+      if (msg.includes('roles') || msg.includes('roles_name_store_id_key')) {
         return 'Ya existe un rol activo con este nombre en el ámbito seleccionado.';
       }
-      if (msg.includes('profiles') || msg.includes('username')) {
+      if (msg.includes('profiles_username_key') || msg.includes('username')) {
         return 'El nombre de usuario ya está registrado en el sistema.';
       }
-      return 'Ya existe un registro activo con este nombre en el ámbito seleccionado.';
+      if (msg.includes('profiles_employee_id_key') || msg.includes('employee_id')) {
+        return 'Este empleado ya tiene una cuenta de usuario vinculada.';
+      }
+      if (msg.includes('employees_dni_key') || msg.includes('dni')) {
+        return 'Ya existe un empleado registrado con este número de DNI.';
+      }
+      return 'Ya existe un registro activo con estos datos en el sistema.';
     }
     return msg || defaultMsg;
   };
@@ -462,7 +484,7 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
         if (profErr) throw profErr;
       }
 
-      showToast(`Rol "${oldName}" actualizado a "${newName}" correctamente`, 'success');
+      showToast('Rol actualizado correctamente', 'success');
       setIsEditRoleModalOpen(false);
       setEditingRole(null);
       loadData();
@@ -612,14 +634,16 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
 
   const syncEmployeeStoreAssignment = async (
     employeeId: string,
-    storeAssignments: { store_id: string; role: string; role_id?: string | null }[]
+    storeAssignments: { store_id: string; role: string; role_id?: string | null }[],
+    globalRoleOverride?: string
   ) => {
     const linkedProfile = allProfiles.find(p => p.employee_id === employeeId && p.role !== 'DELETED');
     const profileId = linkedProfile?.id || null;
 
     const defaultStoreId = storeAssignments.length > 0 ? storeAssignments[0]?.store_id || null : null;
-    const primaryRole = storeAssignments.length > 0 ? storeAssignments[0]?.role || 'CAJERO' : 'CAJERO';
-    const primaryRoleId = storeAssignments.length > 0 ? storeAssignments[0]?.role_id || null : null;
+    const primaryRole = globalRoleOverride
+      || (storeAssignments.length > 0 ? storeAssignments[0]?.role || 'MOSTRADOR' : linkedProfile?.role || 'MOSTRADOR');
+    const primaryRoleId = globalRoleOverride ? null : (storeAssignments.length > 0 ? storeAssignments[0]?.role_id || null : null);
 
     const { error: profileError } = await supabase
       .from('profiles')
@@ -726,50 +750,111 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (empAccessScope === 'stores') {
-      const assignedStoreIds = isAdmin ? empStoreIds : (activeStoreId ? [activeStoreId] : []);
-      if (assignedStoreIds.length === 0) {
-        showToast('Debes seleccionar al menos una tienda para el empleado', 'error');
+    const isAccessRequired = Boolean(createAccess || (editingEmployee && profileByEmployeeId[editingEmployee.id]));
+
+    if (empAccessScope === 'global') {
+      if (isAccessRequired) {
+        if (!empGlobalRole) {
+          showToast('Debes seleccionar un rol global para el empleado', 'error');
+          return;
+        }
+        const existingLinkedProf = editingEmployee ? profileByEmployeeId[editingEmployee.id] : null;
+        const isPromotingEmpToAdmin = empGlobalRole === 'ADMIN' && (createAccess || !existingLinkedProf || existingLinkedProf.role !== 'ADMIN');
+        if (isPromotingEmpToAdmin && !isOwner) {
+          showToast('Solo la Cuenta Propietaria tiene autorización para otorgar el rol Administrador Global', 'error');
+          return;
+        }
+        if (isPromotingEmpToAdmin && !empConfirmGlobalAdmin) {
+          showToast('Debes confirmar la casilla de seguridad para otorgar el rol ADMIN global', 'error');
+          return;
+        }
+      }
+    } else {
+      if (isAdmin && empStoreIds.length === 0) {
+        showToast('Debes asignar al menos una sucursal de trabajo', 'error');
+        return;
+      }
+      if (isAccessRequired) {
+        if (isAdmin) {
+          const unassignedStoreId = empStoreIds.find(sId => !empStoreRoleIds[sId] && !empStoreRoles[sId]);
+          if (unassignedStoreId) {
+            const storeName = storeMap.get(unassignedStoreId) || 'la sucursal asignada';
+            showToast(`Debes seleccionar un rol para ${storeName}`, 'error');
+            return;
+          }
+        } else if (targetModalStoreId && !empStoreRoleIds[targetModalStoreId] && !empStoreRoles[targetModalStoreId]) {
+          const storeName = storeMap.get(targetModalStoreId) || 'la sucursal asignada';
+          showToast(`Debes seleccionar un rol para ${storeName}`, 'error');
+          return;
+        }
+      }
+    }
+
+    if (!editingEmployee && createAccess) {
+      if (!empUsername.trim() || !empPassword || empPassword.trim().length < 4) {
+        showToast('Usuario y contraseña (mínimo 4 caracteres) son obligatorios para crear el acceso', 'error');
         return;
       }
     }
 
-    if (!editingEmployee && createAccess && (!empUsername.trim() || !empPassword)) {
-      showToast('Usuario y contraseña son obligatorios para crear el acceso', 'error');
-      return;
-    }
-
     setSavingEmployee(true);
     try {
-      const assignedStoreIds = isAdmin ? empStoreIds : (targetModalStoreId ? [targetModalStoreId] : []);
-      const storeAssignments = assignedStoreIds.map(sId => ({
-        store_id: sId,
-        role: empStoreRoles[sId] || getValidStoreRole(null, sId),
-        role_id: empStoreRoleIds[sId] || null
-      }));
+      let storeAssignments: { store_id: string; role: string; role_id?: string | null }[] = [];
+      if (isAdmin) {
+        storeAssignments = empStoreIds.map(sId => {
+          const selectedRoleObj = roles.find(r => r.id === empStoreRoleIds[sId]) || roles.find(r => r.name === empStoreRoles[sId] && (r.store_id === sId || !r.store_id));
+          const roleName = selectedRoleObj?.name || empStoreRoles[sId] || getValidStoreRole(null, sId);
+          return {
+            store_id: sId,
+            role: roleName,
+            role_id: selectedRoleObj?.id || empStoreRoleIds[sId] || null
+          };
+        });
+      } else if (editingEmployee) {
+        // Preservar asignaciones de tiendas que el usuario actual no administra
+        const unmanagedStores = (editingEmployee.employee_stores || [])
+          .filter(es => es.store_id !== targetModalStoreId)
+          .map(es => ({
+            store_id: es.store_id,
+            role: es.role || getValidStoreRole(null, es.store_id),
+            role_id: (es as any).role_id || null
+          }));
+
+        const selectedRoleObj = targetModalStoreId ? (roles.find(r => r.id === empStoreRoleIds[targetModalStoreId]) || roles.find(r => r.name === empStoreRoles[targetModalStoreId] && (r.store_id === targetModalStoreId || !r.store_id))) : null;
+        const currentStoreAssignment = targetModalStoreId ? [{
+          store_id: targetModalStoreId,
+          role: selectedRoleObj?.name || empStoreRoles[targetModalStoreId] || getValidStoreRole(null, targetModalStoreId),
+          role_id: selectedRoleObj?.id || empStoreRoleIds[targetModalStoreId] || null
+        }] : [];
+
+        storeAssignments = [...unmanagedStores, ...currentStoreAssignment];
+      } else {
+        storeAssignments = targetModalStoreId ? [{
+          store_id: targetModalStoreId,
+          role: empStoreRoles[targetModalStoreId] || getValidStoreRole(null, targetModalStoreId),
+          role_id: empStoreRoleIds[targetModalStoreId] || null
+        }] : [];
+      }
 
       if (editingEmployee) {
-        // Update existing employee
-        const { error: empErr } = await supabase.from('employees').update({
-          full_name: fullName.trim(),
-          dni: dni.trim(),
-          phone: phone.trim() || null,
-        }).eq('id', editingEmployee.id);
+        // Actualizar datos de identidad del empleado solo si tiene cobertura total
+        const linkedProf = profileByEmployeeId[editingEmployee.id];
+        const canEditIdentity = checkCanManageTarget(linkedProf, editingEmployee, { requireFullCoverage: true });
 
-        if (empErr) throw empErr;
+        if (canEditIdentity) {
+          const { error: empErr } = await supabase.from('employees').update({
+            full_name: fullName.trim(),
+            dni: dni.trim(),
+            phone: phone.trim() || null,
+          }).eq('id', editingEmployee.id);
+
+          if (empErr) throw empErr;
+        }
 
         if (empAccessScope === 'global') {
-          await syncEmployeeStoreAssignment(editingEmployee.id, []);
-          const existingProf = profileByEmployeeId[editingEmployee.id];
-          if (existingProf) {
-            await supabase.from('profiles').update({ role: empGlobalRole, role_id: null, default_store_id: null }).eq('id', existingProf.id);
-          }
+          await syncEmployeeStoreAssignment(editingEmployee.id, [], empGlobalRole);
         } else {
           await syncEmployeeStoreAssignment(editingEmployee.id, storeAssignments);
-          const existingProf = profileByEmployeeId[editingEmployee.id];
-          if (existingProf && storeAssignments.length > 0) {
-            await supabase.from('profiles').update({ role: storeAssignments[0]?.role || 'CAJERO', role_id: storeAssignments[0]?.role_id || null, default_store_id: storeAssignments[0]?.store_id || null }).eq('id', existingProf.id);
-          }
         }
 
         showToast('Empleado actualizado correctamente', 'success');
@@ -785,7 +870,7 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
 
         if (newEmp) {
           if (empAccessScope === 'global') {
-            await syncEmployeeStoreAssignment(newEmp.id, []);
+            await syncEmployeeStoreAssignment(newEmp.id, [], empGlobalRole);
           } else {
             await syncEmployeeStoreAssignment(newEmp.id, storeAssignments);
           }
@@ -824,7 +909,7 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
                   setEditingEmployee(null);
                   setFullName(''); setDni(''); setPhone('');
                   setCreateAccess(false); setEmpUsername(''); setEmpPassword(''); setEmpEmail(''); setEmpStoreIds([]); setEmpStoreRoles({}); setEmpStoreRoleIds({});
-                  setEmpAccessScope('stores'); setEmpGlobalRole('ADMIN');
+                  setEmpAccessScope('stores'); setEmpGlobalRole('ADMIN'); setEmpConfirmGlobalAdmin(false);
                 }
               });
               setSavingEmployee(false);
@@ -847,7 +932,7 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
       setEditingEmployee(null);
       setFullName(''); setDni(''); setPhone('');
       setCreateAccess(false); setEmpUsername(''); setEmpPassword(''); setEmpEmail(''); setEmpStoreIds([]); setEmpStoreRoles({}); setEmpStoreRoleIds({});
-      setEmpAccessScope('stores'); setEmpGlobalRole('ADMIN');
+      setEmpAccessScope('stores'); setEmpGlobalRole('ADMIN'); setEmpConfirmGlobalAdmin(false);
 
       loadData();
     } catch (err: any) {
@@ -859,6 +944,10 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
 
   const handleEditEmployeeClick = (emp: Employee) => {
     const targetProfile = profileByEmployeeId[emp.id];
+    if (targetProfile?.is_owner && !isOwner) {
+      showToast('El registro del Propietario está blindado y solo puede ser administrado por el dueño principal', 'error');
+      return;
+    }
     if (!checkCanManageTarget(targetProfile, emp)) {
       showToast('Solo puedes modificar personal asignado a tu misma sucursal local', 'error');
       return;
@@ -900,14 +989,37 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
       setEmpGlobalRole('ADMIN');
     }
     setCreateAccess(false);
+    setEmpConfirmGlobalAdmin(targetProfile?.role === 'ADMIN');
     setIsEmployeeModalOpen(true);
   };
 
   const handleDeleteEmployeeClick = (empId: string, empName: string) => {
     const targetEmp = employeeById[empId] || employees.find(e => e.id === empId);
     const targetProfile = profileByEmployeeId[empId];
-    if (!checkCanManageTarget(targetProfile, targetEmp)) {
-      showToast('Solo puedes modificar personal asignado a tu misma sucursal local', 'error');
+
+    if (targetProfile?.is_owner) {
+      showToast('El registro del Propietario del sistema es intocable y no puede ser dado de baja', 'error');
+      return;
+    }
+
+    if ((currentEmployeeId && empId === currentEmployeeId) || (currentProfileId && targetProfile?.id === currentProfileId)) {
+      showToast('No puedes dar de baja tu propio registro de empleado en sesión activa', 'error');
+      return;
+    }
+
+    if (targetProfile?.role === 'ADMIN' && !isOwner) {
+      showToast('Solo la Cuenta Propietaria tiene autorización para dar de baja a empleados con rol Administrador', 'error');
+      return;
+    }
+
+    const activeAdmins = allProfiles.filter(p => p.role === 'ADMIN');
+    if (targetProfile?.role === 'ADMIN' && activeAdmins.length <= 1) {
+      showToast('No se puede dar de baja al único Administrador Global activo del sistema', 'error');
+      return;
+    }
+
+    if (!checkCanManageTarget(targetProfile, targetEmp, { requireFullCoverage: true })) {
+      showToast('Solo puedes dar de baja a empleados que pertenezcan exclusivamente a tus sucursales autorizadas', 'error');
       return;
     }
     setDeletingEmployee({ id: empId, name: empName });
@@ -931,17 +1043,77 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
   };
 
   const handleUnlinkEmployeeClick = (empId: string, empName: string, profileId: string) => {
+    const targetEmp = employeeById[empId] || employees.find(e => e.id === empId);
+    const targetProfile = profileByEmployeeId[empId] || allProfiles.find(p => p.id === profileId);
+
+    if (targetProfile?.is_owner) {
+      showToast('No se puede desvincular la cuenta del Propietario del sistema', 'error');
+      return;
+    }
+
+    if (profileId === currentProfileId || (currentEmployeeId && empId === currentEmployeeId)) {
+      showToast('No puedes desvincular tu propia cuenta en sesión activa', 'error');
+      return;
+    }
+
+    if (!checkCanManageTarget(targetProfile, targetEmp, { requireFullCoverage: true })) {
+      showToast('Solo puedes desvincular cuentas de empleados que pertenezcan exclusivamente a tus sucursales autorizadas', 'error');
+      return;
+    }
     setUnlinkingEmployee({ empId, name: empName, profileId });
   };
 
   const confirmUnlinkEmployee = async () => {
     if (!unlinkingEmployee) return;
     try {
-      // Desvincular perfil del empleado y desactivarlo (soft delete) usando role = 'DELETED'
-      const { error } = await supabase.from('profiles').update({ employee_id: null, role: 'DELETED', role_id: null, default_store_id: null }).eq('id', unlinkingEmployee.profileId);
-      if (error) throw error;
+      const empId = unlinkingEmployee.empId;
+      const profId = unlinkingEmployee.profileId;
 
-      showToast('Acceso desvinculado correctamente', 'success');
+      // 1. Desvincular perfil del empleado dejándolo activo como usuario libre
+      const { error: profError } = await supabase
+        .from('profiles')
+        .update({ employee_id: null })
+        .eq('id', profId);
+
+      if (profError) throw profError;
+
+      // 2. Obtener las asignaciones actuales de tiendas vinculadas a esta relación
+      const { data: currentStores } = await supabase
+        .from('employee_stores')
+        .select('*')
+        .or(`employee_id.eq.${empId},profile_id.eq.${profId}`);
+
+      // 3. Eliminar las filas compartidas actuales
+      await supabase.from('employee_stores').delete().or(`employee_id.eq.${empId},profile_id.eq.${profId}`);
+
+      // 4. Crear copias separadas para que AMBOS (empleado y usuario) conserven sus tiendas
+      const empInserts = (currentStores || []).map((s: any) => ({
+        employee_id: empId,
+        profile_id: null,
+        store_id: s.store_id,
+        role: s.role,
+        role_id: s.role_id || null
+      }));
+
+      const profInserts = (currentStores || []).map((s: any) => ({
+        employee_id: null,
+        profile_id: profId,
+        store_id: s.store_id,
+        role: s.role,
+        role_id: s.role_id || null
+      }));
+
+      // Deduplicar por store_id
+      const uniqueEmp = Array.from(new Map(empInserts.map((i: any) => [i.store_id, i])).values());
+      const uniqueProf = Array.from(new Map(profInserts.map((i: any) => [i.store_id, i])).values());
+
+      const allInserts = [...uniqueEmp, ...uniqueProf];
+      if (allInserts.length > 0) {
+        const { error: insError } = await supabase.from('employee_stores').insert(allInserts);
+        if (insError) throw insError;
+      }
+
+      showToast('Acceso desvinculado correctamente. El usuario queda como cuenta libre.', 'success');
       setUnlinkingEmployee(null);
       loadData();
     } catch (err: any) {
@@ -972,18 +1144,48 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
       const oldEmpId = existingProfile?.employee_id;
       const targetEmpId = selectedEmpId || oldEmpId;
 
+      if (editingUserId) {
+        const isSelf = editingUserId === currentProfileId || (existingProfile?.username && existingProfile.username === currentUsername);
+        if (isSelf && role === 'ADMIN') {
+          if (userAccessScope !== 'global' || userGlobalRole !== 'ADMIN') {
+            showToast('No puedes removerte tus propios privilegios de Administrador Global mientras estás en sesión activa', 'error');
+            setSavingUser(false);
+            return;
+          }
+        }
+
+        const activeAdmins = allProfiles.filter(p => p.role === 'ADMIN');
+        const isTargetDemoted = existingProfile?.role === 'ADMIN' && (userAccessScope !== 'global' || userGlobalRole !== 'ADMIN');
+        if (isTargetDemoted && activeAdmins.length <= 1) {
+          showToast('No se puede cambiar el rol al único Administrador Global activo del sistema', 'error');
+          setSavingUser(false);
+          return;
+        }
+      }
+
       if (userAccessScope === 'global') {
-        if (!confirmGlobalAccess) {
-          showToast('Debes confirmar la casilla de seguridad para otorgar Acceso Global', 'error');
+        if (!userGlobalRole) {
+          showToast('Debes seleccionar un rol global para el usuario', 'error');
+          setSavingUser(false);
+          return;
+        }
+        const isPromotingToAdmin = userGlobalRole === 'ADMIN' && (!existingProfile || existingProfile.role !== 'ADMIN');
+        if (isPromotingToAdmin && !isOwner) {
+          showToast('Solo la Cuenta Propietaria tiene autorización para otorgar o promover usuarios al rol Administrador Global', 'error');
+          setSavingUser(false);
+          return;
+        }
+        if (isPromotingToAdmin && !confirmGlobalAccess) {
+          showToast('Debes confirmar la casilla de seguridad para otorgar permisos administrativos globales (ADMIN)', 'error');
           setSavingUser(false);
           return;
         }
 
         const updates: any = {
           username: username.trim(),
-          role: userGlobalRole || 'ADMIN',
+          role: userGlobalRole,
           role_id: null,
-          employee_id: selectedEmpId || null,
+          employee_id: targetEmpId || null,
           email: email.trim() || null,
           default_store_id: null
         };
@@ -994,8 +1196,11 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
           if (profileErr) throw profileErr;
 
           await supabase.from('employee_stores').delete().eq('profile_id', editingUserId);
+          if (targetEmpId) {
+            await supabase.from('employee_stores').delete().eq('employee_id', targetEmpId);
+          }
 
-          showToast('Acceso actualizado a Global correctamente', 'success');
+          showToast('Usuario actualizado correctamente', 'success');
         } else {
           const check = checkUsernameState(username);
           if (check.exists) {
@@ -1013,13 +1218,17 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
                   setIsUserModalOpen(false);
                   setEditingUserId(null);
                   setUserAccessScope('stores');
-                  setUserGlobalRole('ADMIN');
+                  setUserGlobalRole('');
                   setUsername(''); setPassword(''); setEmail(''); setSelectedEmpId(''); setSelectedStoreIds([]); setUserStoreRoles({}); setUserStoreRoleIds({});
                 }
               });
               setSavingUser(false);
               return;
             }
+          }
+
+          if (selectedEmpId) {
+            await supabase.from('employee_stores').delete().eq('employee_id', selectedEmpId);
           }
 
           const { data: profileResult, error: profileErr } = await supabase.from('profiles').insert(updates).select('*');
@@ -1034,34 +1243,73 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        const storeAssignments = assignedStoreIds.map(sId => ({
-          store_id: sId,
-          role: userStoreRoles[sId] || getValidStoreRole(null, sId),
-          role_id: userStoreRoleIds[sId] || null
-        }));
+        const unassignedStoreId = assignedStoreIds.find(sId => !userStoreRoleIds[sId] && !userStoreRoles[sId]);
+        if (unassignedStoreId) {
+          const storeName = storeMap.get(unassignedStoreId) || 'la sucursal seleccionada';
+          showToast(`Debes seleccionar un rol para ${storeName}`, 'error');
+          setSavingUser(false);
+          return;
+        }
 
-        const defaultStoreId = storeAssignments.length > 0 ? storeAssignments[0]?.store_id || null : null;
-        const primaryRole = storeAssignments[0]?.role || 'CAJERO';
+        const storeAssignments = assignedStoreIds.map(sId => {
+          const selectedRoleObj = roles.find(r => r.id === userStoreRoleIds[sId]) || roles.find(r => r.name === userStoreRoles[sId] && (r.store_id === sId || !r.store_id));
+          const roleName = selectedRoleObj?.name || userStoreRoles[sId] || getValidStoreRole(null, sId);
+          return {
+            store_id: sId,
+            role: roleName,
+            role_id: selectedRoleObj?.id || userStoreRoleIds[sId] || null
+          };
+        });
+
+        const userStores = activeStoreId ? [activeStoreId] : availableStoreIds;
+        const profileStores = (existingProfile?.employee_stores || []).map((es: any) => es.store_id).filter(Boolean);
+        const empStores = (targetEmpId && employeeById[targetEmpId]?.employee_stores || []).map((es: any) => es.store_id).filter(Boolean);
+        const defaultStore = existingProfile?.default_store_id ? [existingProfile.default_store_id] : [];
+        const allTargetStores = [...new Set([...profileStores, ...empStores, ...defaultStore])];
+        const canEditUserIdentity = isUserGlobalAdmin || allTargetStores.length === 0 || allTargetStores.every((storeId: any) => userStores.includes(storeId));
+
+        let finalStoreAssignments = storeAssignments;
+        if (editingUserId && !canEditUserIdentity && existingProfile) {
+          const unmanagedStores = (existingProfile.employee_stores || [])
+            .filter(es => !userStores.includes(es.store_id))
+            .map(es => ({
+              store_id: es.store_id,
+              role: es.role || getValidStoreRole(null, es.store_id),
+              role_id: (es as any).role_id || null
+            }));
+          const managedStoreAssignments = storeAssignments.filter(sa => userStores.includes(sa.store_id));
+          finalStoreAssignments = [...unmanagedStores, ...managedStoreAssignments];
+        }
+
+        const defaultStoreId = finalStoreAssignments.length > 0 ? finalStoreAssignments[0]?.store_id || null : null;
+        const primaryRole = finalStoreAssignments[0]?.role || existingProfile?.role || 'CAJERO';
+        const primaryRoleId = finalStoreAssignments[0]?.role_id || existingProfile?.role_id || null;
 
         if (editingUserId) {
-          const updates: any = {
+          const updates: any = canEditUserIdentity ? {
             username: username.trim(),
             role: primaryRole,
-            role_id: storeAssignments[0]?.role_id || null,
-            employee_id: selectedEmpId || null,
+            role_id: primaryRoleId,
+            employee_id: targetEmpId || null,
             email: email.trim() || null,
             default_store_id: defaultStoreId
+          } : {
+            role: primaryRole,
+            role_id: primaryRoleId
           };
-          if (hash) updates.password_hash = hash;
+          if (canEditUserIdentity && hash) updates.password_hash = hash;
 
           const { data: profileResult, error: profileErr } = await supabase.from('profiles').update(updates).eq('id', editingUserId).select('*');
           if (profileErr) throw profileErr;
 
           await supabase.from('employee_stores').delete().eq('profile_id', editingUserId);
-          if (storeAssignments.length > 0) {
-            const inserts = storeAssignments.map(sa => ({
+          if (targetEmpId) {
+            await supabase.from('employee_stores').delete().eq('employee_id', targetEmpId);
+          }
+          if (finalStoreAssignments.length > 0) {
+            const inserts = finalStoreAssignments.map(sa => ({
               profile_id: editingUserId,
-              employee_id: selectedEmpId || null,
+              employee_id: targetEmpId || null,
               store_id: sa.store_id,
               role: sa.role,
               role_id: sa.role_id || null
@@ -1070,7 +1318,7 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
             if (empStoreErr) throw empStoreErr;
           }
 
-          showToast('Acceso actualizado a Por Sucursales correctamente', 'success');
+          showToast('Usuario actualizado correctamente', 'success');
         } else {
           // CREATE
           const payload = {
@@ -1098,7 +1346,7 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
                   setIsUserModalOpen(false);
                   setEditingUserId(null);
                   setUserAccessScope('stores');
-                  setUserGlobalRole('ADMIN');
+                  setUserGlobalRole('');
                   setUsername(''); setPassword(''); setEmail(''); setSelectedEmpId(''); setSelectedStoreIds([]); setUserStoreRoles({}); setUserStoreRoleIds({});
                 }
               });
@@ -1107,13 +1355,17 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
             }
           }
 
+          if (selectedEmpId) {
+            await supabase.from('employee_stores').delete().eq('employee_id', selectedEmpId);
+          }
+
           const { data: newProfile, error: profileErr } = await supabase.from('profiles').insert({
             username: username.trim(),
             ...payload
           }).select('*').single();
           if (profileErr) throw profileErr;
 
-          if (storeAssignments.length > 0 && newProfile) {
+          if (storeAssignments.length > 0) {
             const inserts = storeAssignments.map(sa => ({
               profile_id: newProfile.id,
               employee_id: selectedEmpId || null,
@@ -1123,7 +1375,7 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
             }));
             await supabase.from('employee_stores').insert(inserts);
           }
-          showToast('Acceso creado correctamente', 'success');
+          showToast('Usuario creado correctamente', 'success');
         }
       }
 
@@ -1131,8 +1383,8 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
       setIsUserModalOpen(false);
       setEditingUserId(null);
       setUserAccessScope('stores');
-      setUserGlobalRole('ADMIN');
-      setUsername(''); setPassword(''); setEmail(''); setSelectedEmpId(''); setSelectedStoreIds([]); setUserStoreRoles({});
+      setUserGlobalRole('');
+      setUsername(''); setPassword(''); setEmail(''); setSelectedEmpId(''); setSelectedStoreIds([]); setUserStoreRoles({}); setUserStoreRoleIds({});
       await loadData();
     } catch (err: any) {
       showToast(formatFriendlyErrorMessage(err, 'Error al guardar acceso'), 'error');
@@ -1170,7 +1422,7 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
       const defaultStoreId = storeAssignments[0]?.store_id || selectedRoleObj?.store_id || null;
 
       const hash = bcrypt.hashSync(empPassword, 8);
-      const { error } = await supabase.from('profiles').insert({
+      const { data: newProfile, error } = await supabase.from('profiles').insert({
         username: empUsername.trim(),
         role: primaryRole,
         role_id: primaryRoleId,
@@ -1178,14 +1430,15 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
         employee_id: linkingEmployee.id,
         email: empEmail.trim() || null,
         default_store_id: defaultStoreId
-      });
+      }).select('id').single();
       if (error) throw error;
 
       // Si el empleado tiene tiendas físicas asignadas, actualizar los roles en employee_stores también
       if (storeAssignments.length > 0) {
-        await supabase.from('employee_stores').delete().eq('employee_id', linkingEmployee.id);
+        await supabase.from('employee_stores').delete().or(`employee_id.eq.${linkingEmployee.id},profile_id.eq.${newProfile.id}`);
         await supabase.from('employee_stores').insert(
           storeAssignments.map(sa => ({
+            profile_id: newProfile.id,
             employee_id: linkingEmployee.id,
             store_id: sa.store_id,
             role: sa.role,
@@ -1215,31 +1468,29 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
     }
     setIsLinking(true);
     try {
-      const selectedUser = allProfiles.find(p => p.id === linkExistingUserId);
-      if (selectedUser) {
-        const empStoreIds = (linkingEmployee.employee_stores || []).map(es => es.store_id);
+      const empStoreIds = (linkingEmployee.employee_stores || []).map(es => es.store_id);
 
-        let userStoreIds: string[] = [];
-        if (selectedUser.employee_stores && selectedUser.employee_stores.length > 0) {
-          userStoreIds = selectedUser.employee_stores.map(es => es.store_id);
-        } else if (selectedUser.default_store_id) {
-          userStoreIds = [selectedUser.default_store_id];
-        }
-
-        const isUserGlobalAdmin = selectedUser.role === 'ADMIN' || selectedUser.role_id === null;
-
-        const empStoresSorted = [...empStoreIds].sort().join(',');
-        const userStoresSorted = [...userStoreIds].sort().join(',');
-        const isStrictMatch = empStoresSorted === userStoresSorted;
-
-        if (!isUserGlobalAdmin && !isStrictMatch) {
-          showToast('El empleado está asignado a unas tiendas, pero el usuario pertenece a otra distinta. Por favor, asegúrate de que el empleado y el usuario pertenezcan a las mismas tiendas antes de vincularlos.', 'error');
-          setIsLinking(false);
-          return;
-        }
+      let userStoreIds: string[] = [];
+      if (selectedUser?.employee_stores && selectedUser.employee_stores.length > 0) {
+        userStoreIds = selectedUser.employee_stores.map(es => es.store_id);
+      } else if (selectedUser?.default_store_id) {
+        userStoreIds = [selectedUser.default_store_id];
       }
 
-      const defaultStoreId = linkingEmployee.employee_stores?.[0]?.store_id || null;
+      const isUserGlobalAdmin = selectedUser?.role === 'ADMIN' || selectedUser?.role_id === null;
+
+      const empStoresSorted = [...empStoreIds].sort().join(',');
+      const userStoresSorted = [...userStoreIds].sort().join(',');
+      const hasConflict = empStoreIds.length > 0 && userStoreIds.length > 0 && empStoresSorted !== userStoresSorted;
+
+      if (!isUserGlobalAdmin && hasConflict) {
+        showToast('El empleado está asignado a unas tiendas, pero el usuario pertenece a otra distinta. Por favor, asegúrate de que pertenezcan a las mismas tiendas antes de vincularlos.', 'error');
+        setIsLinking(false);
+        return;
+      }
+
+      const targetStoreIds = empStoreIds.length > 0 ? empStoreIds : userStoreIds;
+      const defaultStoreId = targetStoreIds[0] || linkingEmployee.employee_stores?.[0]?.store_id || selectedUser?.default_store_id || null;
       const updates: any = { employee_id: linkingEmployee.id };
       if (defaultStoreId) updates.default_store_id = defaultStoreId;
 
@@ -1247,21 +1498,42 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
       if (error) throw error;
 
       // Sincronizar tiendas del empleado con employee_stores del perfil vinculado
-      if (linkingEmployee.employee_stores && linkingEmployee.employee_stores.length > 0) {
+      if (targetStoreIds.length > 0) {
         const existingProf = allProfiles.find(p => p.id === linkExistingUserId);
-        const roleName = existingProf?.role || 'CAJERO';
-        const roleId = existingProf?.role_id || null;
+        const userStores = existingProf?.employee_stores || [];
+        const empStores = linkingEmployee.employee_stores || [];
 
-        await supabase.from('employee_stores').delete().eq('profile_id', linkExistingUserId);
-        await supabase.from('employee_stores').insert(
-          linkingEmployee.employee_stores.map(es => ({
+        const inserts = targetStoreIds.map(storeId => {
+          const empStoreMatch = empStores.find((es: any) => es.store_id === storeId);
+          const userStoreMatch = userStores.find((ues: any) => ues.store_id === storeId);
+          const rawRole = empStoreMatch?.role || userStoreMatch?.role || (existingProf?.role && existingProf.role !== 'DELETED' ? existingProf.role : null);
+          const finalRole = getValidStoreRole(rawRole, storeId);
+
+          let roleId = (empStoreMatch as any)?.role_id || (userStoreMatch as any)?.role_id || null;
+          if (!roleId) {
+            const matched = roles.find(r => r.name === finalRole && (r.store_id === storeId || !r.store_id));
+            roleId = matched?.id || null;
+          }
+
+          return {
             profile_id: linkExistingUserId,
             employee_id: linkingEmployee.id,
-            store_id: es.store_id,
-            role: roleName,
+            store_id: storeId,
+            role: finalRole,
             role_id: roleId
-          }))
-        );
+          };
+        });
+
+        const primaryRole = inserts[0]?.role || 'CAJERO';
+        const primaryRoleId = inserts[0]?.role_id || null;
+
+        await supabase.from('profiles').update({
+          role: primaryRole,
+          role_id: primaryRoleId
+        }).eq('id', linkExistingUserId);
+
+        await supabase.from('employee_stores').delete().or(`profile_id.eq.${linkExistingUserId},employee_id.eq.${linkingEmployee.id}`);
+        await supabase.from('employee_stores').insert(inserts);
       }
 
       showToast('Usuario vinculado correctamente', 'success');
@@ -1276,6 +1548,10 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
   };
 
   const handleEditClick = (profile: Profile) => {
+    if (profile.is_owner && !isOwner) {
+      showToast('La Cuenta Propietaria está blindada y solo puede ser administrada por el dueño principal', 'error');
+      return;
+    }
     const targetEmp = profile.employee_id ? employeeById[profile.employee_id] : null;
     if (!checkCanManageTarget(profile, targetEmp)) {
       showToast('Solo puedes modificar personal asignado a tu misma sucursal local', 'error');
@@ -1288,18 +1564,20 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
     setEmail(profile.email || '');
     setSelectedEmpId(profile.employee_id || '');
 
-    const linkedEmp = profile.employee_id ? employeeById[profile.employee_id] : null;
-    if (profile.role === 'ADMIN' || (!profile.default_store_id && (!linkedEmp?.employee_stores || linkedEmp.employee_stores.length === 0))) {
+    const isGlobal = profile.role === 'ADMIN' ||
+      (!profile.default_store_id && (!profile.employee_stores || profile.employee_stores.length === 0) && (!targetEmp?.employee_stores || targetEmp.employee_stores.length === 0));
+
+    if (isGlobal) {
       setUserAccessScope('global');
-      setUserGlobalRole(profile.role || 'ADMIN');
+      setUserGlobalRole(profile.role || '');
     } else {
       setUserAccessScope('stores');
-      setUserGlobalRole('ADMIN');
+      setUserGlobalRole('');
     }
 
     const profileStores = profile.employee_stores && profile.employee_stores.length > 0
       ? profile.employee_stores
-      : (linkedEmp?.employee_stores || []);
+      : (targetEmp?.employee_stores || []);
 
     if (profileStores && profileStores.length > 0) {
       const ids = profileStores.map((es: any) => es.store_id);
@@ -1307,7 +1585,7 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
       const roleIdsMap: Record<string, string> = {};
       profileStores.forEach((es: any) => {
         const rawRole = es.role || profile.role;
-        rolesMap[es.store_id] = getValidStoreRole(rawRole, es.store_id);
+        rolesMap[es.store_id] = rawRole;
         if (es.role_id) {
           roleIdsMap[es.store_id] = es.role_id;
         } else {
@@ -1321,7 +1599,7 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
       setUserStoreRoleIds(roleIdsMap);
     } else if (profile.default_store_id) {
       setSelectedStoreIds([profile.default_store_id]);
-      setUserStoreRoles({ [profile.default_store_id]: getValidStoreRole(profile.role, profile.default_store_id) });
+      setUserStoreRoles({ [profile.default_store_id]: profile.role });
       const matchedRole = profile.role_id
         ? roles.find(r => r.id === profile.role_id)
         : (roles.find(r => r.name === profile.role && r.store_id === profile.default_store_id) || roles.find(r => r.name === profile.role && !r.store_id));
@@ -1333,13 +1611,13 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
     }
 
     setPassword(''); // Leave empty so it doesn't get updated unless typed
-    setConfirmGlobalAccess(false);
+    setConfirmGlobalAccess(profile.role === 'ADMIN');
     setIsUserModalOpen(true);
   };
 
   const handleCancelEdit = () => {
     setUsername(''); setPassword(''); setEmail(''); setSelectedEmpId(''); setSelectedStoreIds([]); setUserStoreRoles({}); setUserStoreRoleIds({});
-    setUserAccessScope('stores'); setUserGlobalRole('ADMIN'); setConfirmGlobalAccess(false);
+    setUserAccessScope('stores'); setUserGlobalRole(''); setConfirmGlobalAccess(false);
     setEditingUserId(null);
     setIsUserModalOpen(false);
   };
@@ -1368,11 +1646,12 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
           const storeAvailableRoles = roles.filter(
             (r) => r.name !== 'ADMIN' && (r.store_id === store.id || !r.store_id)
           );
-          const currentRoleName = getValidStoreRole(storeRoles[store.id], store.id);
-          const currentRoleId = storeRoleIds?.[store.id] || storeAvailableRoles.find(r => r.name === currentRoleName)?.id || storeAvailableRoles[0]?.id || '';
-          const selectedValue = storeAvailableRoles.some(r => r.id === currentRoleId)
-            ? currentRoleId
-            : (storeAvailableRoles.find(r => r.name === currentRoleName)?.id || storeAvailableRoles[0]?.id || '');
+          const rawRoleName = storeRoles[store.id];
+          const matchedByRoleId = storeRoleIds?.[store.id] ? storeAvailableRoles.find(r => r.id === storeRoleIds[store.id]) : null;
+          const matchedByName = rawRoleName ? storeAvailableRoles.find(r => r.name === rawRoleName) : null;
+          const selectedValue = matchedByRoleId?.id || matchedByName?.id || '';
+
+          const isStoreAllowedToEditRole = isUserGlobalAdmin || (activeStoreId ? store.id === activeStoreId : availableStoreIds.includes(store.id));
 
           return (
             <div
@@ -1382,41 +1661,30 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
                 : 'bg-background border-border hover:bg-secondary/40'
                 } ${isDisabled ? 'opacity-80' : ''}`}
             >
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <label className="flex items-center gap-3 cursor-pointer select-none font-semibold text-sm text-foreground">
+              <div className="flex items-center justify-between gap-2.5">
+                <label className="flex items-center gap-2.5 cursor-pointer select-none font-semibold text-sm text-foreground shrink-0 min-w-0">
                   <input
                     type="checkbox"
-                    className="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer"
+                    className="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer shrink-0"
                     checked={isChecked}
-                    disabled={isDisabled || isStoreToggleDisabled}
+                    disabled={isDisabled || isStoreToggleDisabled || !isStoreAllowedToEditRole}
                     onChange={(e) => onToggleStore(store.id, e.target.checked)}
                   />
-                  <span>{store.name}</span>
+                  <span className="whitespace-nowrap font-bold text-foreground">{store.name}</span>
                 </label>
 
                 {isChecked && (
-                  <div className="flex items-center gap-2 pl-7 sm:pl-0 mt-2 sm:mt-0 flex-1 sm:flex-initial sm:justify-end min-w-0">
-                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider shrink-0">Rol:</span>
-                    <select
-                      value={selectedValue}
-                      disabled={isDisabled}
-                      onChange={(e) => {
-                        const selectedRole = storeAvailableRoles.find(r => r.id === e.target.value);
-                        if (selectedRole) {
-                          onRoleChange(store.id, selectedRole.name, selectedRole.id);
-                        }
+                  <div className="flex items-center gap-2 shrink-0 min-w-0">
+                    <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider shrink-0 hidden xs:inline">Rol:</span>
+                    <StoreRoleDropdown
+                      roles={storeAvailableRoles}
+                      selectedRoleId={selectedValue}
+                      disabled={isDisabled || !isStoreAllowedToEditRole}
+                      getRoleBadgeStyle={getRoleBadgeStyle}
+                      onSelect={(selectedRole) => {
+                        onRoleChange(store.id, selectedRole.name, selectedRole.id);
                       }}
-                      className="h-9 px-3 text-xs font-bold rounded-xl border border-indigo-200 bg-white text-indigo-950 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm cursor-pointer w-full max-w-[200px] sm:max-w-[240px] truncate"
-                    >
-                      {storeAvailableRoles.map(r => {
-                        const scopeLabel = r.store_id ? ` (${storeMap.get(r.store_id) || r.stores?.name || 'Sucursal'})` : ' (Global)';
-                        return (
-                          <option key={r.id} value={r.id}>
-                            {r.name}{scopeLabel}
-                          </option>
-                        );
-                      })}
-                    </select>
+                    />
                   </div>
                 )}
               </div>
@@ -1427,13 +1695,50 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
     );
   };
 
-  const getRoleBadgeStyle = (roleName: string) => {
-    if (roleName === 'ADMIN' || roles.some(r => r.name === roleName && (!r.store_id || r.is_system))) {
-      return 'bg-purple-500/10 border-purple-500/30 text-purple-500';
+  const ROLE_PALETTE = [
+    'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400',
+    'bg-teal-500/10 border-teal-500/30 text-teal-600 dark:text-teal-400',
+    'bg-indigo-500/10 border-indigo-500/30 text-indigo-600 dark:text-indigo-400',
+    'bg-cyan-500/10 border-cyan-500/30 text-cyan-600 dark:text-cyan-400',
+    'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-400',
+    'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400',
+    'bg-blue-500/10 border-blue-500/30 text-blue-600 dark:text-blue-400',
+    'bg-violet-500/10 border-violet-500/30 text-violet-600 dark:text-violet-400',
+  ];
+
+  const getRoleBadgeStyle = (roleName?: string | null): string => {
+    if (!roleName) return 'bg-muted border-border text-muted-foreground';
+    const normalized = roleName.trim().toUpperCase();
+
+    // 1. ADMIN es único y exclusivo con morado imperial
+    if (normalized === 'ADMIN') {
+      return 'bg-purple-500/10 border-purple-500/30 text-purple-600 dark:text-purple-400';
     }
-    if (roleName === 'CAJERA' || roleName === 'CAJERO') return 'bg-cyan-500/10 border-cyan-500/30 text-cyan-500';
-    if (roleName === 'MOSTRADOR') return 'bg-amber-500/10 border-amber-500/30 text-amber-600';
-    return 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500';
+
+    // 2. Roles estándar clave
+    if (normalized.includes('JEFE')) {
+      return 'bg-indigo-500/10 border-indigo-500/30 text-indigo-600 dark:text-indigo-400';
+    }
+    if (normalized === 'CAJERA' || normalized === 'CAJERO') {
+      return 'bg-cyan-500/10 border-cyan-500/30 text-cyan-600 dark:text-cyan-400';
+    }
+    if (normalized === 'MOSTRADOR') {
+      return 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-400';
+    }
+    if (normalized.includes('CONTADOR') || normalized.includes('CONTABILIDAD')) {
+      return 'bg-teal-500/10 border-teal-500/30 text-teal-600 dark:text-teal-400';
+    }
+    if (normalized.includes('MULTIFUNCIÓN') || normalized.includes('MULTIFUNCION')) {
+      return 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400';
+    }
+
+    // 3. Hash determinista para cualquier rol nuevo o personalizado
+    let hash = 0;
+    for (let i = 0; i < normalized.length; i++) {
+      hash = (hash + normalized.charCodeAt(i) * (i + 1)) % ROLE_PALETTE.length;
+    }
+    const idx = Math.abs(hash) % ROLE_PALETTE.length;
+    return ROLE_PALETTE[idx] || (ROLE_PALETTE[0] as string);
   };
 
   const renderStoreAndRoleBadges = (
@@ -1474,9 +1779,7 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
           })}
         </div>
       ) : (
-        <span className="text-xs font-bold text-purple-600 bg-purple-50 px-2.5 py-0.5 rounded-full border border-purple-200 whitespace-nowrap shrink-0 inline-flex items-center">
-          Acceso Global
-        </span>
+        <span className="text-xs text-muted-foreground italic">—</span>
       );
 
       const roleElement = (
@@ -1550,7 +1853,7 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
       if (!activeStoreId) return baseEmployees;
       return baseEmployees.filter(emp => {
         const profile = profileByEmployeeId[emp.id];
-        const isGlobalAccount = profile?.role === 'ADMIN' || 
+        const isGlobalAccount = profile?.role === 'ADMIN' ||
           (!profile?.default_store_id && (!profile?.employee_stores || profile.employee_stores.length === 0) && (!emp.employee_stores || emp.employee_stores.length === 0));
         if (isGlobalAccount) return true;
         return emp.employee_stores?.some(es => es.store_id === activeStoreId);
@@ -1559,7 +1862,7 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
       const targetStoreIds = activeStoreId ? [activeStoreId] : availableStoreIds;
       return baseEmployees.filter(emp => {
         const profile = profileByEmployeeId[emp.id];
-        const isGlobalAccount = profile?.role === 'ADMIN' || 
+        const isGlobalAccount = profile?.role === 'ADMIN' ||
           (!profile?.default_store_id && (!profile?.employee_stores || profile.employee_stores.length === 0) && (!emp.employee_stores || emp.employee_stores.length === 0));
         if (isGlobalAccount) return false;
 
@@ -1575,7 +1878,7 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
       if (!activeStoreId) return baseProfiles;
       return baseProfiles.filter(p => {
         const linkedEmp = p.employee_id ? employeeById[p.employee_id] : null;
-        const isGlobalAccount = p.role === 'ADMIN' || 
+        const isGlobalAccount = p.role === 'ADMIN' ||
           (!p.default_store_id && (!p.employee_stores || p.employee_stores.length === 0) && (!linkedEmp?.employee_stores || linkedEmp.employee_stores.length === 0));
         if (isGlobalAccount) return true;
         if (p.default_store_id === activeStoreId) return true;
@@ -1587,7 +1890,7 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
       const targetStoreIds = activeStoreId ? [activeStoreId] : availableStoreIds;
       return baseProfiles.filter(p => {
         const linkedEmp = p.employee_id ? employeeById[p.employee_id] : null;
-        const isGlobalAccount = p.role === 'ADMIN' || 
+        const isGlobalAccount = p.role === 'ADMIN' ||
           (!p.default_store_id && (!p.employee_stores || p.employee_stores.length === 0) && (!linkedEmp?.employee_stores || linkedEmp.employee_stores.length === 0));
         if (isGlobalAccount) return false;
 
@@ -1599,8 +1902,8 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
     }
   }, [allProfiles, showInactiveUsers, activeStoreId, employeeById, isGlobalUser, availableStoreIds]);
 
-  const unlinkedEmployees = (isGlobalUser ? employees : visibleEmployees).filter((emp: Employee) => 
-    emp.is_active !== false && 
+  const unlinkedEmployees = (isGlobalUser ? employees : visibleEmployees).filter((emp: Employee) =>
+    emp.is_active !== false &&
     (!profileByEmployeeId[emp.id] || profileByEmployeeId[emp.id]?.id === editingUserId)
   );
 
@@ -1663,7 +1966,7 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
 
 
 
-    
+
   // --- Sorting Logic ---
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
 
@@ -1703,7 +2006,10 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
     activeProfiles, activeStoreId, activeTab, allProfiles, allRoles, availableStoreIds, availableStores, checkCanManageTarget, checkUsernameState, confirmDeleteEmployee, confirmDeleteRole, confirmGlobalAccess, createAccess, deletingEmployee, deletingRole, deletingUserId, deletingUsername, dni, editRoleDesc, editRoleName, editingEmployee, editingRole, editingUserId, email, empAccessScope, empEmail, empGlobalRole, empPassword, empStoreIds, empStoreRoleIds, empStoreRoles, empUsername, employeeById, employees, formatFriendlyErrorMessage, fullName, getRoleBadgeStyle, getValidStoreRole, globalRoles, handleCancelEdit, handleCreateEmployee, handleCreateRole, handleDeleteEmployeeClick, handleDeleteRole, handleDeleteUser, handleEditClick, handleEditEmployeeClick, handleExecuteRestoration, handleLinkExistingUser, handleLinkNewUser, handleRestoreEmployee, handleRestorePermissions, handleRestoreRole, handleRestoreUser, handleSaveCredentials, handleSaveEditRole, handleSavePermissions, handleTabChange, handleTogglePermission, hasUnsavedRoleChanges, isAdmin, isDeletingRole, isDeletingUser, isEditRoleModalOpen, isEmployeeModalOpen, isGlobalUser, isHydrated, isLinking, isRestoringUser, isRoleConfirmModalOpen, isRoleModalOpen, isRoleWarningModalOpen, isUserGlobalAdmin, isUserModalOpen, linkExistingUserId, linkMode, linkRoleId, linkingEmployee, loadData, loading, modalResetToken, newRoleDesc, newRoleName, newRoleScopeStoreId, originalRoles, password, pendingRestoration, pendingTab, permissions, phone, profileByEmployeeId, renderRoleOptions, renderStoreAndRoleBadges, renderStoreRoleList, role, roleAssignedUsers, roles, router, savingEditRole, savingEmployee, savingPermissions, savingRole, savingUser, selectedEmpId, selectedModalStoreId, selectedStoreIds, setActiveTab, setAllProfiles, setAllRoles, setConfirmGlobalAccess, setCreateAccess, setDeletingEmployee, setDeletingRole, setDeletingUserId, setDeletingUsername, setDni, setEditRoleDesc, setEditRoleName, setEditingEmployee, setEditingRole, setEditingUserId, setEmail, setEmpAccessScope, setEmpEmail, setEmpGlobalRole, setEmpPassword, setEmpStoreIds, setEmpStoreRoleIds, setEmpStoreRoles, setEmpUsername, setEmployees, setFullName, setHasUnsavedRoleChanges, setIsDeletingRole, setIsDeletingUser, setIsEditRoleModalOpen, setIsEmployeeModalOpen, setIsLinking, setIsRestoringUser, setIsRoleConfirmModalOpen, setIsRoleModalOpen, setIsRoleWarningModalOpen, setIsUserModalOpen, setLinkExistingUserId, setLinkMode, setLinkRoleId, setLinkingEmployee, setLoading, setModalResetToken, setNewRoleDesc, setNewRoleName, setNewRoleScopeStoreId, setOriginalRoles, setPassword, setPendingRestoration, setPendingTab, setPhone, setRoleAssignedUsers, setRoles, setSavingEditRole, setSavingEmployee, setSavingPermissions, setSavingRole, setSavingUser, setSelectedEmpId, setSelectedModalStoreId, setSelectedStoreIds, setShowEmpPassword, setShowInactiveEmployees, setShowInactiveRoles, setShowInactiveUsers, setShowRoleExitConfirm, setShowUserPassword, setToast, setUserAccessScope, setUserGlobalRole, setUserStoreRoleIds, setUserStoreRoles, setUsername, showEmpPassword, showInactiveEmployees, showInactiveRoles, showInactiveUsers, showRoleExitConfirm, showToast, showUserPassword, storeMap, syncEmployeeStoreAssignment, targetModalStoreId, toast, unlinkedEmployees, userAccessScope, userGlobalRole, userStoreRoleIds, userStoreRoles, username, visibleEmployees, visibleRoles,
     isManagePermsModalOpen, setIsManagePermsModalOpen, managingPermsRoleId, setManagingPermsRoleId,
     sortConfig, requestSort, sortedEmployees, sortedProfiles, sortedRoles,
-    unlinkingEmployee, setUnlinkingEmployee, handleUnlinkEmployeeClick, confirmUnlinkEmployee
+    unlinkingEmployee, setUnlinkingEmployee, handleUnlinkEmployeeClick, confirmUnlinkEmployee,
+    empConfirmGlobalAdmin, setEmpConfirmGlobalAdmin,
+    currentProfileId, currentEmployeeId, currentUsername,
+    isOwner
   };
 
   return (

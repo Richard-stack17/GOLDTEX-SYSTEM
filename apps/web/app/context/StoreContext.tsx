@@ -78,15 +78,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     loadUserStores();
   }, [isHydrated, employeeId, role]);
 
-  // BUG FIX CRÍTICO: Forzar reseteo si el nuevo usuario no tiene permisos globales
+  // Auto-ajuste para rutas mono-tienda (/hub, /pos, /caja): siempre forzar modo SINGLE
   useEffect(() => {
-    if (isHydrated && role && !isLoadingStores && !isGlobalUser) {
+    if (!isHydrated || !role || isLoadingStores || availableStores.length === 0) return;
+    const cleanPath = (pathname || '').replace(/\/$/, '') || '/';
+    const isSingleStoreRoute = cleanPath === '/hub' || cleanPath.startsWith('/pos') || cleanPath.startsWith('/caja');
+
+    if (isSingleStoreRoute && (isAllStoresMode || !activeStore)) {
       setIsAllStoresModeState(false);
-      if (typeof window !== "undefined") {
+      const preferred = availableStores.find(s => s.id === defaultStoreId) || availableStores[0];
+      if (preferred) {
+        setActiveStoreState(preferred);
+        localStorage.setItem("goltex_active_store_id", preferred.id);
+        localStorage.setItem("goltex_active_store_name", preferred.name);
         localStorage.setItem("goltex_store_mode", "SINGLE");
+        if (preferred.role && preferred.role !== role && role !== 'ADMIN') {
+          setRole(preferred.role);
+        }
       }
     }
-  }, [role, employeeId, isGlobalUser, isHydrated, isLoadingStores]);
+  }, [role, isHydrated, isLoadingStores, pathname, isAllStoresMode, activeStore, availableStores, defaultStoreId, setRole]);
 
   const applyProfileStore = async (targetStoreId: string | null) => {
     if (!targetStoreId) return;
@@ -267,18 +278,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
 
       let debugMode = "NINGUNO";
+      const cleanCurrentPath = (typeof window !== 'undefined' ? window.location.pathname : '').replace(/\/$/, '') || '/';
+      const isCurrentSingleStoreRoute = cleanCurrentPath === '/hub' || cleanCurrentPath.startsWith('/pos') || cleanCurrentPath.startsWith('/caja');
 
       if (storesForUser.length > 1) {
         // Si tiene múltiples tiendas y tenía "Todas" guardado, o es la primera vez (no hay nada guardado)
-        if (savedMode === "ALL" || (!savedMode && !savedStoreId)) {
+        if (!isCurrentSingleStoreRoute && (savedMode === "ALL" || (!savedMode && !savedStoreId))) {
           setIsAllStoresModeState(true);
           setActiveStoreState(null);
           localStorage.setItem("goltex_store_mode", "ALL");
           debugMode = "MODO CONSOLIDADO (Todas)";
         } else {
-          // Buscar la tienda guardada o usar la primera como fallback
+          // Buscar la tienda guardada o usar defaultStoreId o la primera como fallback
           let selected = storesForUser.find(s => s.id === savedStoreId);
-          if (!selected) selected = storesForUser[0];
+          if (!selected) selected = storesForUser.find(s => s.id === defaultStoreId) || storesForUser[0];
 
           setIsAllStoresModeState(false);
           setActiveStoreState(selected!);

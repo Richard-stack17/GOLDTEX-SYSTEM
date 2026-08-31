@@ -14,9 +14,10 @@ import { useTableSort } from '../hooks/useTableSort';
 import {
   Search, ClipboardList, Trash2, Calendar, Filter,
   ChevronDown, ChevronUp, AlertCircle, ShoppingBag, ArrowLeft,
-  UserCheck, CreditCard, XCircle, User, ArrowUpDown, ArrowUp, ArrowDown, Layers
+  UserCheck, CreditCard, XCircle, User, ArrowUpDown, ArrowUp, ArrowDown, Layers, Printer
 } from 'lucide-react';
 import { formatTicketHash, parseInternalTicketNum } from '../lib/ticket-sequence';
+import { silentPrintSaleReceipt } from '../configuracion/utils/printerEngine';
 
 const formatPeruDateTimeFull = (isoString?: string | null) => {
   if (!isoString) return null;
@@ -101,6 +102,12 @@ export default function HistorialProformasPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3500);
+  };
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
@@ -123,7 +130,7 @@ export default function HistorialProformasPage() {
           cashier:profiles!cashier_id(username, employees:employees!employee_id(full_name)),
           cancelled_by:profiles!cancelled_by_id(username, employees:employees!employee_id(full_name)),
           customers ( business_name, doc_number, document_type ),
-          transactions ( payment_method, amount, sequence, created_at ),
+          transactions ( payment_method, amount, sequence, created_at, surcharge_pct, surcharge_amount ),
           children:sales!parent_sale_id(id, internal_ticket_number, proforma_number, total, items, seller_id, created_at, seller:profiles!seller_id(username, employees:employees!employee_id(full_name)))
         `)
         .is('parent_sale_id', null)
@@ -292,6 +299,17 @@ export default function HistorialProformasPage() {
   const handleSoftDelete = (id: string, currentStatus: string, document_number: string) => {
     if (currentStatus === 'CANCELLED') return;
     setSaleToCancel({ id, document_number });
+  };
+
+  const handlePrintSale = async (sale: SaleRow) => {
+    try {
+      showToast("Enviando a la impresora...", "success");
+      await silentPrintSaleReceipt(sale, false, activeStoreId || undefined);
+      showToast("Ticket impreso correctamente", "success");
+    } catch (e: any) {
+      console.error("Error al imprimir ticket:", e);
+      showToast("Error al imprimir: " + (e?.message || "Impresora no configurada o desconectada"), "error");
+    }
   };
 
   if (!isHydrated) return null;
@@ -511,9 +529,13 @@ export default function HistorialProformasPage() {
                           <td className="px-2.5 py-2.5 font-mono font-bold text-gray-700 whitespace-nowrap">
                             {(() => {
                               const isConsolidated = sale.source_type === 'CONSOLIDATED' || (Array.isArray(sale.children) && sale.children.length > 0);
-                              const childNums = Array.isArray(sale.children) && sale.children.length > 0
-                                ? sale.children.map((c: any) => c.internal_ticket_number || parseInternalTicketNum(c)).filter(Boolean)
-                                : [];
+                              const rawChildren = Array.isArray(sale.children) && sale.children.length > 0 ? sale.children : [];
+                              const sortedChildren = [...rawChildren].sort((a: any, b: any) => {
+                                const numA = Number(a.internal_ticket_number || parseInternalTicketNum(a) || 0);
+                                const numB = Number(b.internal_ticket_number || parseInternalTicketNum(b) || 0);
+                                return numA - numB;
+                              });
+                              const childNums = sortedChildren.map((c: any) => c.internal_ticket_number || parseInternalTicketNum(c)).filter(Boolean);
 
                               if (isConsolidated && childNums.length > 0) {
                                 return (
@@ -550,9 +572,13 @@ export default function HistorialProformasPage() {
                           <td className="px-3 py-2.5 font-mono text-gray-600">
                             {(() => {
                               const isConsolidated = sale.source_type === 'CONSOLIDATED' || (Array.isArray(sale.children) && sale.children.length > 0);
-                              const childDocs = Array.isArray(sale.children) && sale.children.length > 0
-                                ? sale.children.map((c: any) => c.proforma_number || (c.internal_ticket_number ? `TKT-${String(c.internal_ticket_number).padStart(4, '0')}` : '')).filter(Boolean)
-                                : [];
+                              const rawChildren = Array.isArray(sale.children) && sale.children.length > 0 ? sale.children : [];
+                              const sortedChildren = [...rawChildren].sort((a: any, b: any) => {
+                                const numA = Number(a.internal_ticket_number || parseInternalTicketNum(a) || 0);
+                                const numB = Number(b.internal_ticket_number || parseInternalTicketNum(b) || 0);
+                                return numA - numB;
+                              });
+                              const childDocs = sortedChildren.map((c: any) => c.proforma_number || (c.internal_ticket_number ? `TKT-${String(c.internal_ticket_number).padStart(4, '0')}` : '')).filter(Boolean);
 
                               const ticketCodeElement = isConsolidated && childDocs.length > 0
                                 ? (
@@ -636,6 +662,15 @@ export default function HistorialProformasPage() {
                               >
                                 {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                               </button>
+                              {!isCancelled && (
+                                <button
+                                  onClick={() => handlePrintSale(sale)}
+                                  className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                                  title="Reimprimir Ticket"
+                                >
+                                  <Printer className="w-4 h-4" />
+                                </button>
+                              )}
                               {!isCancelled && permissions?.history_cancel_proforma && (
                                 <button
                                   onClick={() => handleSoftDelete(sale.id, sale.status, sale.proforma_number || sale.invoice_number || '')}
@@ -695,13 +730,13 @@ export default function HistorialProformasPage() {
 
                                     return (
                                       <div className="flex flex-wrap items-center gap-2">
-                                        {/* 1. Cliente */}
-                                        <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 border border-slate-200 text-slate-800 rounded-full text-xs font-bold">
-                                          <User className="w-3.5 h-3.5 text-slate-600 shrink-0" />
-                                          <span>CLIENTE: <strong className="uppercase">{clientName}</strong><span className="text-[10px] text-slate-500 font-mono">{docInfo}</span></span>
-                                        </div>
+                                        {(isPaid || !isVarios) && (
+                                          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 border border-slate-200 text-slate-800 rounded-full text-xs font-bold">
+                                            <User className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+                                            <span>CLIENTE: <strong className="uppercase">{clientName}</strong><span className="text-[10px] text-slate-500 font-mono">{docInfo}</span></span>
+                                          </div>
+                                        )}
 
-                                        {/* 2. Atendido */}
                                         {isMultipleSeller ? (
                                           <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-50 border border-purple-200 text-purple-900 rounded-full text-xs font-bold shadow-xs">
                                             <Layers className="w-3.5 h-3.5 text-purple-600 shrink-0" />
@@ -715,7 +750,6 @@ export default function HistorialProformasPage() {
                                           </div>
                                         )}
 
-                                        {/* 3. Cobrado (Si existió cobro) */}
                                         {isPaid && (
                                           <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-50 border border-blue-200 text-blue-800 rounded-full text-xs font-bold">
                                             <CreditCard className="w-3.5 h-3.5 text-blue-600 shrink-0" />
@@ -724,7 +758,6 @@ export default function HistorialProformasPage() {
                                           </div>
                                         )}
 
-                                        {/* 4. Anulado (Si fue anulada) */}
                                         {isCancelled && (
                                           <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-rose-50 border border-rose-200 text-rose-800 rounded-full text-xs font-bold">
                                             <XCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
@@ -742,7 +775,11 @@ export default function HistorialProformasPage() {
                                       <Layers className="w-4 h-4 text-indigo-600" /> Proformas Unificadas en esta Venta ({((sale as any).children).length})
                                     </h5>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                      {((sale as any).children).map((child: any) => {
+                                      {[...((sale as any).children)].sort((a: any, b: any) => {
+                                        const numA = Number(a.internal_ticket_number || parseInternalTicketNum(a) || 0);
+                                        const numB = Number(b.internal_ticket_number || parseInternalTicketNum(b) || 0);
+                                        return numA - numB;
+                                      }).map((child: any) => {
                                         const childTime = formatPeruDateTimeFull(child.created_at);
                                         return (
                                           <div key={child.id} className="flex items-center justify-between bg-white px-3.5 py-2.5 rounded-lg border border-indigo-100 text-xs shadow-sm">
@@ -812,7 +849,7 @@ export default function HistorialProformasPage() {
                                             </>
                                           )}
                                           <tr>
-                                            <td colSpan={3} className="py-2 text-right font-black text-gray-900 uppercase">Total Cobrado:</td>
+                                            <td colSpan={3} className="py-2 text-right font-black text-gray-900 uppercase">Total:</td>
                                             <td className="py-2 text-right font-black text-teal-700 text-sm font-mono">S/ {sale.total.toFixed(2)}</td>
                                           </tr>
                                         </tfoot>
@@ -869,6 +906,16 @@ export default function HistorialProformasPage() {
         description={`¿Estás seguro de anular el documento ${saleToCancel?.document_number || ''}? Esta acción no se puede deshacer.`}
         isLoading={isCanceling}
       />
+
+      {toast && (
+        <div className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl shadow-xl flex items-center gap-3 border text-sm font-bold animate-in fade-in slide-in-from-bottom-3 duration-200 ${
+          toast.type === 'success' 
+            ? 'bg-emerald-600 text-white border-emerald-500' 
+            : 'bg-red-600 text-white border-red-500'
+        }`}>
+          <span>{toast.message}</span>
+        </div>
+      )}
     </div>
   );
 }

@@ -8,7 +8,7 @@ import { isNativeAndroidApp } from '../lib/platform';
  * Rutas raíz donde presionar "Atrás" no tiene a dónde ir.
  * En estas rutas el botón no hace nada (evita cerrar la app accidentalmente).
  */
-const ROOT_PATHS = ['/hub', '/pos', '/login', '/'];
+const ROOT_PATHS = ['/hub', '/login', '/'];
 
 /**
  * Registra el manejador del botón físico de retroceso de Android.
@@ -32,6 +32,16 @@ export function useAndroidBackButton() {
         App = mod.App;
 
         listenerHandle = await App.addListener('backButton', ({ canGoBack }) => {
+          // 1. Emitir evento cancelable para que pantallas con estado (ej. POS) puedan interceptarlo
+          const customEvent = new CustomEvent('goltex:android-back', {
+            cancelable: true,
+            bubbles: true,
+          });
+          const wasIntercepted = !window.dispatchEvent(customEvent);
+          if (wasIntercepted) {
+            return;
+          }
+
           const isRoot = ROOT_PATHS.some(
             (p) => pathname === p || pathname?.startsWith(p + '/')
           );

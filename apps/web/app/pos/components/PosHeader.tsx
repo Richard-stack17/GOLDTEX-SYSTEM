@@ -1,7 +1,7 @@
 "use client";
 import React from "react";
 import { Button, Input } from "@goltex/ui";
-import { ArrowLeft, Search, Sun, Moon } from "lucide-react";
+import { ArrowLeft, Search, Sun, Moon, Printer, RefreshCw, AlertTriangle } from "lucide-react";
 import AccountSwitcher from "../../components/AccountSwitcher";
 import { useTheme } from "../../context/ThemeContext";
 import { useStore } from "../../context/StoreContext";
@@ -13,8 +13,11 @@ export default function PosHeader() {
   const { activeStore } = useStore();
   const { permissions } = useRole();
   const {
-    handleBackClick, search, setQwertyOpen, isCajaOpen, handleOpenCaja, handleCloseCajaAttempt, ticketNumber
+    handleBackClick, search, setQwertyOpen, isCajaOpen, handleOpenCaja, handleCloseCajaAttempt, ticketNumber, 
+    activePrinter, isPrinterAuthorized, isPairingPrinter, handlePairPrinter
   } = usePos();
+
+  const deviceDisplayName = activePrinter?.name || activePrinter?.model || activePrinter?.mac_address || "Impresora";
 
   return (
     <div className="p-3 sm:p-4 border-b border-border bg-card z-10 flex flex-col gap-2 shadow-sm relative shrink-0">
@@ -27,7 +30,7 @@ export default function PosHeader() {
           {activeStore && (
             <div className="flex flex-col text-left shrink-0">
               <span className="text-[9px] font-black text-muted-foreground uppercase tracking-widest leading-none">Punto de Venta</span>
-              <span className="text-xs font-black text-amber-600 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-lg mt-1 uppercase leading-none truncate max-w-[130px] xl:max-w-[160px]">
+              <span className="text-xs font-black text-amber-600 bg-amber-500/10 border border-amber-500/20 px-2.5 py-0.5 rounded-lg mt-1 uppercase leading-none truncate max-w-[130px] xl:max-w-[160px]">
                 {activeStore.name}
               </span>
             </div>
@@ -60,6 +63,58 @@ export default function PosHeader() {
             >
               Cerrar Caja
             </button>
+          )}
+          {/* Badge de Impresora Inteligente (Con 1-Click Connect y Alerta Visual) */}
+          {activePrinter ? (
+            isPrinterAuthorized === false ? (
+              <button
+                type="button"
+                onClick={handlePairPrinter}
+                disabled={isPairingPrinter}
+                className="px-3 h-10 xl:h-11 shrink-0 flex items-center gap-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border-2 border-amber-500 text-amber-900 dark:text-amber-300 font-bold text-xs shadow-xs transition-all cursor-pointer select-none animate-pulse"
+                title={`Atención: Impresora ${deviceDisplayName} no vinculada. Haz clic para conectar.`}
+              >
+                {isPairingPrinter ? (
+                  <RefreshCw className="w-4 h-4 animate-spin text-amber-600 dark:text-amber-400 shrink-0" />
+                ) : (
+                  <div className="relative shrink-0 flex items-center justify-center">
+                    <Printer className="w-4 h-4 text-amber-700 dark:text-amber-300" />
+                    <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-500 ring-2 ring-card animate-ping" />
+                    <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-600" />
+                  </div>
+                )}
+                <div className="flex flex-col text-left leading-tight">
+                  <span className="text-[9px] font-black text-amber-700 dark:text-amber-400 uppercase tracking-wider">
+                    {isPairingPrinter ? 'Vinculando...' : 'Requerido'}
+                  </span>
+                  <span className="text-xs font-black truncate max-w-[120px] xl:max-w-[150px]">
+                    Conectar {deviceDisplayName}
+                  </span>
+                </div>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handlePairPrinter}
+                disabled={isPairingPrinter}
+                className="bg-emerald-500/10 hover:bg-emerald-500/15 border border-emerald-500/30 px-3 h-10 xl:h-11 shrink-0 flex items-center gap-2 rounded-xl text-emerald-700 dark:text-emerald-400 transition-all cursor-pointer select-none shadow-xs"
+                title={`Impresora lista: ${activePrinter.name} (${deviceDisplayName} • ${activePrinter.paper_width || 80}mm). Clic para re-vincular si es necesario.`}
+              >
+                <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0 animate-pulse" />
+                <Printer className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                <span className="text-[11px] font-bold truncate max-w-[100px] xl:max-w-[130px] hidden md:inline">
+                  {deviceDisplayName}
+                </span>
+              </button>
+            )
+          ) : (
+            <div
+              className="bg-secondary border border-border px-2.5 h-10 xl:h-11 shrink-0 flex items-center gap-1.5 rounded-xl text-muted-foreground select-none opacity-80"
+              title="Sin impresora configurada para esta sucursal"
+            >
+              <Printer className="w-4 h-4 shrink-0 opacity-50" />
+              <span className="text-[11px] font-semibold hidden md:inline">Sin Impresora</span>
+            </div>
           )}
           <div className="h-10 xl:h-11 shrink-0 flex items-center">
             <AccountSwitcher />
@@ -124,6 +179,46 @@ export default function PosHeader() {
             )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            {activePrinter && (
+              isPrinterAuthorized === false ? (
+                <button
+                  type="button"
+                  onClick={handlePairPrinter}
+                  disabled={isPairingPrinter}
+                  className="px-2.5 h-10 shrink-0 flex items-center gap-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border-2 border-amber-500 text-amber-900 dark:text-amber-300 font-black text-[11px] uppercase tracking-tight shadow-xs transition-all cursor-pointer relative animate-pulse"
+                  title={`Conectar ${deviceDisplayName}`}
+                >
+                  {isPairingPrinter ? (
+                    <RefreshCw className="w-4 h-4 animate-spin text-amber-600 shrink-0" />
+                  ) : (
+                    <div className="relative shrink-0 flex items-center justify-center">
+                      <Printer className="w-4 h-4 text-amber-700 dark:text-amber-300" />
+                      <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-500 ring-2 ring-card" />
+                    </div>
+                  )}
+                  <span className="truncate max-w-[90px]">
+                    {isPairingPrinter ? '...' : `Conectar`}
+                  </span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handlePairPrinter}
+                  disabled={isPairingPrinter}
+                  className="w-10 h-10 shrink-0 flex items-center justify-center rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 transition-all cursor-pointer relative"
+                  title={`Impresora lista: ${deviceDisplayName}`}
+                >
+                  {isPairingPrinter ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <>
+                      <Printer className="w-4 h-4" />
+                      <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-background" />
+                    </>
+                  )}
+                </button>
+              )
+            )}
             <AccountSwitcher />
             <button
               onClick={toggleTheme}

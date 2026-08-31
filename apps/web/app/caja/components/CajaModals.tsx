@@ -1,8 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@goltex/ui";
-import { User, FileText, CheckCircle2, RefreshCw, XCircle, Layers } from "lucide-react";
+import { User, FileText, CheckCircle2, RefreshCw, XCircle, Layers, ShoppingBag, ChevronDown } from "lucide-react";
+import { TicketItemBreakdown } from './TicketItemBreakdown';
 
 export function CajaModals(props: any) {
+  const [showItemsBreakdown, setShowItemsBreakdown] = useState(false);
   const {
     selectedTicket,
     closeModal,
@@ -96,7 +98,11 @@ export function CajaModals(props: any) {
                   </span>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-32 overflow-y-auto pr-1">
-                  {selectedTicket._consolidated_tickets.map((t: any) => {
+                  {[...selectedTicket._consolidated_tickets].sort((a: any, b: any) => {
+                    const numA = parseInternalTicketNum ? parseInternalTicketNum(a) : (a.internal_ticket_number || 0);
+                    const numB = parseInternalTicketNum ? parseInternalTicketNum(b) : (b.internal_ticket_number || 0);
+                    return Number(numA) - Number(numB);
+                  }).map((t: any) => {
                     const ticketNo = parseInternalTicketNum ? parseInternalTicketNum(t) : (t.internal_ticket_number || 0);
                     const formattedHash = formatTicketHash ? formatTicketHash(ticketNo) : `#${ticketNo}`;
                     return (
@@ -113,6 +119,26 @@ export function CajaModals(props: any) {
                 </div>
               </div>
             )}
+            {/* Acordeón de Desglose de Productos */}
+            <div className="border border-border rounded-xl overflow-hidden bg-card">
+              <button
+                type="button"
+                onClick={() => setShowItemsBreakdown(prev => !prev)}
+                className="w-full px-4 py-2.5 bg-secondary/40 hover:bg-secondary/70 flex items-center justify-between text-xs font-bold text-foreground transition-colors"
+              >
+                <span className="flex items-center gap-2">
+                  <ShoppingBag className="w-4 h-4 text-indigo-500" />
+                  {showItemsBreakdown ? "Ocultar desglose de productos" : "Ver desglose de productos / servicios"}
+                </span>
+                <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${showItemsBreakdown ? "rotate-180 text-indigo-500" : ""}`} />
+              </button>
+              {showItemsBreakdown && (
+                <div className="p-3 border-t border-border bg-background/50">
+                  <TicketItemBreakdown ticket={selectedTicket} compact />
+                </div>
+              )}
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
               {/* Columna Izquierda: Métodos de Pago */}
               <div className="space-y-5">
@@ -123,15 +149,19 @@ export function CajaModals(props: any) {
                       type="button"
                       onMouseDown={(e) => {
                         e.preventDefault();
-                        if (!focusedMethod) return;
                         setPaymentAmounts((prev: any) => ({
                           ...prev,
-                          [focusedMethod]: totalServices.toFixed(2)
+                          EFECTIVO: totalServices.toFixed(2)
                         }));
+                        setFocusedMethod('EFECTIVO');
+                        setTimeout(() => {
+                          document.getElementById('payment-input-EFECTIVO')?.focus();
+                        }, 0);
                       }}
-                      className="bg-purple-100 hover:bg-purple-200 text-purple-700 text-xs font-bold px-4 py-1.5 rounded-full transition-colors border border-purple-200"
+                      className="bg-purple-100 hover:bg-purple-200 dark:bg-purple-950/60 dark:hover:bg-purple-900/60 text-purple-700 dark:text-purple-300 text-xs font-bold px-4 py-1.5 rounded-full transition-colors border border-purple-200 dark:border-purple-800 shadow-xs"
+                      title="Asignar el total de servicios automáticamente a Efectivo"
                     >
-                      Atajo Servicios
+                      Atajo Servicios (S/ {totalServices.toFixed(2)})
                     </button>
                   )}
                 </div>

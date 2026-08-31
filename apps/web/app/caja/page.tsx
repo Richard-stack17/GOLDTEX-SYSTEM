@@ -1,5 +1,6 @@
 "use client";
 import { CajaModals } from './components/CajaModals';
+import { TicketItemBreakdown } from './components/TicketItemBreakdown';
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import Link from "next/link";
@@ -11,8 +12,8 @@ import {
 import {
   CreditCard, Banknote, Smartphone, RefreshCw,
   CheckCircle2, AlertCircle, ArrowLeft, Clock, Receipt, XCircle,
-  LayoutGrid, List, Trash2, Delete, Sun, Moon, FileText, User, Printer, Lock, Layers,
-  ArrowUpDown, ArrowUp, ArrowDown, CheckSquare, Database, Landmark
+  LayoutGrid, List, Trash2, Delete, Sun, Moon, FileText, User, UserCheck, Printer, Lock, Layers,
+  ArrowUpDown, ArrowUp, ArrowDown, CheckSquare, Database, Landmark, ChevronDown, ShoppingBag
 } from "lucide-react";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { useTableSort } from "../hooks/useTableSort";
@@ -57,6 +58,14 @@ type PendingTicket = {
   cashier_id?: string | null;
   seller_id?: string | null;
   cashier?: {
+    username: string;
+    employees?: { full_name: string }[] | { full_name: string } | null;
+  } | null;
+  seller?: {
+    username: string;
+    employees?: { full_name: string }[] | { full_name: string } | null;
+  } | null;
+  cancelled_by?: {
     username: string;
     employees?: { full_name: string }[] | { full_name: string } | null;
   } | null;
@@ -124,7 +133,6 @@ function TicketTableRow({
   statusBadge,
   handleCancel,
   openModal,
-  handleReprint,
   showToast,
   permissions,
   isSelected,
@@ -205,7 +213,7 @@ function TicketTableRow({
         return;
       }
 
-      const success = await onSaveRow(ticket, rowBuffer);
+  const success = await onSaveRow(ticket, rowBuffer);
       if (success) {
         showToast("Ticket actualizado correctamente", "success");
       } else {
@@ -226,287 +234,322 @@ function TicketTableRow({
   const ticketNo = parseInternalTicketNum(ticket);
   const sunatDoc = starsoftDocNum(ticket);
   const badge = statusBadge(ticket.status);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   return (
-    <tr
-      id={`ticket-row-${ticket.id}`}
-      className={`hover:bg-secondary/30 transition-colors ${isSelected ? 'bg-indigo-50/50 dark:bg-indigo-950/20' : ''}`}
-      onFocus={handleFocus}
-      onBlur={handleBlur}
-      onClick={(e) => {
-        if (permissions?.caja_cobro_consolidado && onToggleSelect) {
-          const target = e.target as HTMLElement;
-          if (target.tagName === 'INPUT' || target.tagName === 'BUTTON' || target.closest('button')) return;
-          if (ticket.status !== 'PENDING') {
-            showToast("Solo se pueden unificar proformas pendientes", "error");
-            return;
+    <React.Fragment>
+      <tr
+        id={`ticket-row-${ticket.id}`}
+        className={`hover:bg-secondary/30 transition-colors ${isSelected ? 'bg-indigo-50/50 dark:bg-indigo-950/20' : ''} ${isExpanded ? 'bg-secondary/20' : ''}`}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
+        onClick={(e) => {
+          if (permissions?.caja_cobro_consolidado && onToggleSelect) {
+            const target = e.target as HTMLElement;
+            if (target.tagName === 'INPUT' || target.tagName === 'BUTTON' || target.closest('button')) return;
+            if (ticket.status !== 'PENDING') {
+              showToast("Solo se pueden unificar proformas pendientes", "error");
+              return;
+            }
+            onToggleSelect(ticket.id);
           }
-          onToggleSelect(ticket.id);
-        }
-      }}
-    >
-      {permissions?.caja_cobro_consolidado && (
-        <td className="px-4 py-4 text-center w-12" onClick={(e) => e.stopPropagation()}>
-          <div className="flex items-center justify-center">
-            <input
-              type="checkbox"
-              checked={isSelected}
-              onChange={() => {
-                if (ticket.status !== 'PENDING') {
-                  showToast("Solo se pueden unificar proformas pendientes", "error");
-                  return;
-                }
-                onToggleSelect(ticket.id);
-              }}
-              disabled={ticket.status !== 'PENDING'}
-              className="w-5 h-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-            />
-          </div>
-        </td>
-      )}
-      <td className="px-4 py-3">
-        {(() => {
-          const isConsolidated = ticket.source_type === 'CONSOLIDATED' || (Array.isArray(ticket.children) && ticket.children.length > 0);
-          const childTickets = Array.isArray(ticket.children) && ticket.children.length > 0
-            ? ticket.children
-            : (Array.isArray(ticket._consolidated_tickets) ? ticket._consolidated_tickets : []);
-          const childNums = childTickets.map((c: any) => c.internal_ticket_number || parseInternalTicketNum(c)).filter(Boolean);
-
-          if (isConsolidated && childNums.length > 0) {
-            return (
-              <div className="flex flex-col gap-1">
-                <div className="flex items-center gap-1 flex-wrap">
-                  {childNums.map((num: number, idx: number) => (
-                    <React.Fragment key={idx}>
-                      <span className="font-black text-sm text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 px-1.5 py-0.5 rounded-md shadow-sm">
-                        #{num}
-                      </span>
-                      {idx < childNums.length - 1 && <span className="text-xs font-bold text-muted-foreground">+</span>}
-                    </React.Fragment>
-                  ))}
-                </div>
-                <span className="inline-flex items-center w-fit px-1.5 py-0.2 rounded-full text-[9px] font-black uppercase tracking-wider bg-violet-100 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800">
-                  UNIFICADO ({childNums.length})
-                </span>
-              </div>
-            );
-          }
-
-          return (
-            <div className="flex items-center gap-1.5">
-              <div className="font-black text-lg">{formatTicketHash(ticketNo)}</div>
-              {isConsolidated && (
-                <span className="px-1.5 py-0.2 rounded-full text-[9px] font-black uppercase tracking-wider bg-violet-100 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800">
-                  UNIFICADO
-                </span>
-              )}
+        }}
+      >
+        {permissions?.caja_cobro_consolidado && (
+          <td className="px-4 py-4 text-center w-12" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-center">
+              <input
+                type="checkbox"
+                checked={isSelected}
+                onChange={() => {
+                  if (ticket.status !== 'PENDING') {
+                    showToast("Solo se pueden unificar proformas pendientes", "error");
+                    return;
+                  }
+                  onToggleSelect(ticket.id);
+                }}
+                disabled={ticket.status !== 'PENDING'}
+                className="w-5 h-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+              />
             </div>
-          );
-        })()}
-        {sunatDoc && (
-          <span className="text-[11px] text-muted-foreground font-mono block mt-0.5">Doc: {sunatDoc}</span>
+          </td>
         )}
-      </td>
-      <td className="px-4 py-3 text-muted-foreground font-mono">
-        {(() => {
-          const isConsolidated = ticket.source_type === 'CONSOLIDATED' || (Array.isArray(ticket.children) && ticket.children.length > 0);
-          const childTickets = Array.isArray(ticket.children) && ticket.children.length > 0
-            ? ticket.children
-            : (Array.isArray(ticket._consolidated_tickets) ? ticket._consolidated_tickets : []);
-
-          if (isConsolidated) {
-            const docNames = childTickets.map((c: any) => c.proforma_number || (c.internal_ticket_number ? `TKT-${String(c.internal_ticket_number).padStart(4, '0')}` : '')).filter(Boolean);
-            return (
-              <div className="flex flex-col gap-0.5">
-                {docNames.length > 0 ? (
-                  docNames.map((docName: string, idx: number) => (
-                    <span key={idx} className="font-bold text-xs text-indigo-700 dark:text-indigo-300 tracking-tight">
-                      {docName}
-                    </span>
-                  ))
-                ) : (
-                  <span className="font-bold text-xs text-indigo-700 dark:text-indigo-300">
-                    {ticket.proforma_number || 'UNIFICADO'}
-                  </span>
-                )}
-                {ticket.invoice_number && <div className="text-[10px] text-emerald-600 font-bold font-sans">{ticket.invoice_number}</div>}
-              </div>
-            );
-          }
-
-          return (
-            <div>
-              <div className="text-xs">{ticket.proforma_number || '—'}</div>
-              {ticket.invoice_number && <div className="text-[10px] text-emerald-600 font-bold font-sans">{ticket.invoice_number}</div>}
-            </div>
-          );
-        })()}
-      </td>
-      <td className="px-2 py-1 whitespace-nowrap min-w-[100px]">
-        {ticket.status === "PENDING" ? (
-          <span className="px-4 font-mono font-bold text-gray-400 text-right block w-full">—</span>
-        ) : (
-          <input type="number" step="0.01" placeholder="0.00"
-            value={rowBuffer.monto}
-            onChange={(e) => handleChange('monto', e.target.value)}
-            onKeyDown={handleKeyDown}
-            onWheel={(e) => e.currentTarget.blur()}
-            className={`${inlineCellCls} text-right text-gray-700 dark:text-gray-200 ${spinnerOff}`}
-          />
-        )}
-      </td>
-      <td className="px-2 py-1 whitespace-nowrap min-w-[100px]">
-        {ticket.status === "PENDING" ? (
-          <span className="px-4 font-mono font-bold text-gray-400 text-right block w-full">—</span>
-        ) : (
-          <input type="number" step="0.01" placeholder="0.00"
-            value={rowBuffer.bcp}
-            onChange={(e) => handleChange('bcp', e.target.value)}
-            onKeyDown={handleKeyDown}
-            onWheel={(e) => e.currentTarget.blur()}
-            className={`${inlineCellCls} text-right text-gray-700 dark:text-gray-200 ${spinnerOff}`}
-          />
-        )}
-      </td>
-      <td className="px-2 py-1 whitespace-nowrap min-w-[100px]">
-        {ticket.status === "PENDING" ? (
-          <span className="px-4 font-mono font-bold text-gray-400 text-right block w-full">—</span>
-        ) : (
-          <input type="number" step="0.01" placeholder="0.00"
-            value={rowBuffer.bbva}
-            onChange={(e) => handleChange('bbva', e.target.value)}
-            onKeyDown={handleKeyDown}
-            onWheel={(e) => e.currentTarget.blur()}
-            className={`${inlineCellCls} text-right text-gray-700 dark:text-gray-200 ${spinnerOff}`}
-          />
-        )}
-      </td>
-      <td className="px-2 py-1 whitespace-nowrap min-w-[100px]">
-        {ticket.status === "PENDING" ? (
-          <span className="px-4 font-mono font-bold text-gray-400 text-right block w-full">—</span>
-        ) : (
-          <input type="number" step="0.01" placeholder="0.00"
-            readOnly={true}
-            disabled={true}
-            value={rowBuffer.izipay}
-            onChange={(e) => handleChange('izipay', e.target.value)}
-            onKeyDown={handleKeyDown}
-            onWheel={(e) => e.currentTarget.blur()}
-            className={`${inlineCellCls} text-right bg-slate-100 text-slate-500 cursor-not-allowed border-slate-200 opacity-75 font-semibold ${spinnerOff}`}
-          />
-        )}
-      </td>
-      <td className="px-4 py-3 text-right whitespace-nowrap">
-        {ticket.status === "PENDING" ? (
-          <div className="flex flex-col items-end leading-none">
-            <span className="font-black text-orange-500 text-lg">
-              S/ {ticket.total.toFixed(2)}
-            </span>
-            <span className="text-[10px] font-bold text-orange-500/80 uppercase mt-1">
-              Por cobrar
-            </span>
-          </div>
-        ) : ticket.status === "CANCELLED" ? (
-          <span className="font-black text-muted-foreground/60 line-through text-lg">
-            S/ {ticket.total.toFixed(2)}
-          </span>
-        ) : (() => {
-          const typedSuma = (Number(rowBuffer.monto) || 0) + (Number(rowBuffer.bcp) || 0) + (Number(rowBuffer.bbva) || 0) + (Number(rowBuffer.izipay) || 0);
-          const isMatch = Math.abs(typedSuma - ticket.total) < 0.01;
-
-          return (
-            <div className="flex flex-col items-end leading-none">
-              <span className="font-black text-emerald-500 dark:text-emerald-400 text-lg">
-                S/ {ticket.total.toFixed(2)}
-              </span>
-
-              {(izipayFee > 0 || confeccionAmt > 0) && (
-                <div className="flex flex-wrap justify-end gap-1.5 mt-1.5">
-                  {izipayFee > 0 && (
-                    <span className="bg-rose-50 text-rose-600 border border-rose-200/60 text-[10px] px-2 py-0.5 rounded-md font-bold uppercase tracking-wider shadow-sm">
-                      IZI {displayIzipayRate}%: S/ {izipayFee.toFixed(2)}
-                    </span>
-                  )}
-                  {confeccionAmt > 0 && (
-                    <span className="bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200/60 text-[10px] px-2 py-0.5 rounded-md font-bold uppercase tracking-wider shadow-sm">
-                      SERV: S/ {confeccionAmt.toFixed(2)}
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })()}
-      </td>
-      <td className="px-3 py-3 text-center">
-        <span className={`text-xs font-bold px-2.5 py-1 rounded-full uppercase tracking-wider ${badge.classes}`}>
-          {badge.label}
-        </span>
-      </td>
-      {showCashierName && (
-        <td className="px-3 py-3 whitespace-nowrap">
-          {ticket.status !== 'PENDING' && ticket.cashier ? (
+        <td className="px-4 py-3">
+          <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                onOpenCashierInfo?.({
-                  name: getCashierDisplayName(ticket.cashier),
-                  username: ticket.cashier?.username || '',
-                  doc: ticket.proforma_number || (ticket.internal_ticket_number ? `#${ticket.internal_ticket_number}` : 'Ticket'),
-                  date: ticket.updated_at || ticket.created_at,
-                });
+                setIsExpanded(prev => !prev);
               }}
-              title="Ver detalle del cajero"
-              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-secondary/50 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 border border-border/70 hover:border-indigo-300 dark:hover:border-indigo-700 transition-all cursor-pointer group/cashier focus:outline-none"
+              className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+              title={isExpanded ? "Ocultar desglose" : "Ver desglose de ítems"}
             >
-              <div className="w-5 h-5 rounded-full bg-indigo-100 dark:bg-indigo-900/60 flex items-center justify-center shrink-0 group-hover/cashier:bg-indigo-200 dark:group-hover/cashier:bg-indigo-800 transition-colors">
-                <User className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
-              </div>
-              <span className="text-xs font-semibold text-foreground truncate max-w-[95px] block underline decoration-dotted decoration-indigo-400/40 underline-offset-2">
-                {getCashierDisplayName(ticket.cashier)}
-              </span>
+              <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${isExpanded ? "rotate-180 text-indigo-600 dark:text-indigo-400" : ""}`} />
             </button>
+            <div className="flex-1 min-w-0">
+              {(() => {
+                const isConsolidated = ticket.source_type === 'CONSOLIDATED' || (Array.isArray(ticket.children) && ticket.children.length > 0);
+                const rawChildTickets = Array.isArray(ticket.children) && ticket.children.length > 0
+                  ? ticket.children
+                  : (Array.isArray(ticket._consolidated_tickets) ? ticket._consolidated_tickets : []);
+                const childTickets = [...rawChildTickets].sort((a: any, b: any) => {
+                  const numA = Number(a.internal_ticket_number || parseInternalTicketNum(a) || 0);
+                  const numB = Number(b.internal_ticket_number || parseInternalTicketNum(b) || 0);
+                  return numA - numB;
+                });
+                const childNums = childTickets.map((c: any) => c.internal_ticket_number || parseInternalTicketNum(c)).filter(Boolean);
+
+                if (isConsolidated && childNums.length > 0) {
+                  return (
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center gap-1 flex-wrap">
+                        {childNums.map((num: number, idx: number) => (
+                          <React.Fragment key={idx}>
+                            <span className="font-black text-sm text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 px-1.5 py-0.5 rounded-md shadow-sm">
+                              #{num}
+                            </span>
+                            {idx < childNums.length - 1 && <span className="text-xs font-bold text-muted-foreground">+</span>}
+                          </React.Fragment>
+                        ))}
+                      </div>
+                      <span className="inline-flex items-center w-fit px-1.5 py-0.2 rounded-full text-[9px] font-black uppercase tracking-wider bg-violet-100 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800">
+                        UNIFICADO ({childNums.length})
+                      </span>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="flex items-center gap-1.5">
+                    <div className="font-black text-lg">{formatTicketHash(ticketNo)}</div>
+                    {isConsolidated && (
+                      <span className="px-1.5 py-0.2 rounded-full text-[9px] font-black uppercase tracking-wider bg-violet-100 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800">
+                        UNIFICADO
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
+              {sunatDoc && (
+                <span className="text-[11px] text-muted-foreground font-mono block mt-0.5">Doc: {sunatDoc}</span>
+              )}
+            </div>
+          </div>
+        </td>
+        <td className="px-4 py-3 text-muted-foreground font-mono">
+          {(() => {
+            const isConsolidated = ticket.source_type === 'CONSOLIDATED' || (Array.isArray(ticket.children) && ticket.children.length > 0);
+            const rawChildTickets = Array.isArray(ticket.children) && ticket.children.length > 0
+              ? ticket.children
+              : (Array.isArray(ticket._consolidated_tickets) ? ticket._consolidated_tickets : []);
+            const childTickets = [...rawChildTickets].sort((a: any, b: any) => {
+              const numA = Number(a.internal_ticket_number || parseInternalTicketNum(a) || 0);
+              const numB = Number(b.internal_ticket_number || parseInternalTicketNum(b) || 0);
+              return numA - numB;
+            });
+
+            if (isConsolidated) {
+              const docNames = childTickets.map((c: any) => c.proforma_number || (c.internal_ticket_number ? `TKT-${String(c.internal_ticket_number).padStart(4, '0')}` : '')).filter(Boolean);
+              return (
+                <div className="flex flex-col gap-0.5">
+                  {docNames.length > 0 ? (
+                    docNames.map((docName: string, idx: number) => (
+                      <span key={idx} className="font-bold text-xs text-indigo-700 dark:text-indigo-300 tracking-tight">
+                        {docName}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="font-bold text-xs text-indigo-700 dark:text-indigo-300">
+                      {ticket.proforma_number || 'UNIFICADO'}
+                    </span>
+                  )}
+                  {ticket.invoice_number && <div className="text-[10px] text-emerald-600 font-bold font-sans">{ticket.invoice_number}</div>}
+                </div>
+              );
+            }
+
+            return (
+              <div>
+                <div className="text-xs">{ticket.proforma_number || '—'}</div>
+                {ticket.invoice_number && <div className="text-[10px] text-emerald-600 font-bold font-sans">{ticket.invoice_number}</div>}
+              </div>
+            );
+          })()}
+        </td>
+        <td className="px-2 py-1 whitespace-nowrap min-w-[100px]">
+          {ticket.status === "PENDING" ? (
+            <span className="px-4 font-mono font-bold text-gray-400 text-right block w-full">—</span>
           ) : (
-            <span className="text-xs text-muted-foreground/40 font-mono">—</span>
+            <input type="number" step="0.01" placeholder="0.00"
+              value={rowBuffer.monto}
+              onChange={(e) => handleChange('monto', e.target.value)}
+              onKeyDown={handleKeyDown}
+              onWheel={(e) => e.currentTarget.blur()}
+              className={`${inlineCellCls} text-right text-gray-700 dark:text-gray-200 ${spinnerOff}`}
+            />
           )}
         </td>
-      )}
-      <td className="px-4 py-3 text-right whitespace-nowrap">
-        <div className="flex justify-end gap-1.5">
+        <td className="px-2 py-1 whitespace-nowrap min-w-[100px]">
           {ticket.status === "PENDING" ? (
-            <>
-              {permissions?.delete_sales && (
-                <button
-                  onClick={() => handleCancel(ticket)}
-                  className="px-2.5 py-1 rounded-lg text-xs text-red-500 bg-red-500/10 hover:bg-red-500/20 font-bold transition-colors"
-                >
-                  Anular
-                </button>
-              )}
+            <span className="px-4 font-mono font-bold text-gray-400 text-right block w-full">—</span>
+          ) : (
+            <input type="number" step="0.01" placeholder="0.00"
+              value={rowBuffer.bcp}
+              onChange={(e) => handleChange('bcp', e.target.value)}
+              onKeyDown={handleKeyDown}
+              onWheel={(e) => e.currentTarget.blur()}
+              className={`${inlineCellCls} text-right text-gray-700 dark:text-gray-200 ${spinnerOff}`}
+            />
+          )}
+        </td>
+        <td className="px-2 py-1 whitespace-nowrap min-w-[100px]">
+          {ticket.status === "PENDING" ? (
+            <span className="px-4 font-mono font-bold text-gray-400 text-right block w-full">—</span>
+          ) : (
+            <input type="number" step="0.01" placeholder="0.00"
+              value={rowBuffer.bbva}
+              onChange={(e) => handleChange('bbva', e.target.value)}
+              onKeyDown={handleKeyDown}
+              onWheel={(e) => e.currentTarget.blur()}
+              className={`${inlineCellCls} text-right text-gray-700 dark:text-gray-200 ${spinnerOff}`}
+            />
+          )}
+        </td>
+        <td className="px-2 py-1 whitespace-nowrap min-w-[100px]">
+          {ticket.status === "PENDING" ? (
+            <span className="px-4 font-mono font-bold text-gray-400 text-right block w-full">—</span>
+          ) : (
+            <input type="number" step="0.01" placeholder="0.00"
+              readOnly={true}
+              disabled={true}
+              value={rowBuffer.izipay}
+              onChange={(e) => handleChange('izipay', e.target.value)}
+              onKeyDown={handleKeyDown}
+              onWheel={(e) => e.currentTarget.blur()}
+              className={`${inlineCellCls} text-right bg-slate-100 text-slate-500 cursor-not-allowed border-slate-200 opacity-75 font-semibold ${spinnerOff}`}
+            />
+          )}
+        </td>
+        <td className="px-4 py-3 text-right whitespace-nowrap">
+          {ticket.status === "PENDING" ? (
+            <div className="flex flex-col items-end leading-none">
+              <span className="font-black text-orange-500 text-lg">
+                S/ {ticket.total.toFixed(2)}
+              </span>
+              <span className="text-[10px] font-bold text-orange-500/80 uppercase mt-1">
+                Por cobrar
+              </span>
+            </div>
+          ) : ticket.status === "CANCELLED" ? (
+            <span className="font-black text-muted-foreground/60 line-through text-lg">
+              S/ {ticket.total.toFixed(2)}
+            </span>
+          ) : (() => {
+            const typedSuma = (Number(rowBuffer.monto) || 0) + (Number(rowBuffer.bcp) || 0) + (Number(rowBuffer.bbva) || 0) + (Number(rowBuffer.izipay) || 0);
+            const isMatch = Math.abs(typedSuma - ticket.total) < 0.01;
+
+            return (
+              <div className="flex flex-col items-end leading-none">
+                <span className="font-black text-emerald-500 dark:text-emerald-400 text-lg">
+                  S/ {ticket.total.toFixed(2)}
+                </span>
+
+                {(izipayFee > 0 || confeccionAmt > 0) && (
+                  <div className="flex flex-wrap justify-end gap-1.5 mt-1.5">
+                    {izipayFee > 0 && (
+                      <span className="bg-rose-50 text-rose-600 border border-rose-200/60 text-[10px] px-2 py-0.5 rounded-md font-bold uppercase tracking-wider shadow-sm">
+                        IZI {displayIzipayRate}%: S/ {izipayFee.toFixed(2)}
+                      </span>
+                    )}
+                    {confeccionAmt > 0 && (
+                      <span className="bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200/60 text-[10px] px-2 py-0.5 rounded-md font-bold uppercase tracking-wider shadow-sm">
+                        SERV: S/ {confeccionAmt.toFixed(2)}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+        </td>
+        <td className="px-3 py-3 text-center">
+          <span className={`text-xs font-bold px-2.5 py-1 rounded-full uppercase tracking-wider ${badge.classes}`}>
+            {badge.label}
+          </span>
+        </td>
+        {showCashierName && (
+          <td className="px-3 py-3 whitespace-nowrap">
+            {ticket.status !== 'PENDING' && ticket.cashier ? (
               <button
-                onClick={() => openModal(ticket)}
-                className="px-3.5 py-1 rounded-lg text-xs text-white bg-orange-600 hover:bg-orange-500 font-bold shadow-md shadow-orange-500/20 transition-all"
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenCashierInfo?.({
+                    name: getCashierDisplayName(ticket.cashier),
+                    username: ticket.cashier?.username || '',
+                    doc: ticket.proforma_number || (ticket.internal_ticket_number ? `#${ticket.internal_ticket_number}` : 'Ticket'),
+                    date: ticket.updated_at || ticket.created_at,
+                  });
+                }}
+                title="Ver detalle del cajero"
+                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-secondary/50 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 border border-border/70 hover:border-indigo-300 dark:hover:border-indigo-700 transition-all cursor-pointer group/cashier focus:outline-none"
               >
-                Cobrar
-              </button>
-            </>
-          ) : ticket.status === "COMPLETED" ? (
-            permissions?.delete_sales ? (
-              <button
-                onClick={() => handleCancel(ticket)}
-                title="Anular ticket pagado"
-                className="px-2.5 py-1 rounded-lg text-xs text-red-500 bg-red-500/10 hover:bg-red-500/20 font-bold transition-colors border border-red-500/20"
-              >
-                Anular
+                <div className="w-5 h-5 rounded-full bg-indigo-100 dark:bg-indigo-900/60 flex items-center justify-center shrink-0 group-hover/cashier:bg-indigo-200 dark:group-hover/cashier:bg-indigo-800 transition-colors">
+                  <User className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
+                </div>
+                <span className="text-xs font-semibold text-foreground truncate max-w-[95px] block underline decoration-dotted decoration-indigo-400/40 underline-offset-2">
+                  {getCashierDisplayName(ticket.cashier)}
+                </span>
               </button>
             ) : (
               <span className="text-xs text-muted-foreground/40 font-mono">—</span>
-            )
-          ) : null}
-        </div>
-      </td>
-    </tr>
+            )}
+          </td>
+        )}
+        <td className="px-4 py-3 text-right whitespace-nowrap">
+          <div className="flex justify-end items-center gap-1.5">
+            {ticket.status === "PENDING" ? (
+              <>
+                {permissions?.delete_sales && (
+                  <button
+                    onClick={() => handleCancel(ticket)}
+                    className="px-2.5 py-1 rounded-lg text-xs text-red-500 bg-red-500/10 hover:bg-red-500/20 font-bold transition-colors"
+                  >
+                    Anular
+                  </button>
+                )}
+                <button
+                  onClick={() => openModal(ticket)}
+                  className="px-3.5 py-1 rounded-lg text-xs text-white bg-orange-600 hover:bg-orange-500 font-bold shadow-md shadow-orange-500/20 transition-all"
+                >
+                  Cobrar
+                </button>
+              </>
+            ) : ticket.status === "COMPLETED" ? (
+              permissions?.delete_sales ? (
+                <button
+                  onClick={() => handleCancel(ticket)}
+                  title="Anular ticket pagado"
+                  className="px-2.5 py-1 rounded-lg text-xs text-red-500 bg-red-500/10 hover:bg-red-500/20 font-bold transition-colors border border-red-500/20"
+                >
+                  Anular
+                </button>
+              ) : (
+                <span className="text-xs text-muted-foreground/40 font-mono">—</span>
+              )
+            ) : null}
+          </div>
+        </td>
+      </tr>
+      {isExpanded && (
+        <tr className="bg-muted/10 border-b border-border">
+          <td colSpan={12} className="px-6 py-4">
+            <TicketItemBreakdown ticket={ticket} />
+          </td>
+        </tr>
+      )}
+    </React.Fragment>
   );
 }
 
@@ -532,17 +575,26 @@ export default function CajaPage() {
   const [ticketToCancel, setTicketToCancel] = useState<PendingTicket | null>(null);
   const [activeCashierInfo, setActiveCashierInfo] = useState<{ name: string; username: string; doc: string; date?: string } | null>(null);
   const isEditingRef = useRef(false);
+  const [expandedMobileCards, setExpandedMobileCards] = useState<Record<string, boolean>>({});
 
   // ── Filtro Multi-Select de Cajeros ──
   const [selectedCashierIds, setSelectedCashierIds] = useState<Set<string>>(new Set());
   const [isCashierDropdownOpen, setIsCashierDropdownOpen] = useState(false);
   const cashierDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Cerrar dropdown al hacer click fuera
+  // ── Filtro Multi-Select de Mostrador (Vendedores) ──
+  const [selectedSellerIds, setSelectedSellerIds] = useState<Set<string>>(new Set());
+  const [isSellerDropdownOpen, setIsSellerDropdownOpen] = useState(false);
+  const sellerDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Cerrar dropdowns al hacer click fuera
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (cashierDropdownRef.current && !cashierDropdownRef.current.contains(e.target as Node)) {
         setIsCashierDropdownOpen(false);
+      }
+      if (sellerDropdownRef.current && !sellerDropdownRef.current.contains(e.target as Node)) {
+        setIsSellerDropdownOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -729,9 +781,13 @@ export default function CajaPage() {
       const services = itemsArray.filter((i: any) => {
         if (i.is_service === true) return true;
         const name = (i.name || '').toUpperCase();
-        return name === 'CONFECCIÓN' || name === 'TAXI';
+        return name === 'CONFECCIÓN' || name === 'TAXI' || name.includes('CONFECCIÓN') || name.includes('TAXI');
       });
-      return services.reduce((acc: number, item: any) => acc + (item.editedPrice * (item.quantity || 1)), 0);
+      return services.reduce((acc: number, item: any) => {
+        const q = parseFloat(item.quantity) || 1;
+        const ep = item.editedPrice !== undefined ? parseFloat(item.editedPrice) : parseFloat(item.price) || 0;
+        return acc + (ep * q);
+      }, 0);
     }
     return 0;
   }, [selectedTicket]);
@@ -755,7 +811,15 @@ export default function CajaPage() {
 
     let query = supabase
       .from("sales")
-      .select("id, proforma_number, invoice_number, internal_ticket_number, total, detail, items, status, created_at, updated_at, voucher_type, voucher_doc_number, seller_id, cashier_id, parent_sale_id, source_type, seller:profiles!seller_id(username), cashier:profiles!cashier_id(username, employees:employees!employee_id(full_name)), transactions(payment_method, amount, surcharge_pct, surcharge_amount), children:sales!parent_sale_id(id, internal_ticket_number, proforma_number, total, items, seller_id, seller:profiles!seller_id(username))")
+      .select(`
+        id, proforma_number, invoice_number, internal_ticket_number, total, detail, items, status, created_at, updated_at, voucher_type, voucher_doc_number, voucher_doc_name, seller_id, cashier_id, cancelled_by_id, parent_sale_id, source_type,
+        seller:profiles!seller_id(username, employees:employees!employee_id(full_name)),
+        cashier:profiles!cashier_id(username, employees:employees!employee_id(full_name)),
+        cancelled_by:profiles!cancelled_by_id(username, employees:employees!employee_id(full_name)),
+        customers(business_name, doc_number, document_type),
+        transactions(payment_method, amount, surcharge_pct, surcharge_amount, created_at),
+        children:sales!parent_sale_id(id, internal_ticket_number, proforma_number, total, items, seller_id, created_at, seller:profiles!seller_id(username, employees:employees!employee_id(full_name)))
+      `)
       .eq("record_date", todayStr)
       .is("parent_sale_id", null)
       .order("created_at", { ascending: true });
@@ -844,11 +908,53 @@ export default function CajaPage() {
     return Array.from(map.values()).sort((a, b) => a.displayName.localeCompare(b.displayName));
   }, [tickets]);
 
+  // ── Lista de vendedores / mostrador únicos para el filtro ──
+  const uniqueSellers = useMemo(() => {
+    const map = new Map<string, { id: string; displayName: string }>();
+    tickets.forEach(t => {
+      if (t.seller_id && t.seller) {
+        const emp = (t.seller as any).employees;
+        const name = (Array.isArray(emp) && emp.length > 0)
+          ? (emp[0].full_name || t.seller.username)
+          : (emp?.full_name || t.seller.username);
+        if (!map.has(t.seller_id)) {
+          map.set(t.seller_id, { id: t.seller_id, displayName: name });
+        }
+      }
+      const childTickets = Array.isArray(t.children) && t.children.length > 0
+        ? t.children
+        : (Array.isArray(t._consolidated_tickets) ? t._consolidated_tickets : []);
+      childTickets.forEach((c: any) => {
+        if (c.seller_id && c.seller) {
+          const emp = (c.seller as any).employees;
+          const name = (Array.isArray(emp) && emp.length > 0)
+            ? (emp[0].full_name || c.seller.username)
+            : (emp?.full_name || c.seller.username);
+          if (!map.has(c.seller_id)) {
+            map.set(c.seller_id, { id: c.seller_id, displayName: name });
+          }
+        }
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => a.displayName.localeCompare(b.displayName));
+  }, [tickets]);
+
   // ── Filtered & Sorted tickets ──
   const enrichedFilteredTickets = useMemo(() => {
     let base = statusFilter === "ALL"
       ? tickets
       : tickets.filter(t => t.status === statusFilter);
+
+    // Aplicar filtro de mostrador (vendedor) si hay seleccionados
+    if (selectedSellerIds.size > 0) {
+      base = base.filter(t => {
+        if (t.seller_id && selectedSellerIds.has(t.seller_id)) return true;
+        const childTickets = Array.isArray(t.children) && t.children.length > 0
+          ? t.children
+          : (Array.isArray(t._consolidated_tickets) ? t._consolidated_tickets : []);
+        return childTickets.some((c: any) => c.seller_id && selectedSellerIds.has(c.seller_id));
+      });
+    }
 
     // Aplicar filtro de cajero si hay seleccionados
     if (selectedCashierIds.size > 0) {
@@ -878,7 +984,7 @@ export default function CajaPage() {
         izipay_amt: sumBy("IZIPAY"),
       };
     });
-  }, [tickets, statusFilter, selectedCashierIds]);
+  }, [tickets, statusFilter, selectedSellerIds, selectedCashierIds]);
 
   const { items: sortedTickets, requestSort, sortConfig } = useTableSort(enrichedFilteredTickets, {
     key: 'internal_ticket_number',
@@ -1043,7 +1149,12 @@ export default function CajaPage() {
 
       if (isConsolidated) {
         const todayLimaStr = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-        const hijas = (selectedTicket as any)._consolidated_tickets || [];
+        const rawHijas = (selectedTicket as any)._consolidated_tickets || [];
+        const hijas = [...rawHijas].sort((a: any, b: any) => {
+          const numA = Number(a.internal_ticket_number || parseInternalTicketNum(a) || 0);
+          const numB = Number(b.internal_ticket_number || parseInternalTicketNum(b) || 0);
+          return numA - numB;
+        });
         const hijasNums = hijas.map((h: any) => h.internal_ticket_number || parseInternalTicketNum(h)).filter(Boolean);
         const hijasDocNames = hijas.map((h: any) => h.proforma_number || (h.internal_ticket_number ? `TKT-${String(h.internal_ticket_number).padStart(4, '0')}` : '')).filter(Boolean);
 
@@ -1240,6 +1351,7 @@ export default function CajaPage() {
     setIsReviewing(false);
     setIsSubmitting(false);
     setActivePayMethod("EFECTIVO");
+    setFocusedMethod("EFECTIVO");
     setPaymentAmounts({ EFECTIVO: "", BCP: "", BBVA: "", IZIPAY: "" });
     setVoucherType("TICKET");
     setDocNumber("");
@@ -1515,12 +1627,75 @@ export default function CajaPage() {
             </div>
 
             {/* Separador vertical */}
-            {permissions?.view_cashier_name && uniqueCashiers.length > 0 && (
+            {uniqueSellers.length > 0 && (
+              <div className="hidden sm:block w-px h-5 bg-border shrink-0" />
+            )}
+
+            {/* Filtro Multi-Select de Mostrador (Vendedores) */}
+            {uniqueSellers.length > 0 && (
+              <div className="relative shrink-0" ref={sellerDropdownRef}>
+                <button
+                  onClick={() => setIsSellerDropdownOpen(prev => !prev)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors border ${selectedSellerIds.size > 0
+                    ? 'bg-purple-600 text-white border-purple-700 shadow-md shadow-purple-500/30'
+                    : 'bg-card text-muted-foreground border-border hover:text-foreground shadow-sm'
+                    }`}
+                >
+                  <UserCheck className="w-3.5 h-3.5" />
+                  Mostrador
+                  {selectedSellerIds.size > 0 && (
+                    <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-white/30 text-white text-[10px] font-black">
+                      {selectedSellerIds.size}
+                    </span>
+                  )}
+                  <svg className={`w-3 h-3 transition-transform ${isSellerDropdownOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" /></svg>
+                </button>
+                {isSellerDropdownOpen && (
+                  <div className="absolute top-full right-0 mt-1 w-56 bg-card border border-border rounded-xl shadow-2xl z-40 overflow-hidden animate-in fade-in slide-in-from-top-2">
+                    <div className="p-2 border-b border-border flex items-center justify-between">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-muted-foreground">Filtrar por mostrador</span>
+                      {selectedSellerIds.size > 0 && (
+                        <button
+                          onClick={() => setSelectedSellerIds(new Set())}
+                          className="text-[10px] font-bold text-purple-500 hover:text-purple-600"
+                        >
+                          Limpiar
+                        </button>
+                      )}
+                    </div>
+                    <div className="py-1 max-h-56 overflow-y-auto">
+                      {uniqueSellers.map(seller => (
+                        <label
+                          key={seller.id}
+                          className="flex items-center gap-2.5 px-3 py-2 hover:bg-secondary cursor-pointer transition-colors"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedSellerIds.has(seller.id)}
+                            onChange={() => {
+                              const next = new Set(selectedSellerIds);
+                              if (next.has(seller.id)) next.delete(seller.id);
+                              else next.add(seller.id);
+                              setSelectedSellerIds(next);
+                            }}
+                            className="w-4 h-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                          />
+                          <span className="text-sm font-medium text-foreground truncate">{seller.displayName}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Separador vertical */}
+            {uniqueCashiers.length > 0 && (
               <div className="hidden sm:block w-px h-5 bg-border shrink-0" />
             )}
 
             {/* Filtro Multi-Select de Cajeros */}
-            {permissions?.view_cashier_name && uniqueCashiers.length > 0 && (
+            {uniqueCashiers.length > 0 && (
               <div className="relative shrink-0" ref={cashierDropdownRef}>
                 <button
                   onClick={() => setIsCashierDropdownOpen(prev => !prev)}
@@ -1622,9 +1797,14 @@ export default function CajaPage() {
                       <div className="flex flex-col min-w-0">
                         {(() => {
                           const isConsolidated = ticket.source_type === 'CONSOLIDATED' || (Array.isArray(ticket.children) && ticket.children.length > 0);
-                          const childTickets = Array.isArray(ticket.children) && ticket.children.length > 0
+                          const rawChildTickets = Array.isArray(ticket.children) && ticket.children.length > 0
                             ? ticket.children
                             : (Array.isArray(ticket._consolidated_tickets) ? ticket._consolidated_tickets : []);
+                          const childTickets = [...rawChildTickets].sort((a: any, b: any) => {
+                            const numA = Number(a.internal_ticket_number || parseInternalTicketNum(a) || 0);
+                            const numB = Number(b.internal_ticket_number || parseInternalTicketNum(b) || 0);
+                            return numA - numB;
+                          });
                           const childNums = childTickets.map((c: any) => c.internal_ticket_number || parseInternalTicketNum(c)).filter(Boolean);
 
                           if (isConsolidated && childNums.length > 0) {
@@ -1690,7 +1870,7 @@ export default function CajaPage() {
                           <span className="w-full h-10 rounded-xl text-white bg-blue-600 font-bold shadow-lg shadow-blue-500/20 flex items-center justify-center gap-1.5 cursor-default">
                             Completado
                           </span>
-                          {permissions?.view_cashier_name && ticket.cashier && (
+                          {ticket.cashier && (
                             <div className="flex items-center gap-1.5">
                               <div className="w-4 h-4 rounded-full bg-indigo-100 dark:bg-indigo-900/60 flex items-center justify-center shrink-0">
                                 <User className="w-2.5 h-2.5 text-indigo-600 dark:text-indigo-400" />
@@ -1702,6 +1882,25 @@ export default function CajaPage() {
                           )}
                         </div>
                       ) : null}
+
+                      <div className="pt-2 border-t border-border">
+                        <button
+                          type="button"
+                          onClick={() => setExpandedMobileCards(prev => ({ ...prev, [ticket.id]: !prev[ticket.id] }))}
+                          className="w-full flex items-center justify-between text-xs font-bold text-muted-foreground hover:text-foreground py-1 transition-colors"
+                        >
+                          <span className="flex items-center gap-1.5">
+                            <ShoppingBag className="w-3.5 h-3.5 text-indigo-500" />
+                            {expandedMobileCards[ticket.id] ? "Ocultar desglose" : "Ver desglose de ítems"}
+                          </span>
+                          <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${expandedMobileCards[ticket.id] ? "rotate-180 text-indigo-500" : ""}`} />
+                        </button>
+                        {expandedMobileCards[ticket.id] && (
+                          <div className="mt-2 pt-2 border-t border-border/50">
+                            <TicketItemBreakdown ticket={ticket} compact />
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                   {ticket.status === "PENDING" && permissions?.delete_sales && (
@@ -1809,14 +2008,12 @@ export default function CajaPage() {
                         {renderSortIcon("status")}
                       </div>
                     </th>
-                    {permissions?.view_cashier_name && (
-                      <th className="px-3 py-3 font-bold whitespace-nowrap">
-                        <div className="inline-flex items-center gap-1.5">
-                          <User className="w-3.5 h-3.5" />
-                          <span>Cobró</span>
-                        </div>
-                      </th>
-                    )}
+                    <th className="px-3 py-3 font-bold whitespace-nowrap">
+                      <div className="inline-flex items-center gap-1.5">
+                        <User className="w-3.5 h-3.5" />
+                        <span>Cobró</span>
+                      </div>
+                    </th>
                     <th className="px-4 py-3 font-bold text-right">Acciones</th>
                   </tr>
                 </thead>
@@ -1835,11 +2032,10 @@ export default function CajaPage() {
                       statusBadge={statusBadge}
                       handleCancel={(t: any) => handleCancelTicket(t)}
                       openModal={openModal}
-                      handleReprint={() => { }}
                       showToast={showToast}
                       permissions={permissions}
                       isSelected={selectedTicketIds.has(ticket.id)}
-                      showCashierName={!!permissions?.view_cashier_name}
+                      showCashierName={true}
                       onOpenCashierInfo={(info: any) => setActiveCashierInfo(info)}
                       onToggleSelect={(id: string) => {
                         const newSet = new Set(selectedTicketIds);
@@ -2015,7 +2211,13 @@ export default function CajaPage() {
               onClick={() => {
                 const selected = sortedTickets.filter(t => selectedTicketIds.has(t.id));
                 const total = selected.reduce((sum, t) => sum + (t.total || 0), 0);
-                const items = selected.flatMap(t => (t as any).items || []);
+                const items = selected.flatMap(t => {
+                  if (Array.isArray((t as any).items)) return (t as any).items;
+                  if (typeof (t as any).items === 'string') {
+                    try { return JSON.parse((t as any).items); } catch (e) { return []; }
+                  }
+                  return [];
+                });
                 const primarySellerId = selected.find((t: any) => t.seller_id)?.seller_id || null;
                 const consolidated: any = {
                   id: "CONSOLIDATED",
@@ -2029,9 +2231,7 @@ export default function CajaPage() {
                   cashier_id: null,
                   _consolidated_tickets: selected
                 };
-                setSelectedTicket(consolidated);
-                setPaymentAmounts({ EFECTIVO: "", BCP: "", BBVA: "", IZIPAY: "" });
-                setActivePayMethod("EFECTIVO");
+                openModal(consolidated);
               }}
               className="bg-orange-600 hover:bg-orange-500 text-white px-6 py-2.5 rounded-full font-black text-sm transition-all shadow-lg shadow-orange-600/30 flex items-center gap-2 transform hover:scale-105 active:scale-95"
             >

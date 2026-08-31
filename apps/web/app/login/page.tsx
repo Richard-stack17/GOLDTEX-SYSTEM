@@ -11,7 +11,7 @@ import bcrypt from "bcryptjs";
 export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { setUsername, setRole, setEmployeeId, setProfileId, setDefaultStoreId } = useRole();
+  const { setUsername, setRole, setEmployeeId, setProfileId, setDefaultStoreId, setIsOwner } = useRole();
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
 
@@ -58,6 +58,7 @@ export default function LoginPage() {
           password_hash,
           employee_id,
           default_store_id,
+          is_owner,
           employees:employee_id ( full_name )
         `)
         .eq("username", usernameInput)
@@ -119,6 +120,7 @@ export default function LoginPage() {
       setEmployeeId(profileData.employee_id ?? null);
       setProfileId(profileData.id);
       setDefaultStoreId(profileData.default_store_id ?? null);
+      setIsOwner(Boolean(profileData.is_owner));
 
       // Guardar historial de cuentas para selector rápido
       try {

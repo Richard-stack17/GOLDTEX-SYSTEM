@@ -1,38 +1,54 @@
-import React from 'react';
 import {
   UserPlus, ShieldAlert,
   RefreshCw, Plus,
   UserCog, X, Trash2, Check,
   Info, RotateCcw,
-  Eye, EyeOff, ShieldCheck, Edit2, KeyRound, Loader2, Save, Unlink
+  Eye, EyeOff, ShieldCheck, Edit2, KeyRound, Loader2, Save, Unlink, ChevronDown, Shield, AlertCircle, Crown
 } from 'lucide-react';
 import { ConfirmDialog } from '../../../../components/ConfirmDialog';
 import { Toast } from './Toast';
 import { Employee, Profile, Role, PERMISSION_GROUPS } from '../types';
 import { usePersonal } from '../PersonalContext';
+import { StoreRoleDropdown } from './StoreRoleDropdown';
+import { FreeUserDropdown } from './FreeUserDropdown';
+import { CustomSelect } from '../../../../components/CustomSelect';
 
 export function PersonalModals() {
   const {
     activeProfiles, activeStoreId, activeTab, allProfiles, allRoles, availableStoreIds, availableStores, checkCanManageTarget, checkUsernameState, confirmDeleteEmployee, confirmDeleteRole, confirmGlobalAccess, createAccess, deletingEmployee, deletingRole, deletingUserId, deletingUsername, dni, editRoleDesc, editRoleName, editingEmployee, editingRole, editingUserId, email, empAccessScope, empEmail, empGlobalRole, empPassword, empStoreIds, empStoreRoleIds, empStoreRoles, empUsername, employeeById, employees, formatFriendlyErrorMessage, fullName, getRoleBadgeStyle, getValidStoreRole, globalRoles, handleCancelEdit, handleCreateEmployee, handleCreateRole, handleDeleteEmployeeClick, handleDeleteRole, handleDeleteUser, handleEditClick, handleEditEmployeeClick, handleExecuteRestoration, handleLinkExistingUser, handleLinkNewUser, handleRestoreEmployee, handleRestorePermissions, handleRestoreRole, handleRestoreUser, handleSaveCredentials, handleSaveEditRole, handleSavePermissions, handleTabChange, handleTogglePermission, hasUnsavedRoleChanges, isAdmin, isDeletingRole, isDeletingUser, isEditRoleModalOpen, isEmployeeModalOpen, isGlobalUser, isHydrated, isLinking, isRestoringUser, isRoleConfirmModalOpen, isRoleModalOpen, isRoleWarningModalOpen, isUserGlobalAdmin, isUserModalOpen, linkExistingUserId, linkMode, linkRoleId, linkingEmployee, loadData, loading, modalResetToken, newRoleDesc, newRoleName, newRoleScopeStoreId, originalRoles, password, pendingRestoration, pendingTab, permissions, phone, profileByEmployeeId, renderRoleOptions, renderStoreAndRoleBadges, renderStoreRoleList, role, roleAssignedUsers, roles, router, savingEditRole, savingEmployee, savingPermissions, savingRole, savingUser, selectedEmpId, selectedModalStoreId, selectedStoreIds, setActiveTab, setAllProfiles, setAllRoles, setConfirmGlobalAccess, setCreateAccess, setDeletingEmployee, setDeletingRole, setDeletingUserId, setDeletingUsername, setDni, setEditRoleDesc, setEditRoleName, setEditingEmployee, setEditingRole, setEditingUserId, setEmail, setEmpAccessScope, setEmpEmail, setEmpGlobalRole, setEmpPassword, setEmpStoreIds, setEmpStoreRoleIds, setEmpStoreRoles, setEmpUsername, setEmployees, setFullName, setHasUnsavedRoleChanges, setIsDeletingRole, setIsDeletingUser, setIsEditRoleModalOpen, setIsEmployeeModalOpen, setIsLinking, setIsRestoringUser, setIsRoleConfirmModalOpen, setIsRoleModalOpen, setIsRoleWarningModalOpen, setIsUserModalOpen, setLinkExistingUserId, setLinkMode, setLinkRoleId, setLinkingEmployee, setLoading, setModalResetToken, setNewRoleDesc, setNewRoleName, setNewRoleScopeStoreId, setOriginalRoles, setPassword, setPendingRestoration, setPendingTab, setPhone, setRoleAssignedUsers, setRoles, setSavingEditRole, setSavingEmployee, setSavingPermissions, setSavingRole, setSavingUser, setSelectedEmpId, setSelectedModalStoreId, setSelectedStoreIds, setShowEmpPassword, setShowInactiveEmployees, setShowInactiveRoles, setShowInactiveUsers, setShowRoleExitConfirm, setShowUserPassword, setToast, setUserAccessScope, setUserGlobalRole, setUserStoreRoleIds, setUserStoreRoles, setUsername, showEmpPassword, showInactiveEmployees, showInactiveRoles, showInactiveUsers, showRoleExitConfirm, showToast, showUserPassword, storeMap, syncEmployeeStoreAssignment, targetModalStoreId, toast, unlinkedEmployees, userAccessScope, userGlobalRole, userStoreRoleIds, userStoreRoles, username, visibleEmployees, visibleRoles,
     isManagePermsModalOpen, setIsManagePermsModalOpen, managingPermsRoleId, setManagingPermsRoleId,
-    unlinkingEmployee, setUnlinkingEmployee, confirmUnlinkEmployee
+    unlinkingEmployee, setUnlinkingEmployee, confirmUnlinkEmployee,
+    empConfirmGlobalAdmin, setEmpConfirmGlobalAdmin,
+    currentProfileId, currentEmployeeId, currentUsername,
+    isOwner
   } = usePersonal();
 
   return (
     <>
 
       {/* ── Confirm Delete User Dialog ── */}
-      <ConfirmDialog
-        isOpen={!!deletingUserId}
-        title="¿Desactivar Acceso de Usuario?"
-        description={`¿Estás seguro de que deseas desactivar el acceso para el usuario @${deletingUsername}? Esta acción mantendrá el historial intacto pero le impedirá iniciar sesión.`}
-        confirmText="Sí, desactivar"
-        cancelText="Cancelar"
-        onConfirm={handleDeleteUser}
-        onCancel={() => setDeletingUserId(null)}
-        isLoading={isDeletingUser}
-        isDestructive={true}
-      />
+      {(() => {
+        const targetProf = deletingUserId ? allProfiles.find((p: any) => p.id === deletingUserId) : null;
+        const isTargetAdmin = targetProf?.role === 'ADMIN';
+
+        return (
+          <ConfirmDialog
+            isOpen={!!deletingUserId}
+            title={isTargetAdmin ? "Atención: ¿Desactivar Administrador Global?" : "¿Desactivar Acceso de Usuario?"}
+            description={
+              isTargetAdmin
+                ? `ATENCIÓN DE SEGURIDAD: Estás a punto de desactivar al usuario con privilegios de ADMINISTRADOR GLOBAL (@${deletingUsername}). Esta acción revocará todos sus permisos directivos en el sistema.`
+                : `¿Estás seguro de que deseas desactivar el acceso para el usuario @${deletingUsername}? Esta acción mantendrá el historial intacto pero le impedirá iniciar sesión.`
+            }
+            confirmText={isTargetAdmin ? "Sí, desactivar Administrador" : "Sí, desactivar"}
+            cancelText="Cancelar"
+            onConfirm={handleDeleteUser}
+            onCancel={() => setDeletingUserId(null)}
+            isLoading={isDeletingUser}
+            isDestructive={true}
+          />
+        );
+      })()}
 
       {/* ── Pending Restoration Warning Modal ── */}
       {pendingRestoration && (
@@ -162,19 +178,22 @@ export function PersonalModals() {
                 <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
                   Alcance / Sucursal
                 </label>
-                <select
+                <CustomSelect
                   value={newRoleScopeStoreId}
                   disabled={!isUserGlobalAdmin}
-                  onChange={e => setNewRoleScopeStoreId(e.target.value)}
-                  className="w-full h-10 bg-background border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors disabled:opacity-80 disabled:cursor-not-allowed"
-                >
-                  {isUserGlobalAdmin && (
-                    <option value="">Acceso Global (Todas las tiendas)</option>
-                  )}
-                  {availableStores.map((s: any) => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
+                  onChange={(val) => setNewRoleScopeStoreId(val)}
+                  options={[
+                    ...(isUserGlobalAdmin
+                      ? [{ value: '', label: 'Acceso Global (Todas las tiendas)', badge: 'Global', badgeColor: 'bg-purple-500/10 text-purple-600 border-purple-500/30' }]
+                      : []),
+                    ...availableStores.map((s: any) => ({
+                      value: s.id,
+                      label: s.name,
+                      badge: 'Sucursal',
+                      badgeColor: 'bg-indigo-500/10 text-indigo-600 border-indigo-500/30'
+                    }))
+                  ]}
+                />
               </div>
 
               <div className="space-y-1.5">
@@ -212,7 +231,7 @@ export function PersonalModals() {
       {/* ── Employee Modal ── */}
       {isEmployeeModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-md bg-card rounded-2xl shadow-xl border border-border overflow-hidden animate-in zoom-in-95 duration-200">
+          <div className="w-full max-w-lg bg-card rounded-2xl shadow-xl border border-border overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="px-5 py-4 border-b flex items-center justify-between bg-muted/20 border-border text-foreground">
               <div className="flex items-center gap-2">
                 <UserPlus className="w-4 h-4 text-indigo-500" />
@@ -228,48 +247,68 @@ export function PersonalModals() {
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <form onSubmit={handleCreateEmployee} className="p-5 space-y-4 max-h-[75vh] overflow-y-auto" autoComplete="off">
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                  Nombre Completo
-                </label>
-                <input
-                  type="text"
-                  placeholder="Ej: Yuriko Martínez"
-                  value={fullName}
-                  onChange={e => setFullName(e.target.value)}
-                  required
-                  className="w-full h-10 bg-background border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                    DNI
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Ej: 71234567"
-                    value={dni}
-                    onChange={e => setDni(e.target.value)}
-                    required
-                    maxLength={8}
-                    className="w-full h-10 bg-background border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors font-mono"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                    Teléfono
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Opcional"
-                    value={phone}
-                    onChange={e => setPhone(e.target.value)}
-                    className="w-full h-10 bg-background border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors"
-                  />
-                </div>
-              </div>
+            {(() => {
+              const linkedProf = editingEmployee ? profileByEmployeeId[editingEmployee.id] : null;
+              const canEditIdentity = !editingEmployee || checkCanManageTarget(linkedProf, editingEmployee, { requireFullCoverage: true });
+
+              return (
+                <form onSubmit={handleCreateEmployee} className="p-5 space-y-4 max-h-[75vh] overflow-y-auto" autoComplete="off">
+                  {!canEditIdentity && (
+                    <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 flex items-start gap-2.5 text-xs text-amber-900 dark:text-amber-300">
+                      <Shield className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-bold">Datos de identidad protegidos</p>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          Este empleado labora en múltiples sucursales. Solo un administrador con cobertura total puede modificar su Nombre, DNI o Teléfono. Desde aquí puedes gestionar el rol asignado a tu sucursal.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                      Nombre Completo
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ej: Yuriko Martínez"
+                      value={fullName}
+                      onChange={e => setFullName(e.target.value)}
+                      required
+                      disabled={!canEditIdentity}
+                      className={`w-full h-10 bg-background border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors ${!canEditIdentity ? 'bg-muted/60 text-muted-foreground cursor-not-allowed opacity-80 select-none' : ''}`}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                        DNI
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Ej: 71234567"
+                        value={dni}
+                        onChange={e => setDni(e.target.value)}
+                        required
+                        maxLength={8}
+                        disabled={!canEditIdentity}
+                        className={`w-full h-10 bg-background border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors font-mono ${!canEditIdentity ? 'bg-muted/60 text-muted-foreground cursor-not-allowed opacity-80 select-none' : ''}`}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                        Teléfono
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Opcional"
+                        value={phone}
+                        onChange={e => setPhone(e.target.value)}
+                        disabled={!canEditIdentity}
+                        className={`w-full h-10 bg-background border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors ${!canEditIdentity ? 'bg-muted/60 text-muted-foreground cursor-not-allowed opacity-80 select-none' : ''}`}
+                      />
+                    </div>
+                  </div>
               {/* Ámbito de Trabajo Toggle */}
               {isAdmin && (
                 <div className="space-y-1.5 mt-2">
@@ -300,7 +339,7 @@ export function PersonalModals() {
                         : 'text-muted-foreground hover:text-foreground'
                         }`}
                     >
-                      Acceso Global (Admin)
+                      Acceso Global
                     </button>
                   </div>
                 </div>
@@ -308,14 +347,63 @@ export function PersonalModals() {
 
               {/* Asignación de Sucursales y Roles de Trabajo */}
               {empAccessScope === 'global' ? (
-                <div className="space-y-1.5 mt-3 p-3.5 bg-purple-500/10 border border-purple-500/20 rounded-2xl">
+                <div className="space-y-2.5 mt-3 p-3.5 bg-purple-500/10 border border-purple-500/20 rounded-2xl">
                   <label className="text-xs font-bold text-purple-600 uppercase tracking-wider flex items-center gap-1.5">
                     <ShieldCheck className="w-4 h-4 text-purple-500" />
                     Ámbito de Trabajo Global (Todas las tiendas)
                   </label>
-                  <span className="text-[11px] text-purple-600/80 font-medium block mt-1">
-                    Este empleado labora a nivel corporativo en todas las tiendas y es compatible para vinculación con cuentas de Acceso Global.
+                  <span className="text-[11px] text-purple-600/80 font-medium block">
+                    Este empleado labora a nivel corporativo en todas las tiendas.
                   </span>
+
+                  {/* Selector de Rol Global — solo si tiene o tendrá cuenta de acceso */}
+                  {((editingEmployee && profileByEmployeeId[editingEmployee.id]) || createAccess) && (
+                    <>
+                      <div className="pt-2 border-t border-purple-200/40 space-y-1.5">
+                        <label className="text-xs font-bold text-purple-600 uppercase tracking-wider flex items-center gap-1.5">
+                          <Shield className="w-3.5 h-3.5 text-purple-500" />
+                          Rol Global de Sistema
+                        </label>
+                        <CustomSelect
+                          value={empGlobalRole}
+                          onChange={(val) => {
+                            setEmpGlobalRole(val);
+                            if (val !== 'ADMIN') setEmpConfirmGlobalAdmin(false);
+                          }}
+                          placeholder="— Seleccionar Rol Global —"
+                          options={globalRoles
+                            .filter((r: any) => isOwner || r.name !== 'ADMIN')
+                            .map((r: any) => ({
+                              value: r.name,
+                              label: r.name,
+                              badge: 'Global',
+                              badgeColor: 'bg-purple-500/10 text-purple-600 border-purple-500/30'
+                            }))}
+                        />
+                        <span className="text-[11px] text-purple-600/80 font-medium block mt-1">
+                          {empGlobalRole === 'ADMIN'
+                            ? 'Este usuario tendrá acceso total e irrestricto a todos los módulos y sucursales de la empresa.'
+                            : empGlobalRole
+                            ? `Este usuario tendrá acceso a todas las sucursales, aplicando únicamente los permisos definidos para el rol "${empGlobalRole}".`
+                            : 'Selecciona el rol corporativo que se aplicará en todas las sucursales.'}
+                        </span>
+                      </div>
+
+                      {empGlobalRole === 'ADMIN' && (createAccess || !editingEmployee || profileByEmployeeId[editingEmployee.id]?.role !== 'ADMIN') && (
+                        <label className="flex items-center gap-2.5 pt-2.5 border-t border-purple-200/60 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={empConfirmGlobalAdmin}
+                            onChange={(e: any) => setEmpConfirmGlobalAdmin(e.target.checked)}
+                            className="w-4 h-4 text-purple-600 rounded border-purple-300 focus:ring-purple-500"
+                          />
+                          <span className="text-xs font-bold text-purple-900">
+                            Confirmo otorgar acceso administrativo total sobre todas las sucursales y módulos
+                          </span>
+                        </label>
+                      )}
+                    </>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-1.5">
@@ -333,11 +421,6 @@ export function PersonalModals() {
                         onToggleStore: (storeId: any, checked: any) => {
                           if (checked) {
                             setEmpStoreIds((prev: any) => [...prev, storeId]);
-                            const defaultRoleName = getValidStoreRole(null, storeId);
-                            const storeAvailableRoles = roles.filter((r: any) => r.name !== 'ADMIN' && (r.store_id === storeId || !r.store_id));
-                            const defaultRoleId = storeAvailableRoles.find((r: any) => r.name === defaultRoleName)?.id || storeAvailableRoles[0]?.id || '';
-                            setEmpStoreRoles((prev: any) => ({ ...prev, [storeId]: prev[storeId] || defaultRoleName }));
-                            setEmpStoreRoleIds((prev: any) => ({ ...prev, [storeId]: prev[storeId] || defaultRoleId }));
                           } else {
                             setEmpStoreIds((prev: any) => prev.filter((id: any) => id !== storeId));
                             setEmpStoreRoles((prev: any) => {
@@ -378,11 +461,6 @@ export function PersonalModals() {
                                   onChange={(e: any) => {
                                     if (e.target.checked) {
                                       setEmpStoreIds((prev: any) => [...prev, store.id]);
-                                      const defaultRoleName = getValidStoreRole(null, store.id);
-                                      const storeAvailableRoles = roles.filter((r: any) => r.name !== 'ADMIN' && (r.store_id === store.id || !r.store_id));
-                                      const defaultRoleId = storeAvailableRoles.find((r: any) => r.name === defaultRoleName)?.id || storeAvailableRoles[0]?.id || '';
-                                      setEmpStoreRoles((prev: any) => ({ ...prev, [store.id]: prev[store.id] || defaultRoleName }));
-                                      setEmpStoreRoleIds((prev: any) => ({ ...prev, [store.id]: prev[store.id] || defaultRoleId }));
                                     } else {
                                       setEmpStoreIds((prev: any) => prev.filter((id: any) => id !== store.id));
                                       setEmpStoreRoles((prev: any) => {
@@ -413,27 +491,23 @@ export function PersonalModals() {
                           <span>Sucursal asignada automáticamente: <span className="font-bold text-foreground">{storeMap.get(activeStoreId) || '—'}</span></span>
                         ) : (
                           <div className="flex items-center gap-2">
-                            <span>Sucursal asignada:</span>
-                            <select
+                            <span className="text-xs font-medium">Sucursal:</span>
+                            <CustomSelect
                               value={targetModalStoreId}
-                              onChange={(e: any) => {
-                                const newStoreId = e.target.value;
+                              onChange={(newStoreId) => {
                                 setSelectedModalStoreId(newStoreId);
-                                const defaultRoleName = getValidStoreRole(null, newStoreId);
-                                const storeAvailableRoles = roles.filter((r: any) => r.name !== 'ADMIN' && (r.store_id === newStoreId || !r.store_id));
-                                const defaultRoleId = storeAvailableRoles.find((r: any) => r.name === defaultRoleName)?.id || storeAvailableRoles[0]?.id || '';
                                 setEmpStoreIds([newStoreId]);
-                                setEmpStoreRoles({ [newStoreId]: defaultRoleName });
-                                setEmpStoreRoleIds({ [newStoreId]: defaultRoleId });
+                                setEmpStoreRoles({});
+                                setEmpStoreRoleIds({});
                               }}
-                              className="h-8 px-2 text-xs font-bold rounded-lg border border-border bg-background cursor-pointer text-foreground"
-                            >
-                              {availableStores.map((s: any) => (
-                                <option key={s.id} value={s.id}>
-                                  {s.name}
-                                </option>
-                              ))}
-                            </select>
+                              options={availableStores.map((s: any) => ({
+                                value: s.id,
+                                label: s.name,
+                                badge: 'Sucursal',
+                                badgeColor: 'bg-indigo-500/10 text-indigo-600 border-indigo-500/30'
+                              }))}
+                              buttonClassName="h-8 px-2.5 text-xs font-bold"
+                            />
                           </div>
                         )}
                       </div>
@@ -441,32 +515,20 @@ export function PersonalModals() {
                         const storeAvailableRoles = roles.filter(
                           (r: any) => r.name !== 'ADMIN' && (r.store_id === targetModalStoreId || !r.store_id)
                         );
-                        const currentRoleName = empStoreRoles[targetModalStoreId] || (storeAvailableRoles[0]?.name || 'CAJERO');
-                        const currentRoleId = empStoreRoleIds[targetModalStoreId] || storeAvailableRoles.find((r: any) => r.name === currentRoleName)?.id || storeAvailableRoles[0]?.id || '';
-                        const selectedValue = storeAvailableRoles.some((r: any) => r.id === currentRoleId)
-                          ? currentRoleId
-                          : (storeAvailableRoles.find((r: any) => r.name === currentRoleName)?.id || storeAvailableRoles[0]?.id || '');
+                        const rawRoleName = empStoreRoles[targetModalStoreId];
+                        const matchedByRoleId = empStoreRoleIds?.[targetModalStoreId] ? storeAvailableRoles.find((r: any) => r.id === empStoreRoleIds[targetModalStoreId]) : null;
+                        const matchedByName = rawRoleName ? storeAvailableRoles.find((r: any) => r.name === rawRoleName) : null;
+                        const selectedValue = matchedByRoleId?.id || matchedByName?.id || '';
                         return (
-                          <select
-                            value={selectedValue}
-                            onChange={(e: any) => {
-                              const selectedRole = storeAvailableRoles.find((r: any) => r.id === e.target.value);
-                              if (selectedRole) {
-                                setEmpStoreRoles({ [targetModalStoreId]: selectedRole.name });
-                                setEmpStoreRoleIds({ [targetModalStoreId]: selectedRole.id });
-                              }
+                          <StoreRoleDropdown
+                            roles={storeAvailableRoles}
+                            selectedRoleId={selectedValue}
+                            getRoleBadgeStyle={getRoleBadgeStyle}
+                            onSelect={(selectedRole) => {
+                              setEmpStoreRoles({ [targetModalStoreId]: selectedRole.name });
+                              setEmpStoreRoleIds({ [targetModalStoreId]: selectedRole.id });
                             }}
-                            className="h-8 px-2 text-xs font-bold rounded-lg border border-border bg-background cursor-pointer"
-                          >
-                            {storeAvailableRoles.map((r: any) => {
-                              const scopeLabel = r.store_id ? ` (${storeMap.get(r.store_id) || r.stores?.name || 'Sucursal'})` : ' (Global)';
-                              return (
-                                <option key={r.id} value={r.id}>
-                                  {r.name}{scopeLabel}
-                                </option>
-                              );
-                            })}
-                          </select>
+                          />
                         );
                       })()}
                     </div>
@@ -584,6 +646,8 @@ export function PersonalModals() {
                 )}
               </button>
             </form>
+            );
+          })()}
           </div>
         </div>
       )}
@@ -657,22 +721,41 @@ export function PersonalModals() {
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Rol de Acceso al Sistema</label>
-                    <select
-                      required
-                      value={linkRoleId}
-                      onChange={e => setLinkRoleId(e.target.value)}
-                      className="w-full h-10 bg-background border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors"
-                    >
-                      <option value="">— Seleccionar Rol de Acceso —</option>
-                      {roles.filter((r: any) => r.name !== 'ADMIN').map((r: any) => {
-                        const scopeLabel = r.store_id ? ` (${storeMap.get(r.store_id) || r.stores?.name || 'Sucursal'})` : ' (Global)';
-                        return (
-                          <option key={r.id} value={r.id}>
-                            {r.name}{scopeLabel}
-                          </option>
-                        );
-                      })}
-                    </select>
+                    {(() => {
+                      const linkingEmpStoreIds = (linkingEmployee?.employee_stores || []).map((es: any) => es.store_id);
+                      const availableLinkRoles = roles.filter((r: any) => {
+                        if (r.name === 'ADMIN') return false;
+
+                        // Si el empleado tiene tiendas asignadas, el rol debe ser global o de una de sus tiendas
+                        if (linkingEmpStoreIds.length > 0) {
+                          const matchesEmpStore = !r.store_id || linkingEmpStoreIds.includes(r.store_id);
+                          if (!matchesEmpStore) return false;
+                        }
+
+                        // Si el usuario actual es jefe de tienda (no admin global), solo puede ver roles de sus tiendas o globales
+                        if (!isUserGlobalAdmin) {
+                          const isAllowedForManager = !r.store_id || (activeStoreId ? r.store_id === activeStoreId : availableStoreIds.includes(r.store_id));
+                          if (!isAllowedForManager) return false;
+                        }
+
+                        return true;
+                      });
+
+                      return (
+                        <CustomSelect
+                          value={linkRoleId}
+                          onChange={val => setLinkRoleId(val)}
+                          placeholder="— Seleccionar Rol de Acceso —"
+                          options={availableLinkRoles.map((r: any) => ({
+                            value: r.id,
+                            label: r.name,
+                            badge: r.store_id ? 'Sucursal' : 'Global',
+                            badgeColor: r.store_id ? 'bg-indigo-500/10 text-indigo-600 border-indigo-500/30' : 'bg-purple-500/10 text-purple-600 border-purple-500/30',
+                            sublabel: r.store_id ? `(${storeMap.get(r.store_id) || r.stores?.name || 'Sucursal'})` : ''
+                          }))}
+                        />
+                      );
+                    })()}
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Correo Gmail <span className="normal-case font-normal">(Opcional)</span></label>
@@ -687,34 +770,35 @@ export function PersonalModals() {
                 <form onSubmit={handleLinkExistingUser} className="space-y-4">
                   <div className="space-y-1.5">
                     <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Seleccionar Usuario Libre</label>
-                    <select required value={linkExistingUserId} onChange={e => setLinkExistingUserId(e.target.value)} className="w-full h-10 bg-background border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors">
-                      <option value="">— Ninguno seleccionado —</option>
-                      {allProfiles.filter((p: any) => p.role !== 'DELETED' && !p.employee_id).length === 0 ? (
-                        <option value="" disabled>No hay usuarios libres disponibles</option>
-                      ) : (
-                        allProfiles.filter((p: any) => p.role !== 'DELETED' && !p.employee_id).map((p: any) => {
-                          const isProfileGlobalRole = p.role === 'ADMIN' || roles.some((r: any) => (r.id === p.role_id || r.name === p.role) && (!r.store_id || r.is_system));
-                          const pStoreIds = p.employee_stores?.map((es: any) => es.store_id) || (p.default_store_id ? [p.default_store_id] : []);
-                          const pStoreNames = pStoreIds.length > 0
-                            ? pStoreIds.map((id: any) => storeMap.get(id) || 'Tienda').join(', ')
-                            : (isProfileGlobalRole ? 'Global' : 'Sin tienda');
-                          const empStoresSorted = (linkingEmployee?.employee_stores || []).map((es: any) => es.store_id).sort().join(',');
-                          const pStoresSorted = [...pStoreIds].sort().join(',');
-                          const isMismatch = !isProfileGlobalRole && empStoresSorted !== pStoresSorted;
+                    {(() => {
+                      const eligibleFreeProfiles = allProfiles
+                        .filter((p: any) => p.role !== 'DELETED' && !p.employee_id)
+                        .filter((p: any) => checkCanManageTarget(p, null));
 
-                          return (
-                            <option key={p.id} value={p.id}>
-                              @{p.username} ({p.role}) — Tiendas: {pStoreNames}{isMismatch ? ' [Tiendas distintas]' : ''}
-                            </option>
-                          );
-                        })
-                      )}
-                    </select>
+                      return (
+                        <>
+                          <FreeUserDropdown
+                            profiles={eligibleFreeProfiles}
+                            selectedUserId={linkExistingUserId}
+                            onSelect={val => setLinkExistingUserId(val)}
+                            roles={roles}
+                            storeMap={storeMap}
+                            getRoleBadgeStyle={getRoleBadgeStyle}
+                            linkingEmployee={linkingEmployee}
+                            placeholder="— Seleccionar Usuario Libre —"
+                          />
+                          <button
+                            type="submit"
+                            disabled={isLinking || eligibleFreeProfiles.length === 0 || !linkExistingUserId}
+                            className="w-full h-11 mt-2 flex items-center justify-center gap-2 rounded-xl font-bold text-sm bg-indigo-600 hover:bg-indigo-700 text-white transition-colors disabled:opacity-60 disabled:cursor-not-allowed shadow-md"
+                          >
+                            {isLinking ? <RefreshCw className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
+                            Vincular Usuario
+                          </button>
+                        </>
+                      );
+                    })()}
                   </div>
-                  <button type="submit" disabled={isLinking || allProfiles.filter((p: any) => p.role !== 'DELETED' && !p.employee_id).length === 0} className="w-full h-11 mt-2 flex items-center justify-center gap-2 rounded-xl font-bold text-sm bg-indigo-600 hover:bg-indigo-700 text-white transition-colors disabled:opacity-60 disabled:cursor-not-allowed shadow-md">
-                    {isLinking ? <RefreshCw className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
-                    Vincular Usuario
-                  </button>
                 </form>
               )}
             </div>
@@ -723,299 +807,354 @@ export function PersonalModals() {
       )}
 
       {/* ── User (Create/Edit) Modal ── */}
-      {isUserModalOpen && (
-        <div key={editingUserId ? editingUserId : 'new-access-' + modalResetToken} className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-md bg-card rounded-2xl shadow-xl border border-border overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className={`px-5 py-4 border-b flex items-center justify-between ${editingUserId ? 'bg-amber-500/10 border-amber-500/20 text-amber-600' : 'bg-indigo-500/10 border-indigo-500/20 text-indigo-600'}`}>
-              <div className="flex items-center gap-2">
-                {editingUserId ? <Edit2 className="w-4 h-4" /> : <KeyRound className="w-4 h-4 text-indigo-500" />}
-                <h2 className="text-sm font-bold uppercase tracking-wider">
-                  {editingUserId ? 'EDITAR ACCESO' : 'NUEVO ACCESO'}
-                </h2>
-              </div>
-              <button
-                onClick={handleCancelEdit}
-                className={`transition-colors p-1 rounded-lg ${editingUserId ? 'hover:bg-amber-500/20' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`}
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <form onSubmit={handleSaveCredentials} className="p-5 space-y-4" autoComplete="off">
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                  Usuario
-                </label>
-                <input
-                  type="text"
-                  placeholder="Ej: yuriko, admin1"
-                  value={username}
-                  onChange={e => setUsername(e.target.value)}
-                  required
-                  autoComplete="off"
-                  className="w-full h-10 bg-background border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors font-mono"
-                />
-              </div>
+      {isUserModalOpen && (() => {
+        const editingProfile = editingUserId ? allProfiles.find((p: any) => p.id === editingUserId) : null;
+        const targetUserEmp = editingProfile?.employee_id ? employeeById[editingProfile.employee_id] : null;
+        const canEditUserIdentity = !editingUserId || isUserGlobalAdmin || (() => {
+          const userStores = activeStoreId ? [activeStoreId] : availableStoreIds;
+          const profileStores = (editingProfile?.employee_stores || []).map((es: any) => es.store_id).filter(Boolean);
+          const empStores = (targetUserEmp?.employee_stores || []).map((es: any) => es.store_id).filter(Boolean);
+          const defaultStore = editingProfile?.default_store_id ? [editingProfile.default_store_id] : [];
+          const allTargetStores = [...new Set([...profileStores, ...empStores, ...defaultStore])];
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center justify-between">
-                  {editingUserId ? 'Nueva Contraseña / PIN' : 'Contraseña / PIN'}
-                  {editingUserId && <span className="text-[10px] text-amber-600 normal-case bg-amber-500/10 px-1.5 rounded">Opcional si no cambia</span>}
-                </label>
-                <div className="relative">
-                  <input
-                    type={showUserPassword ? "text" : "password"}
-                    placeholder={editingUserId ? "Dejar vacío para no cambiar" : "Mínimo 4 caracteres"}
-                    value={password}
-                    onChange={e => setPassword(e.target.value)}
-                    required={!editingUserId}
-                    minLength={4}
-                    autoComplete="new-password"
-                    className="w-full h-10 bg-background border border-border rounded-xl pl-3 pr-10 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowUserPassword(!showUserPassword)}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-1"
-                    title={showUserPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
-                  >
-                    {showUserPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
+          if (allTargetStores.length === 0) return true;
+          return allTargetStores.every((storeId: any) => userStores.includes(storeId));
+        })();
+
+        const isSelfEditingAdmin = Boolean(editingUserId && (editingUserId === currentProfileId || (editingProfile?.username && editingProfile.username === currentUsername)) && role === 'ADMIN');
+        const isOwnerUser = Boolean(editingProfile?.is_owner);
+
+        return (
+          <div key={editingUserId ? editingUserId : 'new-access-' + modalResetToken} className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="w-full max-w-lg bg-card rounded-2xl shadow-xl border border-border animate-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col">
+              <div className={`px-5 py-4 border-b flex items-center justify-between shrink-0 rounded-t-2xl ${editingUserId ? 'bg-amber-500/10 border-amber-500/20 text-amber-600' : 'bg-indigo-500/10 border-indigo-500/20 text-indigo-600'}`}>
+                <div className="flex items-center gap-2">
+                  {editingUserId ? <Edit2 className="w-4 h-4" /> : <KeyRound className="w-4 h-4 text-indigo-500" />}
+                  <h2 className="text-sm font-bold uppercase tracking-wider">
+                    {editingUserId ? 'EDITAR ACCESO' : 'NUEVO ACCESO'}
+                  </h2>
                 </div>
+                <button
+                  onClick={handleCancelEdit}
+                  className={`transition-colors p-1 rounded-lg ${editingUserId ? 'hover:bg-amber-500/20' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`}
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
 
-              {/* Modo de Acceso Toggle */}
-              {isAdmin && (
-                <div className="space-y-1.5 mt-2">
-                  <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                    Modo de Acceso
-                  </label>
-                  <div className="grid grid-cols-2 gap-1 p-1 bg-muted rounded-xl">
-                    <button
-                      type="button"
-                      onClick={() => setUserAccessScope('stores')}
-                      className={`py-1.5 text-xs font-bold rounded-lg transition-all ${userAccessScope === 'stores'
-                        ? 'bg-background text-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground'
-                        }`}
-                    >
-                      Por Sucursales
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setUserAccessScope('global')}
-                      className={`py-1.5 text-xs font-bold rounded-lg transition-all ${userAccessScope === 'global'
-                        ? 'bg-purple-600 text-white shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground'
-                        }`}
-                    >
-                      Acceso Global (Admin)
-                    </button>
+              {/* Banner Informativo si es la Cuenta Propietaria */}
+              {isOwnerUser && (
+                <div className="mx-5 mt-4 p-3 bg-amber-500/15 border border-amber-500/30 rounded-2xl flex items-start gap-2.5 text-xs text-amber-900 dark:text-amber-200">
+                  <Crown className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold block">Cuenta Propietaria / Dueño del Sistema</span>
+                    <span>Esta cuenta posee la máxima jerarquía del sistema (is_owner). Su rol administrativo y sus credenciales están blindadas contra modificaciones o eliminaciones.</span>
                   </div>
                 </div>
               )}
 
-              {userAccessScope === 'global' ? (
-                <div className="space-y-1.5 mt-3 p-3.5 bg-purple-500/10 border border-purple-500/20 rounded-2xl">
-                  <label className="text-xs font-bold text-purple-600 uppercase tracking-wider flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-purple-500" />
-                    Rol Global de Sistema
-                  </label>
-                  <select
-                    value={userGlobalRole}
-                    onChange={(e: any) => setUserGlobalRole(e.target.value)}
-                    className="w-full h-10 px-3 text-xs font-bold rounded-xl border border-purple-200 bg-white text-purple-950 focus:outline-none focus:ring-2 focus:ring-purple-500 shadow-sm"
-                  >
-                    {globalRoles.map((r: any) => (
-                      <option key={r.id} value={r.name}>{r.name}</option>
-                    ))}
-                  </select>
-                  <span className="text-[11px] text-purple-600/80 font-medium block mt-1">
-                    {userGlobalRole === 'ADMIN'
-                      ? 'Este usuario tendrá acceso total e irrestricto a todos los módulos y sucursales de la empresa.'
-                      : `Este usuario tendrá acceso a todas las sucursales del sistema, aplicando únicamente los permisos definidos para el rol "${userGlobalRole}".`}
-                  </span>
-                  <label className="flex items-center gap-2.5 mt-3 pt-3 border-t border-purple-200/60 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={confirmGlobalAccess}
-                      onChange={(e: any) => setConfirmGlobalAccess(e.target.checked)}
-                      className="w-4 h-4 text-purple-600 rounded border-purple-300 focus:ring-purple-500"
-                    />
-                    <span className="text-xs font-bold text-purple-900">
-                      Confirmar otorgar permisos administrativos globales sobre todas las sucursales
-                    </span>
-                  </label>
-                </div>
-              ) : (
-                <div className="space-y-1.5 mt-2">
-                  <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Tiendas y Roles Asignados</label>
-                  {isAdmin ? (
-                    renderStoreRoleList({
-                      storeIds: selectedStoreIds,
-                      storeRoles: userStoreRoles,
-                      storeRoleIds: userStoreRoleIds,
-                      onToggleStore: (storeId: any, checked: any) => {
-                        if (!selectedEmpId) {
-                          if (checked) {
-                            setSelectedStoreIds((prev: any) => [...prev, storeId]);
-                            const defaultRoleName = getValidStoreRole(null, storeId);
-                            const storeAvailableRoles = roles.filter((r: any) => r.name !== 'ADMIN' && (r.store_id === storeId || !r.store_id));
-                            const defaultRoleId = storeAvailableRoles.find((r: any) => r.name === defaultRoleName)?.id || storeAvailableRoles[0]?.id || '';
-                            setUserStoreRoles((prev: any) => ({ ...prev, [storeId]: prev[storeId] || defaultRoleName }));
-                            setUserStoreRoleIds((prev: any) => ({ ...prev, [storeId]: prev[storeId] || defaultRoleId }));
-                          } else {
-                            setSelectedStoreIds((prev: any) => prev.filter((id: any) => id !== storeId));
-                            setUserStoreRoles((prev: any) => {
-                              const next = { ...prev };
-                              delete next[storeId];
-                              return next;
-                            });
-                            setUserStoreRoleIds((prev: any) => {
-                              const next = { ...prev };
-                              delete next[storeId];
-                              return next;
-                            });
-                          }
-                        }
-                      },
-                      onRoleChange: (storeId: any, roleName: any, roleId: any) => {
-                        setUserStoreRoles((prev: any) => ({ ...prev, [storeId]: roleName }));
-                        setUserStoreRoleIds((prev: any) => ({ ...prev, [storeId]: roleId }));
-                      },
-                      isDisabled: false,
-                      isStoreToggleDisabled: !!selectedEmpId,
-                    })
-                  ) : (
-                    <div className="bg-secondary/50 border border-border rounded-xl p-3 flex items-center justify-between text-sm font-medium text-muted-foreground">
-                      <div className="flex items-center gap-2">
-                        <Info className="w-4 h-4 text-indigo-500 shrink-0" />
-                        {activeStoreId ? (
-                          <span>Tienda asignada automáticamente: <span className="font-bold text-foreground">{storeMap.get(activeStoreId) || '—'}</span></span>
-                        ) : (
-                          <div className="flex items-center gap-2">
-                            <span>Tienda asignada:</span>
-                            <select
-                              value={targetModalStoreId}
-                              onChange={(e: any) => {
-                                const newStoreId = e.target.value;
-                                setSelectedModalStoreId(newStoreId);
-                                const defaultRoleName = getValidStoreRole(null, newStoreId);
-                                const storeAvailableRoles = roles.filter((r: any) => r.name !== 'ADMIN' && (r.store_id === newStoreId || !r.store_id));
-                                const defaultRoleId = storeAvailableRoles.find((r: any) => r.name === defaultRoleName)?.id || storeAvailableRoles[0]?.id || '';
-                                setUserStoreRoles({ [newStoreId]: defaultRoleName });
-                                setUserStoreRoleIds({ [newStoreId]: defaultRoleId });
-                              }}
-                              className="h-8 px-2 text-xs font-bold rounded-lg border border-border bg-background cursor-pointer text-foreground"
-                            >
-                              {availableStores.map((s: any) => (
-                                <option key={s.id} value={s.id}>
-                                  {s.name}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        )}
-                      </div>
-                      {targetModalStoreId && (() => {
-                        const storeAvailableRoles = roles.filter(
-                          (r: any) => r.name !== 'ADMIN' && (r.store_id === targetModalStoreId || !r.store_id)
-                        );
-                        const currentRoleName = userStoreRoles[targetModalStoreId] || (storeAvailableRoles[0]?.name || 'CAJERO');
-                        const currentRoleId = userStoreRoleIds[targetModalStoreId] || storeAvailableRoles.find((r: any) => r.name === currentRoleName)?.id || storeAvailableRoles[0]?.id || '';
-                        const selectedValue = storeAvailableRoles.some((r: any) => r.id === currentRoleId)
-                          ? currentRoleId
-                          : (storeAvailableRoles.find((r: any) => r.name === currentRoleName)?.id || storeAvailableRoles[0]?.id || '');
-                        return (
-                          <select
-                            value={selectedValue}
-                            onChange={(e: any) => {
-                              const selectedRole = storeAvailableRoles.find((r: any) => r.id === e.target.value);
-                              if (selectedRole) {
-                                setUserStoreRoles({ [targetModalStoreId]: selectedRole.name });
-                                setUserStoreRoleIds({ [targetModalStoreId]: selectedRole.id });
-                              }
-                            }}
-                            className="h-8 px-2 text-xs font-bold rounded-lg border border-border bg-background cursor-pointer"
-                          >
-                            {storeAvailableRoles.map((r: any) => {
-                              const scopeLabel = r.store_id ? ` (${storeMap.get(r.store_id) || r.stores?.name || 'Sucursal'})` : ' (Global)';
-                              return (
-                                <option key={r.id} value={r.id}>
-                                  {r.name}{scopeLabel}
-                                </option>
-                              );
-                            })}
-                          </select>
-                        );
-                      })()}
-                    </div>
-                  )}
-                  {selectedEmpId && (
-                    <div className="flex items-start gap-2 mt-2.5 p-2.5 rounded-xl bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/40 text-[11px] text-muted-foreground font-medium leading-tight">
-                      <Info className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
-                      <span>
-                        <strong className="text-foreground font-bold">Sucursales heredadas del empleado.</strong> Puedes modificar los roles de acceso para las tiendas vinculadas. Para agregar o quitar sucursales, edita al perfil en la pestaña <strong className="text-indigo-600 dark:text-indigo-400">Empleados</strong>.
-                      </span>
-                    </div>
-                  )}
+              {/* Banner Informativo si los datos de acceso están protegidos */}
+              {!isOwnerUser && !canEditUserIdentity && (
+                <div className="mx-5 mt-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-start gap-2.5 text-xs text-amber-800 dark:text-amber-300">
+                  <ShieldAlert className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold block">Datos de acceso protegidos</span>
+                    <span>Este usuario también pertenece a otras sucursales que no administras. Sus credenciales e identidad están bloqueadas; solo puedes modificar el rol correspondiente a tu sucursal.</span>
+                  </div>
                 </div>
               )}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                  Correo Gmail
-                </label>
-                <input
-                  type="email"
-                  placeholder="Opcional"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  autoComplete="off"
-                  className="w-full h-10 bg-background border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors"
-                />
-              </div>
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                  Empleado <span className="text-muted-foreground/50 normal-case font-normal">(Opcional)</span>
-                </label>
-                <select
-                  value={selectedEmpId}
-                  onChange={e => setSelectedEmpId(e.target.value)}
-                  className="w-full h-10 bg-background border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors"
-                >
-                  <option value="">— Sin vincular —</option>
-                  {unlinkedEmployees.map((emp: Employee) => (
-                    <option key={emp.id} value={emp.id}>
-                      {emp.full_name} · {emp.dni}
-                    </option>
-                  ))}
-                  {/* Si el usuario actual ya tiene un empleado vinculado, lo agregamos para que se pueda mantener o cambiar */}
-                  {editingUserId && selectedEmpId && employeeById[selectedEmpId] && (
-                    <option value={selectedEmpId} className="bg-amber-500/10">
-                      (Actual) {employeeById[selectedEmpId].full_name}
-                    </option>
-                  )}
-                </select>
-              </div>
+              {/* Banner Informativo si es la cuenta propia de Administrador */}
+              {!isOwnerUser && isSelfEditingAdmin && (
+                <div className="mx-5 mt-4 p-3 bg-indigo-500/10 border border-indigo-500/30 rounded-2xl flex items-start gap-2.5 text-xs text-indigo-900 dark:text-indigo-200">
+                  <ShieldCheck className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold block">Tu Cuenta de Administrador Global</span>
+                    <span>Estás editando tu propia cuenta en sesión. Por seguridad y continuidad operativa, tus privilegios de Administrador Global permanecen protegidos.</span>
+                  </div>
+                </div>
+              )}
 
-              <button
-                type="submit"
-                disabled={savingUser}
-                className={`w-full h-11 mt-2 flex items-center justify-center gap-2 rounded-xl font-bold text-sm text-white transition-colors disabled:opacity-60 disabled:cursor-not-allowed shadow-md ${editingUserId ? 'bg-amber-500 hover:bg-amber-600' : 'bg-indigo-600 hover:bg-indigo-700'
-                  }`}
-              >
-                {savingUser ? (
-                  <><RefreshCw className="w-4 h-4 animate-spin" /> Guardando...</>
-                ) : editingUserId ? (
-                  <><Edit2 className="w-4 h-4" /> Actualizar Acceso</>
-                ) : (
-                  <><Plus className="w-4 h-4" /> Crear Acceso</>
+              <form onSubmit={handleSaveCredentials} className="p-5 space-y-4 overflow-y-auto" autoComplete="off">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                    Usuario
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ej: yuriko, admin1"
+                    value={username}
+                    onChange={e => setUsername(e.target.value)}
+                    required
+                    disabled={!canEditUserIdentity}
+                    autoComplete="off"
+                    className="w-full h-10 bg-background border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors font-mono disabled:opacity-60 disabled:bg-muted/40 disabled:cursor-not-allowed"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center justify-between">
+                    {editingUserId ? 'Nueva Contraseña / PIN' : 'Contraseña / PIN'}
+                    {editingUserId && <span className="text-[10px] text-amber-600 normal-case bg-amber-500/10 px-1.5 rounded">Opcional si no cambia</span>}
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showUserPassword ? "text" : "password"}
+                      placeholder={!canEditUserIdentity ? "Contraseña protegida" : (editingUserId ? "Dejar vacío para no cambiar" : "Mínimo 4 caracteres")}
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      required={!editingUserId}
+                      disabled={!canEditUserIdentity}
+                      minLength={4}
+                      autoComplete="new-password"
+                      className="w-full h-10 bg-background border border-border rounded-xl pl-3 pr-10 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors disabled:opacity-60 disabled:bg-muted/40 disabled:cursor-not-allowed"
+                    />
+                    <button
+                      type="button"
+                      disabled={!canEditUserIdentity}
+                      onClick={() => setShowUserPassword(!showUserPassword)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                      title={showUserPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                    >
+                      {showUserPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Modo de Acceso Toggle */}
+                {isAdmin && (
+                  <div className="space-y-1.5 mt-2">
+                    <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                      Modo de Acceso
+                    </label>
+                    <div className="grid grid-cols-2 gap-1 p-1 bg-muted rounded-xl">
+                      <button
+                        type="button"
+                        disabled={!canEditUserIdentity || isSelfEditingAdmin}
+                        onClick={() => setUserAccessScope('stores')}
+                        className={`py-1.5 text-xs font-bold rounded-lg transition-all ${userAccessScope === 'stores'
+                          ? 'bg-background text-foreground shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground'
+                          } disabled:opacity-50 disabled:cursor-not-allowed`}
+                      >
+                        Por Sucursales
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!canEditUserIdentity || isSelfEditingAdmin}
+                        onClick={() => setUserAccessScope('global')}
+                        className={`py-1.5 text-xs font-bold rounded-lg transition-all ${userAccessScope === 'global'
+                          ? 'bg-purple-600 text-white shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground'
+                          } disabled:opacity-50 disabled:cursor-not-allowed`}
+                      >
+                        Acceso Global
+                      </button>
+                    </div>
+                  </div>
                 )}
-              </button>
-            </form>
+
+                {userAccessScope === 'global' ? (
+                  <div className="space-y-1.5 mt-3 p-3.5 bg-purple-500/10 border border-purple-500/20 rounded-2xl">
+                    <label className="text-xs font-bold text-purple-600 uppercase tracking-wider flex items-center gap-1.5">
+                      <ShieldCheck className="w-4 h-4 text-purple-500" />
+                      Rol Global de Sistema
+                    </label>
+                    <CustomSelect
+                      value={userGlobalRole}
+                      onChange={(val) => setUserGlobalRole(val)}
+                      disabled={!canEditUserIdentity || isSelfEditingAdmin}
+                      placeholder="— Seleccionar Rol Global —"
+                      options={globalRoles
+                        .filter((r: any) => isOwner || r.name !== 'ADMIN')
+                        .map((r: any) => ({
+                          value: r.name,
+                          label: r.name,
+                          badge: 'Global',
+                          badgeColor: 'bg-purple-500/10 text-purple-600 border-purple-500/30'
+                        }))}
+                    />
+                    <span className="text-[11px] text-purple-600/80 font-medium block mt-1">
+                      {userGlobalRole === 'ADMIN'
+                        ? 'Este usuario tendrá acceso total e irrestricto a todos los módulos y sucursales de la empresa.'
+                        : userGlobalRole
+                        ? `Este usuario tendrá acceso a todas las sucursales del sistema, aplicando únicamente los permisos definidos para el rol "${userGlobalRole}".`
+                        : 'Selecciona el rol corporativo que se aplicará en todas las sucursales.'}
+                    </span>
+                    {userGlobalRole === 'ADMIN' && (!editingUserId || editingProfile?.role !== 'ADMIN') && (
+                      <label className="flex items-center gap-2.5 mt-3 pt-3 border-t border-purple-200/60 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={confirmGlobalAccess}
+                          disabled={!canEditUserIdentity || isSelfEditingAdmin}
+                          onChange={(e: any) => setConfirmGlobalAccess(e.target.checked)}
+                          className="w-4 h-4 text-purple-600 rounded border-purple-300 focus:ring-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        />
+                        <span className="text-xs font-bold text-purple-900">
+                          Confirmar otorgar permisos administrativos globales sobre todas las sucursales
+                        </span>
+                      </label>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-1.5 mt-2">
+                    <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Tiendas y Roles Asignados</label>
+                    {isAdmin ? (
+                      renderStoreRoleList({
+                        storeIds: selectedStoreIds,
+                        storeRoles: userStoreRoles,
+                        storeRoleIds: userStoreRoleIds,
+                        onToggleStore: (storeId: any, checked: any) => {
+                          if (!selectedEmpId && canEditUserIdentity) {
+                            if (checked) {
+                              setSelectedStoreIds((prev: any) => [...prev, storeId]);
+                            } else {
+                              setSelectedStoreIds((prev: any) => prev.filter((id: any) => id !== storeId));
+                              setUserStoreRoles((prev: any) => {
+                                const next = { ...prev };
+                                delete next[storeId];
+                                return next;
+                              });
+                              setUserStoreRoleIds((prev: any) => {
+                                const next = { ...prev };
+                                delete next[storeId];
+                                return next;
+                              });
+                            }
+                          }
+                        },
+                        onRoleChange: (storeId: any, roleName: any, roleId: any) => {
+                          setUserStoreRoles((prev: any) => ({ ...prev, [storeId]: roleName }));
+                          setUserStoreRoleIds((prev: any) => ({ ...prev, [storeId]: roleId }));
+                        },
+                        isDisabled: false,
+                        isStoreToggleDisabled: !canEditUserIdentity || !!selectedEmpId,
+                      })
+                    ) : (
+                      <div className="bg-secondary/50 border border-border rounded-xl p-3 flex items-center justify-between text-sm font-medium text-muted-foreground">
+                        <div className="flex items-center gap-2">
+                          <Info className="w-4 h-4 text-indigo-500 shrink-0" />
+                          {activeStoreId ? (
+                            <span>Tienda asignada automáticamente: <span className="font-bold text-foreground">{storeMap.get(activeStoreId) || '—'}</span></span>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-medium">Tienda:</span>
+                              <CustomSelect
+                                value={targetModalStoreId}
+                                onChange={(newStoreId) => {
+                                  setSelectedModalStoreId(newStoreId);
+                                  setUserStoreRoles({});
+                                  setUserStoreRoleIds({});
+                                }}
+                                disabled={!canEditUserIdentity}
+                                options={availableStores.map((s: any) => ({
+                                  value: s.id,
+                                  label: s.name,
+                                  badge: 'Sucursal',
+                                  badgeColor: 'bg-indigo-500/10 text-indigo-600 border-indigo-500/30'
+                                }))}
+                                buttonClassName="h-8 px-2.5 text-xs font-bold"
+                              />
+                            </div>
+                          )}
+                        </div>
+                        {targetModalStoreId && (() => {
+                          const storeAvailableRoles = roles.filter(
+                            (r: any) => r.name !== 'ADMIN' && (r.store_id === targetModalStoreId || !r.store_id)
+                          );
+                          const rawRoleName = userStoreRoles[targetModalStoreId];
+                          const matchedByRoleId = userStoreRoleIds?.[targetModalStoreId] ? storeAvailableRoles.find((r: any) => r.id === userStoreRoleIds[targetModalStoreId]) : null;
+                          const matchedByName = rawRoleName ? storeAvailableRoles.find((r: any) => r.name === rawRoleName) : null;
+                          const selectedValue = matchedByRoleId?.id || matchedByName?.id || '';
+                          return (
+                            <StoreRoleDropdown
+                              roles={storeAvailableRoles}
+                              selectedRoleId={selectedValue}
+                              getRoleBadgeStyle={getRoleBadgeStyle}
+                              onSelect={(selectedRole) => {
+                                setUserStoreRoles({ [targetModalStoreId]: selectedRole.name });
+                                setUserStoreRoleIds({ [targetModalStoreId]: selectedRole.id });
+                              }}
+                            />
+                          );
+                        })()}
+                      </div>
+                    )}
+                    {selectedEmpId && (
+                      <div className="flex items-start gap-2 mt-2.5 p-2.5 rounded-xl bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/40 text-[11px] text-muted-foreground font-medium leading-tight">
+                        <Info className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
+                        <span>
+                          <strong className="text-foreground font-bold">Sucursales heredadas del empleado.</strong> Puedes modificar los roles de acceso para las tiendas vinculadas. Para agregar o quitar sucursales, edita al perfil en la pestaña <strong className="text-indigo-600 dark:text-indigo-400">Empleados</strong>.
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                    Correo Gmail
+                  </label>
+                  <input
+                    type="email"
+                    placeholder="Opcional"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    disabled={!canEditUserIdentity}
+                    autoComplete="off"
+                    className="w-full h-10 bg-background border border-border rounded-xl px-3 text-sm font-semibold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-colors disabled:opacity-60 disabled:bg-muted/40 disabled:cursor-not-allowed"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                    Empleado <span className="text-muted-foreground/50 normal-case font-normal">(Opcional)</span>
+                  </label>
+                  <CustomSelect
+                    value={selectedEmpId}
+                    onChange={(val) => setSelectedEmpId(val)}
+                    disabled={!canEditUserIdentity}
+                    placeholder="— Sin vincular —"
+                    options={[
+                      { value: '', label: '— Sin vincular —' },
+                      ...(editingUserId && selectedEmpId && employeeById[selectedEmpId] && !unlinkedEmployees.some((e: any) => e.id === selectedEmpId)
+                        ? [{
+                          value: selectedEmpId,
+                          label: `(Actual) ${employeeById[selectedEmpId].full_name}`,
+                          badge: 'Actual',
+                          badgeColor: 'bg-amber-500/10 text-amber-600 border-amber-500/30',
+                          sublabel: `· ${employeeById[selectedEmpId].dni}`
+                        }]
+                        : []),
+                      ...unlinkedEmployees.map((emp: Employee) => ({
+                        value: emp.id,
+                        label: emp.full_name,
+                        sublabel: `· ${emp.dni}`,
+                        badge: 'Libre',
+                        badgeColor: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30'
+                      }))
+                    ]}
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={savingUser}
+                  className={`w-full h-11 mt-2 flex items-center justify-center gap-2 rounded-xl font-bold text-sm text-white transition-colors disabled:opacity-60 disabled:cursor-not-allowed shadow-md ${editingUserId ? 'bg-amber-500 hover:bg-amber-600' : 'bg-indigo-600 hover:bg-indigo-700'
+                    }`}
+                >
+                  {savingUser ? (
+                    <><RefreshCw className="w-4 h-4 animate-spin" /> Guardando...</>
+                  ) : editingUserId ? (
+                    <><Edit2 className="w-4 h-4" /> Actualizar Acceso</>
+                  ) : (
+                    <><Plus className="w-4 h-4" /> Crear Acceso</>
+                  )}
+                </button>
+              </form>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ── Toast ── */}
       {toast && <Toast message={toast.message} type={toast.type} />}
@@ -1183,6 +1322,20 @@ export function PersonalModals() {
               Estás a punto de eliminar el empleado <strong>"{deletingEmployee.name}"</strong>. ¿Deseas continuar?
             </p>
 
+            {(() => {
+              const linkedUser = profileByEmployeeId[deletingEmployee.id];
+              if (!linkedUser) return null;
+              return (
+                <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3.5 flex items-start gap-2.5 text-xs text-amber-900 dark:text-amber-300">
+                  <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold">Cuenta de acceso vinculada: <span className="font-mono text-amber-700 dark:text-amber-400">@{linkedUser.username}</span></p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">Al eliminar este empleado, su cuenta de acceso al sistema también será desactivada y desvinculada automáticamente.</p>
+                  </div>
+                </div>
+              );
+            })()}
+
             <div className="flex justify-end gap-3 pt-2">
               <button
                 onClick={() => setDeletingEmployee(null)}
@@ -1217,8 +1370,8 @@ export function PersonalModals() {
             </div>
 
             <p className="text-xs text-muted-foreground leading-relaxed">
-              Estás a punto de desvincular el acceso al sistema del empleado <strong>"{unlinkingEmployee.name}"</strong>. 
-              El usuario actual ya no podrá ingresar usando estas credenciales. ¿Deseas continuar?
+              Estás a punto de desvincular la cuenta de usuario del empleado <strong>"{unlinkingEmployee.name}"</strong>.
+              El usuario quedará activo como cuenta libre y podrá ser vinculado a otro empleado. ¿Deseas continuar?
             </p>
 
             <div className="flex justify-end gap-3 pt-2">
@@ -1243,7 +1396,7 @@ export function PersonalModals() {
       {isManagePermsModalOpen && managingPermsRoleId && (() => {
         const currentRole = roles.find((r: any) => r.id === managingPermsRoleId) || originalRoles.find((r: any) => r.id === managingPermsRoleId);
         if (!currentRole) return null;
-        
+
         const isGlobalRole = !currentRole.store_id || currentRole.is_system;
         const isReadOnly = isGlobalRole && role !== 'ADMIN';
         const isLocked = currentRole.is_system || isReadOnly;
@@ -1257,8 +1410,12 @@ export function PersonalModals() {
                     <ShieldCheck className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="text-lg font-bold">Gestionar Permisos: {currentRole.name}</h3>
-                    <p className="text-sm text-muted-foreground">Configura los accesos por módulo para este rol</p>
+                    <h3 className="text-lg font-bold flex items-center gap-2">
+                      Gestionar Permisos: <span className="text-indigo-600 dark:text-indigo-400">{currentRole.name}</span>
+                    </h3>
+                    <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
+                      {currentRole.description ? currentRole.description : "Configura los accesos por módulo para este rol"}
+                    </p>
                   </div>
                 </div>
                 <button
@@ -1278,12 +1435,12 @@ export function PersonalModals() {
                     </p>
                   </div>
                 )}
-                
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {PERMISSION_GROUPS.map((group) => {
                     const Icon = group.icon;
                     const isMainEnabled = Boolean(currentRole.name === 'ADMIN' || (currentRole.permissions && currentRole.permissions[group.mainKey]));
-                    
+
                     return (
                       <div key={group.mainKey} className="border border-border rounded-xl overflow-hidden flex flex-col bg-card shadow-sm hover:shadow-md transition-shadow duration-200">
                         <div className="p-4 border-b border-border bg-muted/10 flex items-start justify-between gap-4">
@@ -1311,25 +1468,57 @@ export function PersonalModals() {
                             <div className="w-10 h-6 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500"></div>
                           </label>
                         </div>
-                        
+
                         {group.subPermissions.length > 0 && (
                           <div className={`p-4 bg-muted/5 flex-1 flex flex-col gap-3 transition-opacity duration-200 ${!isMainEnabled ? 'opacity-40 grayscale-[50%]' : ''}`}>
-                            {group.subPermissions.map((sub) => {
+                            {group.subPermissions.map((sub: any) => {
                               const isSubEnabled = Boolean(currentRole.name === 'ADMIN' || (currentRole.permissions && currentRole.permissions[sub.key]));
-                              const isDisabled = isLocked || !isMainEnabled;
+                              const isRestrictedForLocal = sub.isCritical && !isGlobalRole;
+                              const isDisabled = isLocked || !isMainEnabled || isRestrictedForLocal;
                               return (
-                                <div key={sub.key} className="flex items-center justify-between">
-                                  <span className="text-xs text-muted-foreground font-medium">{sub.label}</span>
-                                  <label className={`relative inline-flex items-center shrink-0 cursor-pointer ${isDisabled ? 'cursor-not-allowed' : ''}`}>
-                                    <input
-                                      type="checkbox"
-                                      className="sr-only peer"
-                                      checked={isMainEnabled && isSubEnabled}
-                                      disabled={isDisabled}
-                                      onChange={(e) => handleTogglePermission(currentRole.id, currentRole.permissions || {}, sub.key, e.target.checked)}
-                                    />
-                                    <div className={`w-8 h-4 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-border after:border after:rounded-full after:h-3 after:w-3 after:transition-all ${isMainEnabled ? 'peer-checked:bg-indigo-400' : 'peer-checked:bg-muted-foreground'}`}></div>
-                                  </label>
+                                <div key={sub.key} className="flex flex-col gap-1 py-1.5 border-b border-border/30 last:border-0">
+                                  <div className="flex items-center justify-between gap-3">
+                                    <div className="flex items-center gap-2 flex-wrap min-w-0">
+                                      <span className={`text-xs ${sub.isCritical ? 'text-foreground font-bold' : 'text-muted-foreground font-medium'}`}>
+                                        {sub.label}
+                                      </span>
+                                      {sub.isCritical && (
+                                        <button
+                                          type="button"
+                                          onClick={() => showToast(`El permiso "${sub.label}" es crítico y solo es asignable a roles con Acceso Global`, "error")}
+                                          title="Clic para ver detalle de restricción"
+                                          className="text-[9px] font-black text-rose-700 dark:text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 px-1.5 py-0.5 rounded uppercase tracking-wider shrink-0 cursor-pointer transition-colors"
+                                        >
+                                          {sub.criticalBadge || 'Crítico / Global'}
+                                        </button>
+                                      )}
+                                    </div>
+                                    <div
+                                      className="shrink-0"
+                                      onClick={() => {
+                                        if (isRestrictedForLocal) {
+                                          showToast(`El permiso "${sub.label}" es crítico y solo puede asignarse a roles con Acceso Global`, "error");
+                                        }
+                                      }}
+                                    >
+                                      <label className={`relative inline-flex items-center shrink-0 cursor-pointer ${isDisabled ? 'cursor-not-allowed opacity-50' : ''}`}
+                                        title={isRestrictedForLocal ? "Este permiso solo aplica a roles con Ámbito Global" : undefined}>
+                                        <input
+                                          type="checkbox"
+                                          className="sr-only peer"
+                                          checked={isMainEnabled && isSubEnabled && !isRestrictedForLocal}
+                                          disabled={isDisabled}
+                                          onChange={(e) => handleTogglePermission(currentRole.id, currentRole.permissions || {}, sub.key, e.target.checked)}
+                                        />
+                                        <div className={`w-8 h-4 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-border after:border after:rounded-full after:h-3 after:w-3 after:transition-all ${isMainEnabled ? 'peer-checked:bg-indigo-400' : 'peer-checked:bg-muted-foreground'}`}></div>
+                                      </label>
+                                    </div>
+                                  </div>
+                                  {sub.hint && (
+                                    <p className="text-[11px] text-muted-foreground/75 leading-tight">
+                                      {sub.hint}
+                                    </p>
+                                  )}
                                 </div>
                               );
                             })}
@@ -1340,7 +1529,7 @@ export function PersonalModals() {
                   })}
                 </div>
               </div>
-              
+
               <div className="px-6 py-4 border-t border-border bg-muted/30 flex items-center justify-between">
                 <span className="text-xs text-muted-foreground">
                   {hasUnsavedRoleChanges ? (

@@ -16,6 +16,8 @@ interface RoleContextProps {
   setProfileId: (id: string | null) => void;
   defaultStoreId: string | null;
   setDefaultStoreId: (id: string | null) => void;
+  isOwner: boolean;
+  setIsOwner: (val: boolean) => void;
   permissions: Record<string, boolean>;
   clearSession: () => void;
   refreshUserSession: () => Promise<void>;
@@ -30,6 +32,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
   const [employeeId, setEmployeeIdState] = useState<string | null>(null);
   const [profileId, setProfileIdState] = useState<string | null>(null);
   const [defaultStoreId, setDefaultStoreIdState] = useState<string | null>(null);
+  const [isOwner, setIsOwnerState] = useState<boolean>(false);
   const [permissions, setPermissions] = useState<Record<string, boolean>>({});
   const [isHydrated, setIsHydrated] = useState(false);
 
@@ -108,7 +111,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     try {
       const { data: profile, error } = await supabase
         .from("profiles")
-        .select("id, role, role_id, employee_id, default_store_id")
+        .select("id, role, role_id, employee_id, default_store_id, is_owner")
         .eq("username", currentUsername)
         .single();
 
@@ -164,6 +167,10 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
       const freshEmpId = profile.employee_id;
       const freshProfileId = profile.id;
       const freshDefaultStoreId = profile.default_store_id ?? null;
+      const freshIsOwner = Boolean(profile.is_owner);
+
+      setIsOwnerState(freshIsOwner);
+      localStorage.setItem("goltex_is_owner", String(freshIsOwner));
 
       if (freshRole !== role) {
         setRoleState(freshRole);
@@ -217,6 +224,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     const storedEmpId = localStorage.getItem("goltex_employee_id");
     const storedProfileId = localStorage.getItem("goltex_profile_id");
     const storedDefaultStoreId = localStorage.getItem("goltex_default_store_id");
+    const storedIsOwner = localStorage.getItem("goltex_is_owner") === "true";
     const localPerms = localStorage.getItem("goltex_permissions");
     const localPermsUser = localStorage.getItem("goltex_permissions_user");
 
@@ -225,6 +233,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     if (storedEmpId) setEmployeeIdState(storedEmpId);
     if (storedProfileId) setProfileIdState(storedProfileId);
     if (storedDefaultStoreId) setDefaultStoreIdState(storedDefaultStoreId);
+    if (storedIsOwner) setIsOwnerState(true);
 
     // Solo usar permisos si pertenecen exactamente al usuario autenticado
     if (localPerms && (!localPermsUser || localPermsUser === storedUsername)) {
@@ -364,16 +373,23 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const setIsOwner = (val: boolean) => {
+    setIsOwnerState(val);
+    localStorage.setItem("goltex_is_owner", String(val));
+  };
+
   const clearSession = () => {
     setRoleState("");
     setUsernameState("");
     setEmployeeIdState(null);
+    setIsOwnerState(false);
     setPermissions({});
     localStorage.removeItem("goltex_role");
     localStorage.removeItem("goltex_username");
     localStorage.removeItem("goltex_employee_id");
     localStorage.removeItem("goltex_profile_id");
     localStorage.removeItem("goltex_default_store_id");
+    localStorage.removeItem("goltex_is_owner");
     localStorage.removeItem("goltex_permissions");
     localStorage.removeItem("goltex_permissions_user");
   };
@@ -391,6 +407,8 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
         setProfileId,
         defaultStoreId,
         setDefaultStoreId,
+        isOwner,
+        setIsOwner,
         permissions,
         clearSession,
         refreshUserSession,

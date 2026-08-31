@@ -21,13 +21,16 @@ export function getActiveDevicePrinter(storeId?: string | null): any | null {
     const targetPlatform = isMobile ? 'MOBILE' : 'WEB';
 
     let cachedStr: string | null = null;
+    let storageKeyUsed = 'goltex_active_printer';
 
     if (storeId) {
-      cachedStr = localStorage.getItem(`goltex_active_printer_${storeId}`)
+      storageKeyUsed = `goltex_active_printer_${storeId}`;
+      cachedStr = localStorage.getItem(storageKeyUsed)
         || localStorage.getItem(`cached_printer_config_${storeId}`);
     }
 
     if (!cachedStr) {
+      storageKeyUsed = 'goltex_active_printer';
       cachedStr = localStorage.getItem('goltex_active_printer')
         || localStorage.getItem('cached_printer_config');
     }
@@ -40,6 +43,12 @@ export function getActiveDevicePrinter(storeId?: string | null): any | null {
       }
       // 2. Validar que la plataforma coincida con el entorno actual (no usar móvil en web ni web en móvil)
       if (printer.platform && printer.platform !== 'ALL' && printer.platform !== targetPlatform) {
+        try {
+          localStorage.removeItem(storageKeyUsed);
+          if (storageKeyUsed !== 'goltex_active_printer') {
+            localStorage.removeItem('goltex_active_printer');
+          }
+        } catch (_) { }
         return null;
       }
       // 3. Validar que no esté desactivada
@@ -48,7 +57,7 @@ export function getActiveDevicePrinter(storeId?: string | null): any | null {
       }
       return printer;
     }
-  } catch (_) {}
+  } catch (_) { }
   return null;
 }
 
@@ -58,42 +67,46 @@ export function setActiveDevicePrinter(printer: any, storeId?: string | null): v
     const dataStr = JSON.stringify(printer);
     const targetStoreId = storeId || printer?.store_id;
     const key = getActivePrinterStorageKey(targetStoreId);
-    
+
     localStorage.setItem(key, dataStr);
     localStorage.setItem('goltex_active_printer', dataStr);
-    
+
     // Legacy compatibility keys
     localStorage.setItem('cached_printer_config', dataStr);
     if (targetStoreId) {
       localStorage.setItem(`cached_printer_config_${targetStoreId}`, dataStr);
     }
-  } catch (_) {}
+  } catch (_) { }
 }
 
 export async function resolveActivePrinter(storeId?: string | null): Promise<any | null> {
+  const isMobile = isNativeAndroidApp();
+  const targetPlatform = isMobile ? 'MOBILE' : 'WEB';
+
   // 1. Local-First: Preferencia guardada en este dispositivo
   let activePrinter = getActiveDevicePrinter(storeId);
   if (activePrinter && activePrinter.is_active !== false) {
-    return activePrinter;
+    if (!activePrinter.platform || activePrinter.platform === 'ALL' || activePrinter.platform === targetPlatform) {
+      return activePrinter;
+    }
   }
 
   // 2. Cloud Fallback: Si no hay en localStorage, consultar Supabase por plataforma
   try {
-    const targetPlatform = isNativeAndroidApp() ? 'MOBILE' : 'WEB';
     let query = supabase
       .from('printers')
       .select('*')
       .eq('is_active', true);
-    
+
     if (storeId) {
       query = query.eq('store_id', storeId);
     }
-    
+
     // Filtrar por plataforma (MOBILE o ALL si es Android, WEB o ALL si es Web)
     query = query.in('platform', [targetPlatform, 'ALL']);
-    
+
     const { data: printers } = await query.order('auto_print', { ascending: false });
-    
+
     if (printers && printers.length > 0) {
       activePrinter = printers.find((p: any) => p.auto_print) || printers[0];
       if (activePrinter) {
@@ -105,7 +118,7 @@ export async function resolveActivePrinter(storeId?: string | null): Promise<any
     console.error('Error resolving fallback printer from Supabase:', err);
   }
 
-  return activePrinter || null;
+  return null;
 }
 
 export const DEFAULT_TEST_SALE_DATA = {
@@ -213,8 +226,47 @@ export function generateTicketLines(saleData: any, maxChars: number): TicketLine
 
   left(separatorThin);
   const sumaRedondeada2Dec = Math.round(sumaExacta * 100) / 100;
-  const totalRedondeado = Math.round(sumaRedondeada2Dec * 10) / 10;
-  const totalFinalStr = totalRedondeado.toFixed(2);
+  
+  // Detección de recargo por Izipay/Tarjeta (solo aplica si la venta viene con transacciones o si fue cobrada con recargo)
+  const txs = Array.isArray(saleData.transactions) ? saleData.transactions : [];
+  const izipayTx = txs.find((t: any) => t.payment_method === 'IZIPAY');
+  
+  let surchargeAmt = 0;
+  let surchargePct = 0;
+
+  if (izipayTx) {
+    if (izipayTx.surcharge_amount != null && Number(izipayTx.surcharge_amount) > 0) {
+      surchargeAmt = Number(izipayTx.surcharge_amount);
+      surchargePct = Number(izipayTx.surcharge_pct || 0);
+    } else {
+      const diff = Number(saleData.total || 0) - sumaRedondeada2Dec;
+      if (diff > 0.04) {
+        surchargeAmt = diff;
+        surchargePct = Number(izipayTx.surcharge_pct || (Math.round((diff / (sumaRedondeada2Dec || 1)) * 1000) / 10));
+      }
+    }
+  } else if (saleData.total && Number(saleData.total) > sumaRedondeada2Dec + 0.04) {
+    surchargeAmt = Number(saleData.total) - sumaRedondeada2Dec;
+  }
+
+  let totalFinalStr: string;
+
+  if (surchargeAmt > 0.01) {
+    left(formatLR('Subtotal Items:', `S/ ${sumaRedondeada2Dec.toFixed(2)}`));
+    const recargoLabel = surchargePct > 0 
+      ? `Recargo Izipay (${surchargePct % 1 === 0 ? surchargePct : surchargePct.toFixed(1)}%):`
+      : 'Recargo Izipay / Tarj:';
+    left(formatLR(recargoLabel, `+ S/ ${surchargeAmt.toFixed(2)}`));
+    left(separatorThin);
+    
+    const finalTotalNum = (saleData.total != null && Number(saleData.total) > 0) 
+      ? Number(saleData.total) 
+      : (sumaRedondeada2Dec + surchargeAmt);
+    totalFinalStr = finalTotalNum.toFixed(2);
+  } else {
+    const totalRedondeado = Math.round(sumaRedondeada2Dec * 10) / 10;
+    totalFinalStr = totalRedondeado.toFixed(2);
+  }
 
   // Total optimizado en Doble Ancho 2X (Ocupa la mitad de columnas para llenar el 100% de la bobina de borde a borde)
   const halfCols = Math.floor(maxChars / 2);
@@ -258,10 +310,10 @@ export function generateClosureTicketLines(cajaSummary: any, maxChars: number = 
   const lines: TicketLine[] = [];
   const separator = '='.repeat(maxChars);
   const separatorThin = '-'.repeat(maxChars);
-  
+
   const center = (text: string) => lines.push({ align: 'center', text });
   const left = (text: string) => lines.push({ align: 'left', text });
-  
+
   const formatLR = (leftText: string, rightText: string) => {
     const spaceCount = Math.max(1, maxChars - leftText.length - rightText.length);
     return leftText + ' '.repeat(spaceCount) + rightText;
@@ -269,28 +321,28 @@ export function generateClosureTicketLines(cajaSummary: any, maxChars: number = 
 
   center('ARQUEO DE CAJA');
   center(separator);
-  
+
   const dateObj = new Date();
   const dateStr = `${String(dateObj.getDate()).padStart(2, '0')}/${String(dateObj.getMonth() + 1).padStart(2, '0')}/${dateObj.getFullYear()} ${String(dateObj.getHours()).padStart(2, '0')}:${String(dateObj.getMinutes()).padStart(2, '0')}`;
-  
+
   left(`FECHA: ${dateStr}`);
   left(separatorThin);
-  
+
   left(formatLR('EFECTIVO', `S/ ${Number(cajaSummary?.efectivo || 0).toFixed(2)}`));
   left(formatLR('BCP', `S/ ${Number(cajaSummary?.bcp || 0).toFixed(2)}`));
   left(formatLR('BBVA', `S/ ${Number(cajaSummary?.bbva || 0).toFixed(2)}`));
   left(formatLR('IZIPAY', `S/ ${Number(cajaSummary?.izipay || 0).toFixed(2)}`));
-  
+
   left(separatorThin);
-  
+
   const totalStr = `S/ ${Number(cajaSummary?.total || 0).toFixed(2)}`;
   const halfCols = Math.floor(maxChars / 2);
   const spaces2X = Math.max(1, halfCols - 'TOTAL'.length - totalStr.length);
   const total2XLine = `TOTAL${' '.repeat(spaces2X)}${totalStr}`;
   left(total2XLine);
-  
+
   center(separator);
-  
+
   return lines;
 }
 
@@ -389,7 +441,15 @@ export class WebBluetoothAdapter implements IPrinterAdapter {
   private async getWriteCharacteristic(device: any) {
     if (!device?.gatt) throw new Error('El dispositivo no soporta comunicación GATT.');
 
-    let server = device.gatt.connected ? device.gatt : await device.gatt.connect();
+    let server = null;
+    try {
+      server = device.gatt.connected ? device.gatt : await device.gatt.connect();
+    } catch (err: any) {
+      try { device.gatt.disconnect(); } catch (_) { }
+      await new Promise(r => setTimeout(r, 400));
+      server = await device.gatt.connect();
+    }
+
     const services = await server.getPrimaryServices();
 
     // Lista de servicios genéricos a ignorar (no pertenecen al cabezal térmico)
@@ -527,20 +587,41 @@ export class WebBluetoothAdapter implements IPrinterAdapter {
     } catch (_) { }
 
     if (!deviceToPrint) {
-      deviceToPrint = await nav.bluetooth.requestDevice({
-        acceptAllDevices: true,
-        optionalServices: this.knownServices
-      });
+      try {
+        deviceToPrint = await nav.bluetooth.requestDevice({
+          acceptAllDevices: true,
+          optionalServices: this.knownServices
+        });
+      } catch (reqErr: any) {
+        console.warn("Web Bluetooth no autorizado en esta sesión, aplicando impresión térmica del sistema:", reqErr);
+        const maxCharsConfig = activePrinter.max_chars || (activePrinter.paper_width <= 58 ? 32 : 48);
+        const lines = generateTicketLines(saleData, maxCharsConfig);
+        printViaThermalHtml(lines, activePrinter.paper_width || 80);
+        throw new Error(`PRINTER_NOT_AUTHORIZED_IN_BROWSER:${activePrinter.name || 'Impresora'}`);
+      }
     }
 
-    if (!deviceToPrint) throw new Error("PRINTER_CONNECTION_ERROR");
+    if (!deviceToPrint) {
+      const maxCharsConfig = activePrinter.max_chars || (activePrinter.paper_width <= 58 ? 32 : 48);
+      const lines = generateTicketLines(saleData, maxCharsConfig);
+      printViaThermalHtml(lines, activePrinter.paper_width || 80);
+      throw new Error(`PRINTER_NOT_AUTHORIZED_IN_BROWSER:${activePrinter.name || 'Impresora'}`);
+    }
 
     const maxCharsConfig = activePrinter.max_chars || (activePrinter.paper_width <= 58 ? 32 : 48);
-    await this.printSaleReceipt(deviceToPrint, saleData, activePrinter.paper_width || 80, maxCharsConfig);
 
-    if (doubleCopy) {
-      await new Promise(resolve => setTimeout(resolve, 1500));
+    try {
       await this.printSaleReceipt(deviceToPrint, saleData, activePrinter.paper_width || 80, maxCharsConfig);
+
+      if (doubleCopy) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        await this.printSaleReceipt(deviceToPrint, saleData, activePrinter.paper_width || 80, maxCharsConfig);
+      }
+    } catch (printErr: any) {
+      console.warn("Fallo durante transmisión Bluetooth, recurriendo a impresión térmica del sistema:", printErr);
+      const lines = generateTicketLines(saleData, maxCharsConfig);
+      printViaThermalHtml(lines, activePrinter.paper_width || 80);
+      throw new Error(`PRINTER_COMMUNICATION_ERROR:${activePrinter.name || 'Impresora'}`);
     }
   }
 }
@@ -583,16 +664,16 @@ export class AndroidBluetoothSerialAdapter implements IPrinterAdapter {
 
     // Preferir dispositivos con nombre de impresora o el primero encontrado
     const first = devices.find((d: any) => d.name && (
-      d.name.toLowerCase().includes('printer') || 
-      d.name.toLowerCase().includes('pos') || 
-      d.name.toLowerCase().includes('bt') || 
-      d.name.toLowerCase().includes('tp') || 
+      d.name.toLowerCase().includes('printer') ||
+      d.name.toLowerCase().includes('pos') ||
+      d.name.toLowerCase().includes('bt') ||
+      d.name.toLowerCase().includes('tp') ||
       d.name.toLowerCase().includes('rp')
     )) || devices[0]!;
 
-    return { 
-      name: first.name || first.address || 'Impresora BT', 
-      device: first 
+    return {
+      name: first.name || first.address || 'Impresora BT',
+      device: first
     };
   }
 
@@ -605,20 +686,34 @@ export class AndroidBluetoothSerialAdapter implements IPrinterAdapter {
       return addressOrName;
     }
 
+    // Comprobar memoria local para conectar de inmediato sin escanear el aire
+    if (typeof window !== 'undefined') {
+      const cached = localStorage.getItem('goltex_bt_mac_' + addressOrName);
+      if (cached && macRegex.test(cached)) {
+        return cached;
+      }
+    }
+
     // Si addressOrName es un nombre de dispositivo (ej. "POS-58" o "MTP-II")
     // buscamos entre los dispositivos escaneados / vinculados para obtener la MAC real
     try {
       const { BluetoothSerial } = await import('@e-is/capacitor-bluetooth-serial');
       const scanRes = await BluetoothSerial.scan();
       const devices = scanRes?.devices || [];
-      const match = devices.find((d: any) => 
+      const match = devices.find((d: any) =>
         (d.name && d.name.toLowerCase() === addressOrName.toLowerCase()) ||
         (d.address && d.address.toLowerCase() === addressOrName.toLowerCase())
       );
       if (match?.address && macRegex.test(match.address)) {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('goltex_bt_mac_' + addressOrName, match.address);
+        }
         return match.address;
       }
       if (devices.length > 0 && devices[0]?.address && macRegex.test(devices[0].address)) {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('goltex_bt_mac_' + addressOrName, devices[0].address);
+        }
         return devices[0].address;
       }
     } catch (_) { }
@@ -631,7 +726,7 @@ export class AndroidBluetoothSerialAdapter implements IPrinterAdapter {
     const address = await this.resolveValidMacAddress(addressOrName);
 
     // 1. Limpieza de socket previo para evitar bloqueos
-    try { await BluetoothSerial.disconnect({ address }); } catch (_) {}
+    try { await BluetoothSerial.disconnect({ address }); } catch (_) { }
 
     // 2. Conectar directamente por RFCOMM Insecure (estándar nativo para impresoras térmicas ESC/POS)
     try {
@@ -645,13 +740,13 @@ export class AndroidBluetoothSerialAdapter implements IPrinterAdapter {
     }
 
     try {
-      // Pequeña pausa para estabilizar el canal de datos
-      await new Promise(r => setTimeout(r, 100));
+      // Breve pausa para estabilizar el canal de datos
+      await new Promise(r => setTimeout(r, 60));
 
       const value = Array.from(uint8).map(b => String.fromCharCode(b)).join('');
       await BluetoothSerial.write({ address, value });
       // Pausa para que la impresora procese los bytes antes de desconectar
-      await new Promise(r => setTimeout(r, 1000));
+      await new Promise(r => setTimeout(r, 400));
     } finally {
       try { await BluetoothSerial.disconnect({ address }); } catch (_) { }
     }
@@ -692,7 +787,7 @@ export class AndroidBluetoothSerialAdapter implements IPrinterAdapter {
     const uint8 = buildEscPosBytes(lines, maxCharsConfig);
 
     // 1. Limpieza preventiva
-    try { await BluetoothSerial.disconnect({ address }); } catch (_) {}
+    try { await BluetoothSerial.disconnect({ address }); } catch (_) { }
 
     // 2. Conexión rápida Insecure / Secure
     try {
@@ -706,15 +801,16 @@ export class AndroidBluetoothSerialAdapter implements IPrinterAdapter {
     }
 
     try {
-      await new Promise(r => setTimeout(r, 100));
+      await new Promise(r => setTimeout(r, 60));
       const value = Array.from(uint8).map(b => String.fromCharCode(b)).join('');
       await BluetoothSerial.write({ address, value });
-      await new Promise(r => setTimeout(r, 600));
+
       if (doubleCopy) {
-        await new Promise(r => setTimeout(r, 600));
+        await new Promise(r => setTimeout(r, 350));
         await BluetoothSerial.write({ address, value });
-        await new Promise(r => setTimeout(r, 600));
       }
+
+      await new Promise(r => setTimeout(r, 400));
     } finally {
       try { await BluetoothSerial.disconnect({ address }); } catch (_) { }
     }
@@ -792,14 +888,15 @@ export class AndroidWifiTcpAdapter implements IPrinterAdapter {
 
 // ── USB / CABLE ADAPTER (Web Serial & WebUSB API) ──
 export class WebUsbSerialAdapter {
-  async requestDevice() {
+  async requestDevice(options?: { filters?: any[] }) {
     const nav = typeof window !== 'undefined' ? (navigator as any) : null;
     let usbError: any = null;
 
     // 1. Intentar primero con WebUSB (La mayoría de impresoras térmicas modernas son Raw USB)
     if (nav?.usb) {
       try {
-        const device = await nav.usb.requestDevice({ filters: [] });
+        const filters = options?.filters || [];
+        const device = await nav.usb.requestDevice({ filters });
         return {
           name: device.productName || 'Impresora USB (Directa)',
           device
@@ -835,29 +932,67 @@ export class WebUsbSerialAdapter {
   async printEscPos(usbObj: any, uint8: Uint8Array) {
     if (usbObj?.port) {
       const port = usbObj.port;
-      await port.open({ baudRate: 9600 });
+      const baudRate = usbObj.baudRate || 9600;
+      if (!port.readable && !port.writable) {
+        await port.open({ baudRate });
+      }
       const writer = port.writable.getWriter();
       await writer.write(uint8);
       writer.releaseLock();
-      await new Promise(r => setTimeout(r, 500));
-      await port.close();
+      await new Promise(r => setTimeout(r, 300));
+      try {
+        await port.close();
+      } catch (_) { }
       return;
     }
 
     if (usbObj?.device) {
       const device = usbObj.device;
       await device.open();
-      await device.selectConfiguration(1);
-      await device.claimInterface(0);
 
-      const iface = device.configuration.interfaces[0];
-      const alt = iface.alternates[0];
-      const endpoint = alt.endpoints.find((e: any) => e.direction === 'out');
-      const endpointNumber = endpoint ? endpoint.endpointNumber : 1;
+      if (device.configuration === null) {
+        try {
+          await device.selectConfiguration(1);
+        } catch (_) { }
+      }
 
-      await device.transferOut(endpointNumber, uint8);
-      await new Promise(r => setTimeout(r, 500));
-      await device.close();
+      // Búsqueda dinámica de la interfaz y endpoint OUT (Crucial para Windows y distintas marcas de ticketeras)
+      let targetInterfaceNumber = 0;
+      let targetEndpointNumber = 1;
+      let found = false;
+
+      if (device.configuration?.interfaces) {
+        for (const iface of device.configuration.interfaces) {
+          for (const alt of iface.alternates || []) {
+            const ep = alt.endpoints?.find((e: any) => e.direction === 'out');
+            if (ep) {
+              targetInterfaceNumber = iface.interfaceNumber;
+              targetEndpointNumber = ep.endpointNumber;
+              found = true;
+              break;
+            }
+          }
+          if (found) break;
+        }
+      }
+
+      try {
+        await device.claimInterface(targetInterfaceNumber);
+      } catch (claimErr: any) {
+        if (claimErr.name === 'SecurityError' || claimErr.message?.includes('Access denied')) {
+          throw new Error('Windows tiene bloqueado el puerto USB por el driver instalado. En Windows, usa el puerto serie COM o el modo de impresión del sistema.');
+        }
+        throw claimErr;
+      }
+
+      await device.transferOut(targetEndpointNumber, uint8);
+      await new Promise(r => setTimeout(r, 300));
+      try {
+        await device.releaseInterface(targetInterfaceNumber);
+      } catch (_) { }
+      try {
+        await device.close();
+      } catch (_) { }
       return;
     }
 
@@ -984,7 +1119,7 @@ export const scanBluetoothPrinters = async (): Promise<Array<{ name: string; add
       if (!enabled) {
         try {
           await BluetoothSerial.enable();
-        } catch (_) {}
+        } catch (_) { }
       }
     } catch (_) { }
 
@@ -1003,19 +1138,20 @@ export const scanBluetoothPrinters = async (): Promise<Array<{ name: string; add
       throw new Error('Asegúrate de tener el Bluetooth encendido y la impresora vinculada o encendida.');
     }
 
-    // Deduplicar por dirección MAC manteniendo todos los dispositivos detectados en vivo
+    // Filtrar estrictamente solo dispositivos con MAC address física válida (elimina entradas huérfanas o sin antena)
+    const macRegex = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/;
     const allDevices: any[] = [];
     const seenAddresses = new Set<string>();
     for (const d of scanDevices) {
       const addr = d.address || d.id;
-      if (addr && !seenAddresses.has(addr)) {
+      if (addr && macRegex.test(addr) && !seenAddresses.has(addr)) {
         seenAddresses.add(addr);
         allDevices.push(d);
       }
     }
 
     return allDevices.map((d: any) => ({
-      name: d.name || d.address || 'Dispositivo Bluetooth',
+      name: d.name || d.address || 'Impresora Bluetooth',
       address: d.address || d.id || '',
       device: d,
     }));
@@ -1055,14 +1191,22 @@ export const silentPrintSaleReceipt = async (saleData: any, doubleCopy: boolean 
 
     const nav = typeof window !== 'undefined' ? (navigator as any) : null;
     let deviceToPrint = null;
-    
+
     if (nav?.usb && typeof nav.usb.getDevices === 'function') {
       try {
         const devices = await nav.usb.getDevices();
         if (devices && devices.length > 0) {
-          deviceToPrint = { device: devices.find((d: any) => d.productName === activePrinter.mac_address) || devices[0] };
+          const matched = devices.find((d: any) =>
+            (activePrinter.mac_address && d.productName === activePrinter.mac_address) ||
+            (activePrinter.name && d.productName === activePrinter.name)
+          ) || devices.find((d: any) => {
+            const pName = (d.productName || '').toLowerCase();
+            return !pName.includes('mouse') && !pName.includes('keyboard');
+          }) || devices[0];
+
+          if (matched) deviceToPrint = { device: matched };
         }
-      } catch (_) {}
+      } catch (_) { }
     }
 
     if (!deviceToPrint && nav?.serial && typeof nav.serial.getPorts === 'function') {
@@ -1071,7 +1215,7 @@ export const silentPrintSaleReceipt = async (saleData: any, doubleCopy: boolean 
         if (ports && ports.length > 0) {
           deviceToPrint = { port: ports[0] };
         }
-      } catch (_) {}
+      } catch (_) { }
     }
 
     if (!deviceToPrint) {
@@ -1082,13 +1226,19 @@ export const silentPrintSaleReceipt = async (saleData: any, doubleCopy: boolean 
     const lines = generateTicketLines(saleData, maxCharsConfig);
     const uint8 = buildEscPosBytes(lines, maxCharsConfig);
 
-    await usbSerialAdapter.printEscPos(deviceToPrint, uint8);
-    
-    if (doubleCopy) {
-      await new Promise(r => setTimeout(r, 1500));
+    try {
       await usbSerialAdapter.printEscPos(deviceToPrint, uint8);
+
+      if (doubleCopy) {
+        await new Promise(r => setTimeout(r, 1500));
+        await usbSerialAdapter.printEscPos(deviceToPrint, uint8);
+      }
+      return;
+    } catch (usbErr: any) {
+      console.warn('Fallo impresión USB directa, recurriendo a impresión térmica del sistema:', usbErr);
+      printViaThermalHtml(lines, activePrinter.paper_width || 80);
+      return;
     }
-    return;
   }
 
   // Por defecto (bluetooth o fallback general)
@@ -1131,13 +1281,13 @@ export const silentPrintClosureReport = async (cajaSummary: any, storeId?: strin
       try {
         const devices = await nav.usb.getDevices();
         if (devices && devices.length > 0) deviceToPrint = { device: devices.find((d: any) => d.productName === activePrinter.mac_address) || devices[0] };
-      } catch (_) {}
+      } catch (_) { }
     }
     if (!deviceToPrint && nav?.serial && typeof nav.serial.getPorts === 'function') {
       try {
         const ports = await nav.serial.getPorts();
         if (ports && ports.length > 0) deviceToPrint = { port: ports[0] };
-      } catch (_) {}
+      } catch (_) { }
     }
     if (!deviceToPrint) throw new Error('No se encontraron impresoras USB con permisos. Ve a Configuración y vuelve a darle al botón BUSCAR en tu impresora USB.');
 
@@ -1152,7 +1302,7 @@ export const silentPrintClosureReport = async (cajaSummary: any, storeId?: strin
   const maxCharsConfig = activePrinter.max_chars || (activePrinter.paper_width <= 58 ? 32 : 48);
   const lines = generateClosureTicketLines(cajaSummary, maxCharsConfig);
   const uint8 = buildEscPosBytes(lines, maxCharsConfig);
-  
+
   if (isNativeAndroidApp()) {
     return androidBluetoothAdapter.printSaleReceipt(activePrinter, { items: [], total: cajaSummary?.totalSales || 0 }, activePrinter.paper_width || 80, maxCharsConfig);
   } else {
@@ -1165,12 +1315,12 @@ export const silentPrintClosureReport = async (cajaSummary: any, storeId?: strin
         const devices = await nav.bluetooth.getDevices();
         if (devices && devices.length > 0) deviceToPrint = devices.find((d: any) => d.name === activePrinter.name) || devices[0];
       }
-    } catch (_) {}
+    } catch (_) { }
     if (!deviceToPrint) {
       deviceToPrint = await nav.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: (webBluetoothAdapter as any).knownServices });
     }
     if (!deviceToPrint) throw new Error("PRINTER_CONNECTION_ERROR");
-    
+
     if (!deviceToPrint.gatt.connected) await deviceToPrint.gatt.connect();
     let writeChar = null;
     for (const serviceUuid of (webBluetoothAdapter as any).knownServices) {
@@ -1179,10 +1329,10 @@ export const silentPrintClosureReport = async (cajaSummary: any, storeId?: strin
         const chars = await service.getCharacteristics();
         writeChar = chars.find((c: any) => c.properties.write || c.properties.writeWithoutResponse);
         if (writeChar) break;
-      } catch (_) {}
+      } catch (_) { }
     }
     if (!writeChar) throw new Error("No se pudo obtener la interfaz de escritura.");
-    
+
     const CHUNK_SIZE = 200;
     for (let i = 0; i < uint8.length; i += CHUNK_SIZE) {
       await writeChar.writeValue(uint8.slice(i, i + CHUNK_SIZE));
@@ -1193,6 +1343,198 @@ export const silentPrintClosureReport = async (cajaSummary: any, storeId?: strin
 
 // Alias de compatibilidad — mantiene la referencia legacy para imports existentes
 export const printerEngine: IPrinterAdapter = webBluetoothAdapter;
+
+export async function checkDevicePermission(activePrinter: any): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  if (!activePrinter) return false;
+
+  const type = activePrinter.type || activePrinter.connection_type || 'bluetooth';
+
+  if (isNativeAndroidApp()) {
+    if (type === 'wifi') return true;
+    if (type === 'bluetooth') {
+      try {
+        const { BluetoothSerial } = await import('@e-is/capacitor-bluetooth-serial');
+        const res = await BluetoothSerial.isEnabled();
+        return Boolean(res?.enabled);
+      } catch (_) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  if (type === 'wifi') return true;
+
+  const nav = navigator as any;
+  if (type === 'usb') {
+    if (nav?.usb && typeof nav.usb.getDevices === 'function') {
+      try {
+        const devices = await nav.usb.getDevices();
+        if (devices && devices.length > 0) {
+          const isPrinter = devices.some((d: any) => {
+            const pName = (d.productName || '').toLowerCase();
+            return !pName.includes('mouse') && !pName.includes('keyboard');
+          });
+          if (isPrinter) return true;
+        }
+      } catch (_) { }
+    }
+    if (nav?.serial && typeof nav.serial.getPorts === 'function') {
+      try {
+        const ports = await nav.serial.getPorts();
+        if (ports && ports.length > 0) return true;
+      } catch (_) { }
+    }
+    return false;
+  }
+
+  // Bluetooth
+  if (nav?.bluetooth && typeof nav.bluetooth.getDevices === 'function') {
+    try {
+      const devices = await nav.bluetooth.getDevices();
+      if (devices && devices.length > 0) {
+        return devices.some((d: any) => d.name === activePrinter.name) || true;
+      }
+    } catch (_) { }
+  }
+  return false;
+}
+
+export async function pairActivePrinter(activePrinter: any): Promise<{ success: boolean; error?: string }> {
+  if (typeof window === 'undefined') return { success: false, error: 'No disponible en el servidor' };
+  if (!activePrinter) return { success: false, error: 'No hay impresora activa seleccionada' };
+
+  const type = activePrinter.type || activePrinter.connection_type || 'bluetooth';
+
+  if (isNativeAndroidApp()) {
+    if (type === 'wifi') return { success: true };
+    if (type === 'bluetooth') {
+      try {
+        const { BluetoothSerial } = await import('@e-is/capacitor-bluetooth-serial');
+        const isEnabledRes = await BluetoothSerial.isEnabled();
+        if (!isEnabledRes?.enabled) {
+          if (typeof (BluetoothSerial as any).enable === 'function') {
+            await (BluetoothSerial as any).enable();
+            const recheck = await BluetoothSerial.isEnabled();
+            if (!recheck?.enabled) {
+              return { success: false, error: 'El Bluetooth no fue activado. Enciéndelo para imprimir.' };
+            }
+          } else {
+            return { success: false, error: 'El Bluetooth de tu teléfono está apagado. Actívalo en los ajustes de tu dispositivo.' };
+          }
+        }
+        return { success: true };
+      } catch (err: any) {
+        return { success: false, error: err?.message || 'No se pudo encender el Bluetooth' };
+      }
+    }
+    return { success: true };
+  }
+
+  const nav = typeof navigator !== 'undefined' ? (navigator as any) : null;
+
+  if (type === 'wifi') {
+    return { success: true };
+  }
+
+  if (type === 'usb') {
+    try {
+      let filters: any[] = [];
+      let savedVid: number | undefined;
+      let savedPid: number | undefined;
+
+      if (typeof window !== 'undefined') {
+        const cached = localStorage.getItem(`usb_vid_pid_${activePrinter.store_id || 'default'}`);
+        if (cached) {
+          try {
+            const parsed = JSON.parse(cached);
+            if (parsed.vendorId) {
+              savedVid = parsed.vendorId;
+              savedPid = parsed.productId;
+            }
+          } catch (_) { }
+        }
+      }
+
+      if (savedVid !== undefined) {
+        filters.push(savedPid !== undefined ? { vendorId: savedVid, productId: savedPid } : { vendorId: savedVid });
+      }
+
+      let usbRes: any = null;
+      try {
+        usbRes = await usbSerialAdapter.requestDevice(filters.length > 0 ? { filters } : undefined);
+      } catch (fErr: any) {
+        if (fErr?.message?.includes('cancelada')) {
+          return { success: false, error: 'Selección USB cancelada.' };
+        }
+        // Si el filtro específico no coincidió, reintentar sin filtros
+        usbRes = await usbSerialAdapter.requestDevice();
+      }
+
+      if (usbRes) {
+        if (typeof window !== 'undefined' && usbRes.device?.vendorId) {
+          localStorage.setItem(`usb_vid_pid_${activePrinter.store_id || 'default'}`, JSON.stringify({
+            vendorId: usbRes.device.vendorId,
+            productId: usbRes.device.productId,
+            productName: usbRes.device.productName
+          }));
+        }
+        setActiveDevicePrinter(activePrinter, activePrinter.store_id);
+        return { success: true };
+      }
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Selección USB cancelada' };
+    }
+  }
+
+  // Bluetooth
+  if (nav?.bluetooth) {
+    try {
+      const cleanName = activePrinter?.name?.trim();
+      let dev = null;
+
+      if (cleanName) {
+        try {
+          const namePrefix = cleanName.split(' ')[0] || cleanName.slice(0, 4);
+          dev = await nav.bluetooth.requestDevice({
+            filters: [
+              { name: cleanName },
+              { namePrefix: namePrefix }
+            ],
+            optionalServices: (webBluetoothAdapter as any).knownServices
+          });
+        } catch (filterErr: any) {
+          if (filterErr?.name === 'NotFoundError') {
+            return { success: false, error: 'Selección Bluetooth cancelada.' };
+          }
+          // Fallback a acceptAllDevices si el filtro estricto no coincidió con el broadcast BLE
+          dev = await nav.bluetooth.requestDevice({
+            acceptAllDevices: true,
+            optionalServices: (webBluetoothAdapter as any).knownServices
+          });
+        }
+      } else {
+        dev = await nav.bluetooth.requestDevice({
+          acceptAllDevices: true,
+          optionalServices: (webBluetoothAdapter as any).knownServices
+        });
+      }
+
+      if (dev) {
+        setActiveDevicePrinter(activePrinter, activePrinter.store_id);
+        return { success: true };
+      }
+    } catch (err: any) {
+      if (err?.name === 'NotFoundError') {
+        return { success: false, error: 'Selección Bluetooth cancelada.' };
+      }
+      return { success: false, error: err?.message || 'Error al conectar dispositivo Bluetooth' };
+    }
+  }
+
+  return { success: false, error: 'Bluetooth no soportado en este navegador' };
+}
 
 export async function safePrint(saleData: any, doubleCopy = false, storeId?: string): Promise<{ success: boolean; error?: string }> {
   try {

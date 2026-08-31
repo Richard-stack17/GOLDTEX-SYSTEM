@@ -33,6 +33,13 @@ export default function RootLayout({
     // dinámicamente el atributo `class` (dark/light) en el cliente,
     // lo que causa un mismatch con el SSR. Es el uso correcto y acotado.
     <html lang="es" className="dark" suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `window.Capacitor = window.Capacitor || { triggerEvent: function(){} };`,
+          }}
+        />
+      </head>
       <body className={`${inter.className} min-h-screen bg-background antialiased overflow-y-scroll`} suppressHydrationWarning>
         <GlobalErrorHandler>
           <ThemeProvider>

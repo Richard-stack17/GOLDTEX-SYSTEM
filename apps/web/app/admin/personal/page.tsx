@@ -63,7 +63,7 @@ function PersonalView() {
             {[
               { id: "empleados", label: "Empleados" },
               { id: "usuarios", label: "Usuarios" },
-              { id: "roles", label: "Roles" },
+              ...(Boolean(permissions?.personal_manage_roles || isUserGlobalAdmin) ? [{ id: "roles", label: "Roles" }] : []),
             ].map(({ id, label }) => (
               <button
                 key={id}
@@ -91,7 +91,7 @@ function PersonalView() {
       <main className="flex-1 p-6 max-w-screen-xl w-full mx-auto">
         {activeTab === 'empleados' && <PersonalEmployeesTab />}
         {activeTab === 'usuarios' && <PersonalUsersTab />}
-        {activeTab === 'roles' && <PersonalRolesTab />}
+        {activeTab === 'roles' && Boolean(permissions?.personal_manage_roles || isUserGlobalAdmin) && <PersonalRolesTab />}
       </main>
 
       <PersonalModals />

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Printer, Trash2, Search, CheckCircle2, AlertCircle, Loader2, Save, ChevronDown, X, RefreshCw, Wifi } from 'lucide-react';
+import { ArrowLeft, Printer, Trash2, Search, CheckCircle2, AlertCircle, Loader2, Save, ChevronDown, X, RefreshCw, Wifi, Info } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useRole } from '../../context/RoleContext';
 import { useStore } from '../../context/StoreContext';
@@ -115,6 +115,13 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
               const matched = devices.find((d: any) => d.productName === data.mac_address) || devices[0];
               setUsbDeviceObj({ device: matched, name: matched.productName || data.mac_address || 'USB' });
               setUsbName(matched.productName || data.mac_address || 'USB');
+            } else if (nav?.serial?.getPorts) {
+              nav.serial.getPorts().then((ports: any[]) => {
+                if (ports && ports.length > 0) {
+                  setUsbDeviceObj({ port: ports[0], name: data.mac_address || 'Puerto Serie USB' });
+                  setUsbName(data.mac_address || 'Puerto Serie USB');
+                }
+              }).catch(() => {});
             }
           }).catch(() => {});
         } else if (nav?.serial?.getPorts) {
@@ -157,7 +164,14 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
     setTimeout(() => setToast(null), 3500);
   };
 
+  const canManage = Boolean(permissions?.settings_printers_manage);
+
   const handleSave = async () => {
+    if (!canManage) {
+      showToast('No tienes permisos para crear o editar impresoras.', 'error');
+      return;
+    }
+
     if (!name.trim()) {
       showToast('El nombre es requerido', 'error');
       return;
@@ -187,7 +201,6 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
 
     let error;
     if (autoPrint && storeId) {
-      // Desmarcar solo las de la misma tienda y la misma plataforma para no pisar otras plataformas
       let query = supabase.from('printers').update({ auto_print: false }).eq('store_id', storeId);
       if (platform !== 'ALL') {
         query = query.in('platform', [platform, 'ALL']);
@@ -232,67 +245,73 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
     setIsLoading(true);
     const { error } = await supabase.from('printers').update({ is_active: false }).eq('id', printerId);
     setIsLoading(false);
+    setShowDeleteConfirm(false);
 
     if (error) {
       showToast(error.message, 'error');
     } else {
       showToast('Impresora desactivada correctamente', 'success');
-      setTimeout(() => router.push('/configuracion'), 1000);
+      setIsActive(false);
+      setHasUnsavedChanges(false);
     }
-    setShowDeleteConfirm(false);
   };
 
   const confirmReactivate = async () => {
-    if (!printerId) return;
     setIsLoading(true);
     const { error } = await supabase.from('printers').update({ is_active: true }).eq('id', printerId);
     setIsLoading(false);
+
     if (error) {
       showToast(error.message, 'error');
     } else {
-      showToast('Impresora reactivada', 'success');
+      showToast('Impresora activada correctamente', 'success');
       setIsActive(true);
-      setTimeout(() => router.push('/configuracion'), 800);
+      setHasUnsavedChanges(false);
     }
   };
 
   const runBtScan = async () => {
-    setDiscoveredBtDevices([]); // Limpiar memoria previa antes de escanear
-    setIsBtScanning(true);
-    setBtScanError(null);
     try {
+      setIsBtScanning(true);
+      setBtScanError(null);
+      setDiscoveredBtDevices([]);
       const devices = await scanBluetoothPrinters();
       setDiscoveredBtDevices(devices);
-      if (devices.length === 0) {
-        setBtScanError('No se encontraron dispositivos Bluetooth encendidos cerca.');
-      }
     } catch (err: any) {
-      setBtScanError(err.message || 'Error al buscar dispositivos Bluetooth');
+      setBtScanError(err.message || 'Error al escanear dispositivos Bluetooth');
     } finally {
       setIsBtScanning(false);
     }
   };
 
-  const handleBuscarBT = async () => {
+  const startNativeBtScan = runBtScan;
+
+  const selectNativeBtDevice = (dev: { name: string; address: string; device: any }) => {
+    setMacAddress(dev.name || dev.address);
+    setBtDeviceObj(dev.device);
+    setHasUnsavedChanges(true);
+    setIsBtModalOpen(false);
+    showToast(`Vinculado con: ${dev.name || dev.address}`, 'success');
+  };
+
+  const handleBuscar = async () => {
     if (isNativeAndroid) {
-      setDiscoveredBtDevices([]); // Limpiar caché al abrir modal
       setIsBtModalOpen(true);
-      void runBtScan();
-    } else {
-      try {
-        setIsSearching(true);
-        const res = await requestBluetoothDevice();
-        const btName = res.name;
-        const btAddress = (res as any).address || (res.device as any)?.address || btName;
-        setMacAddress(btAddress);
-        setBtDeviceObj(res.device);
-        setHasUnsavedChanges(true);
-        showToast(`Conectado a: ${btName}`, 'success');
-      } catch (error: any) {
-        showToast(error.message, 'error');
-      } finally {
-        setIsSearching(false);
-      }
+      startNativeBtScan();
+      return;
+    }
+
+    try {
+      setIsSearching(true);
+      const result = await requestBluetoothDevice();
+      setMacAddress(result.name);
+      setBtDeviceObj(result.device);
+      setHasUnsavedChanges(true);
+      showToast(`Conectado a: ${result.name}`, 'success');
+    } catch (error: any) {
+      showToast(error.message, 'error');
+    } finally {
+      setIsSearching(false);
     }
   };
 
@@ -303,6 +322,13 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
       setUsbName(result.name);
       setUsbDeviceObj(result);
       setMacAddress(result.name);
+      if (typeof window !== 'undefined' && result.device?.vendorId) {
+        localStorage.setItem(`usb_vid_pid_${storeId || 'default'}`, JSON.stringify({
+          vendorId: result.device.vendorId,
+          productId: result.device.productId,
+          productName: result.device.productName
+        }));
+      }
       setHasUnsavedChanges(true);
       showToast(`Conectado a: ${result.name}`, 'success');
     } catch (error: any) {
@@ -313,39 +339,21 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
   };
 
   const handleTestPrint = async () => {
+    if (!canManage) {
+      showToast('La impresión de prueba no está disponible en modo solo lectura', 'error');
+      return;
+    }
     const currentCols = Number(maxChars) || (paperWidth <= 58 ? 32 : 48);
 
     if (type === 'bluetooth') {
-      let activeBt = btDeviceObj;
-      if (isNativeAndroid && macAddress) {
-        activeBt = { address: macAddress, name: name || 'Impresora Bluetooth' };
-      }
-
-      if (!activeBt && typeof window !== 'undefined' && !isNativeAndroid) {
-        const nav = navigator as any;
-        if (nav?.bluetooth?.getDevices) {
-          try {
-            const devices = await nav.bluetooth.getDevices();
-            if (devices && devices.length > 0) {
-              const matched = devices.find((d: any) => d.id === macAddress || d.name === macAddress) || devices[0];
-              if (matched) {
-                activeBt = matched;
-                setBtDeviceObj(matched);
-              }
-            }
-          } catch (_) {}
-        }
-      }
-
-      if (!activeBt) {
-        showToast('Por favor, busca y empareja la impresora Bluetooth con el botón BUSCAR primero.', 'error');
+      if (!macAddress) {
+        showToast('Debes seleccionar un dispositivo Bluetooth primero', 'error');
         return;
       }
-
       try {
-        showToast('Conectando con la impresora Bluetooth...', 'success');
-        await printTestReceipt(activeBt, paperWidth, currentCols);
-        showToast('¡Impresión Bluetooth enviada con éxito!', 'success');
+        showToast('Enviando ticket de prueba por Bluetooth...', 'success');
+        await printTestReceipt(btDeviceObj || { name: macAddress }, paperWidth, currentCols);
+        showToast('¡Impresión enviada con éxito!', 'success');
       } catch (error: any) {
         showToast(error.message, 'error');
       }
@@ -353,43 +361,15 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
     }
 
     if (type === 'usb') {
-      let activeUsb = usbDeviceObj;
-
-      // Auto-recuperar si el navegador ya otorgó permisos previos a este dominio
-      if (!activeUsb && typeof window !== 'undefined') {
-        const nav = navigator as any;
-        if (nav?.usb?.getDevices) {
-          try {
-            const devices = await nav.usb.getDevices();
-            if (devices && devices.length > 0) {
-              const matched = devices.find((d: any) => d.productName === macAddress) || devices[0];
-              activeUsb = { device: matched, name: matched.productName || macAddress || 'USB' };
-              setUsbDeviceObj(activeUsb);
-            }
-          } catch (_) {}
-        }
-        if (!activeUsb && nav?.serial?.getPorts) {
-          try {
-            const ports = await nav.serial.getPorts();
-            if (ports && ports.length > 0) {
-              activeUsb = { port: ports[0], name: macAddress || 'Puerto Serie USB' };
-              setUsbDeviceObj(activeUsb);
-            }
-          } catch (_) {}
-        }
-      }
-
-      if (!activeUsb) {
-        showToast('Para conectar por USB en el navegador, presiona el botón BUSCAR arriba.', 'error');
-        return;
-      }
-
       try {
-        showToast('Enviando datos al puerto USB...', 'success');
-        const lines = generateTicketLines(DEFAULT_TEST_SALE_DATA, currentCols);
-        const uint8 = buildEscPosBytes(lines, currentCols);
-        await usbSerialAdapter.printEscPos(activeUsb, uint8);
-        showToast('Datos enviados al puerto USB con éxito.', 'success');
+        showToast('Enviando ticket de prueba por USB...', 'success');
+        if (usbDeviceObj) {
+          await printTestReceipt(usbDeviceObj, paperWidth, currentCols);
+        } else {
+          const lines = generateTicketLines(DEFAULT_TEST_SALE_DATA, currentCols);
+          printViaThermalHtml(lines, paperWidth);
+        }
+        showToast('¡Impresión enviada con éxito!', 'success');
       } catch (error: any) {
         showToast(error.message, 'error');
       }
@@ -399,16 +379,10 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
     if (type === 'wifi') {
       try {
         if (isNativeAndroid) {
-          if (!ipAddress || !port) {
-            showToast('Por favor ingresa la IP y el Puerto de la impresora.', 'error');
-            return;
-          }
-          showToast(`Conectando a la impresora en ${ipAddress}:${port}...`, 'success');
-          // En Android nativo: enviamos bytes ESC/POS directo por TCP (RAW Socket)
-          await androidWifiAdapter.printTestReceipt({ ipAddress, port }, paperWidth, currentCols);
-          showToast('¡Impresión WiFi TCP enviada con éxito!', 'success');
+          showToast('Enviando ticket por WiFi (App Nativa)...', 'success');
+          await printTestReceipt({ ipAddress, port }, paperWidth, currentCols);
+          showToast('¡Impresión enviada con éxito!', 'success');
         } else {
-          // En Web: abrimos la ventana de impresión del SO que gestiona las impresoras de red instaladas
           showToast('Abriendo ventana de impresión térmica...', 'success');
           const lines = generateTicketLines(DEFAULT_TEST_SALE_DATA, currentCols);
           printViaThermalHtml(lines, paperWidth);
@@ -419,8 +393,6 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
       return;
     }
   };
-
-
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
@@ -442,17 +414,32 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
             </div>
           </div>
         </div>
-        <button
-          onClick={handleSave}
-          disabled={isLoading}
-          className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 sm:py-2 rounded-xl sm:rounded-lg bg-primary text-primary-foreground text-xs sm:text-sm font-bold transition-all shadow-sm hover:bg-primary/90 active:scale-[0.99] disabled:opacity-50 cursor-pointer shrink-0"
-        >
-          <Save className="w-4 h-4" /> GUARDAR
-        </button>
+        {canManage ? (
+          <button
+            onClick={handleSave}
+            disabled={isLoading}
+            className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 sm:py-2 rounded-xl sm:rounded-lg bg-primary text-primary-foreground text-xs sm:text-sm font-bold transition-all shadow-sm hover:bg-primary/90 active:scale-[0.99] disabled:opacity-50 cursor-pointer shrink-0"
+          >
+            <Save className="w-4 h-4" /> GUARDAR
+          </button>
+        ) : (
+          <div className="px-3 py-1.5 rounded-lg bg-secondary text-muted-foreground text-xs font-bold border border-border shrink-0 select-none flex items-center gap-1.5">
+            <Info className="w-3.5 h-3.5" /> Solo Lectura
+          </div>
+        )}
       </header>
 
       <main className="flex-1 max-w-2xl w-full mx-auto p-4 sm:p-6 space-y-6">
-        {/* Banner de Estado Inactivo */}
+        {!canManage && (
+          <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3.5 flex items-center gap-3">
+            <Info className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
+            <div>
+              <p className="text-xs font-bold text-amber-900 dark:text-amber-300">Modo de Solo Lectura</p>
+              <p className="text-[11px] text-muted-foreground">Tu rol solo puede ver la configuración de esta impresora. Para modificarla se requiere el permiso de edición.</p>
+            </div>
+          </div>
+        )}
+
         {isEditing && !isActive && (
           <div className="bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl p-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -462,7 +449,7 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
                 <p className="text-xs text-rose-700 dark:text-rose-400">Esta impresora está oculta para el POS y Caja.</p>
               </div>
             </div>
-            {Boolean(permissions?.settings_printers_manage) && (
+            {canManage && (
               <button
                 onClick={confirmReactivate}
                 disabled={isLoading}
@@ -474,15 +461,15 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
           </div>
         )}
 
-        {/* Formulario Principal */}
         <div className="bg-card border border-border rounded-xl shadow-sm divide-y divide-border overflow-hidden">
           <div className="px-5 py-4">
             <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Nombre de la impresora</label>
             <input
               type="text"
               value={name}
+              disabled={!canManage}
               onChange={e => { setName(e.target.value); setHasUnsavedChanges(true); }}
-              className="w-full text-[15px] font-medium bg-transparent outline-none"
+              className="w-full text-[15px] font-medium bg-transparent outline-none disabled:opacity-60 disabled:cursor-not-allowed"
               placeholder="Ej. Caja Principal"
             />
           </div>
@@ -492,8 +479,9 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
             <div className="relative flex items-center">
               <select
                 value={model}
+                disabled={!canManage}
                 onChange={e => { setModel(e.target.value); setHasUnsavedChanges(true); }}
-                className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer pr-7"
+                className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer pr-7 disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 <option value="Otro modelo">Otro modelo (ESC/POS Genérico)</option>
                 <option value="Epson TM-T20">Epson TM-T20</option>
@@ -509,8 +497,9 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
             <div className="relative flex items-center">
               <select
                 value={type}
+                disabled={!canManage}
                 onChange={e => { setType(e.target.value); setHasUnsavedChanges(true); }}
-                className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer pr-7"
+                className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer pr-7 disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 <option value="bluetooth">Bluetooth (Inalámbrico)</option>
                 {isNativeAndroid ? (
@@ -533,8 +522,9 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
             <div className="relative flex items-center">
               <select
                 value={storeId || ''}
+                disabled={!canManage}
                 onChange={e => { setStoreId(e.target.value || null); setHasUnsavedChanges(true); }}
-                className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer pr-7"
+                className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer pr-7 disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 <option value="">-- Selecciona una tienda --</option>
                 {stores.map(s => (
@@ -550,8 +540,9 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
             <div className="relative flex items-center">
               <select
                 value={platform}
+                disabled={!canManage}
                 onChange={e => { setPlatform(e.target.value as any); setHasUnsavedChanges(true); }}
-                className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer pr-7"
+                className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer pr-7 disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 <option value="ALL">Universal (PC / Web y Teléfonos Móviles APK)</option>
                 <option value="WEB">Exclusiva para PC / Web</option>
@@ -565,34 +556,58 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
           </div>
         </div>
 
-        {/* Lógica Condicional de Interfaz según Tipo */}
         <div className="bg-card border border-border rounded-xl shadow-sm divide-y divide-border overflow-hidden">
           {type === 'bluetooth' && (
-            <div className="px-5 py-4 flex items-center justify-between">
-              <div className="flex-1 min-w-0 pr-4">
-                <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Dispositivo Bluetooth</label>
-                <input
-                  type="text"
-                  readOnly
-                  value={macAddress}
-                  className="w-full text-[15px] font-medium text-foreground bg-transparent outline-none truncate"
-                  placeholder={isNativeAndroid ? 'Pulsa BUSCAR para escanear dispositivos Android' : 'No seleccionada (Haz clic en BUSCAR)'}
-                />
+            <>
+              <div className="px-5 py-4 flex items-center justify-between">
+                <div className="flex-1 min-w-0 pr-4">
+                  <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Dispositivo Bluetooth</label>
+                  <input
+                    type="text"
+                    readOnly
+                    value={macAddress}
+                    className="w-full text-[15px] font-medium text-foreground bg-transparent outline-none truncate"
+                    placeholder={isNativeAndroid ? 'Pulsa BUSCAR para escanear dispositivos Android' : 'No seleccionada (Haz clic en BUSCAR)'}
+                  />
+                </div>
+                {/* En Android nativo: usa AndroidBluetoothSerialAdapter (BT Classic SPP).
+                    En Web: usa WebBluetoothAdapter (Web Bluetooth API / Chrome Desktop). */}
+                <button
+                  onClick={handleBuscar}
+                  disabled={!canManage || isSearching}
+                  className={`px-4 py-2 font-bold text-sm rounded-lg border transition-colors flex items-center shadow-sm shrink-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${isNativeAndroid
+                      ? 'bg-sky-500 hover:bg-sky-600 text-white border-sky-600 active:bg-sky-700'
+                      : 'bg-secondary text-secondary-foreground border-border hover:bg-secondary/80 active:bg-secondary/60'
+                    }`}
+                >
+                  <Search className="w-4 h-4 mr-2" />
+                  {isSearching ? 'BUSCANDO...' : 'BUSCAR'}
+                </button>
               </div>
-              {/* En Android nativo: usa AndroidBluetoothSerialAdapter (BT Classic SPP).
-                  En Web: usa WebBluetoothAdapter (Web Bluetooth API / Chrome Desktop). */}
-              <button
-                onClick={handleBuscarBT}
-                disabled={isSearching}
-                className={`px-4 py-2 font-bold text-sm rounded-lg border transition-colors flex items-center shadow-sm shrink-0 cursor-pointer ${isNativeAndroid
-                    ? 'bg-sky-500 hover:bg-sky-600 text-white border-sky-600 active:bg-sky-700'
-                    : 'bg-secondary text-secondary-foreground border-border hover:bg-secondary/80 active:bg-secondary/60'
-                  }`}
-              >
-                <Search className="w-4 h-4 mr-2" />
-                {isSearching ? 'BUSCANDO...' : 'BUSCAR'}
-              </button>
-            </div>
+
+              {!isNativeAndroid && (
+                <div className="mx-5 mb-4 p-3.5 bg-blue-500/10 border border-blue-500/20 rounded-2xl text-xs space-y-2">
+                  <div className="flex items-center gap-2 font-bold text-blue-600 dark:text-blue-400">
+                    <Info className="w-4 h-4 shrink-0" />
+                    <span>Guía de sincronización Bluetooth en Navegador Web:</span>
+                  </div>
+                  <p className="text-muted-foreground leading-relaxed">
+                    Al pulsar <strong>BUSCAR</strong>, el navegador mostrará una ventana. Espera 1 a 2 segundos a que detecte la antena física en vivo.
+                  </p>
+                  <div className="flex items-center gap-2.5 p-2.5 rounded-xl bg-background/80 border border-border">
+                    <div className="w-6 h-6 rounded-lg bg-blue-500/15 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                      {/* Ícono triángulo de señal en vivo de Chrome */}
+                      <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24">
+                        <polygon points="4,20 20,20 20,4" />
+                      </svg>
+                    </div>
+                    <span className="text-[11px] text-foreground font-medium">
+                      Selecciona siempre la impresora que muestre el <strong>ícono de señal en vivo (triángulo)</strong> a su izquierda.
+                    </span>
+                  </div>
+                </div>
+              )}
+            </>
           )}
 
           {type === 'usb' && (
@@ -620,8 +635,8 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
                   </div>
                   <button
                     onClick={handleBuscarUSB}
-                    disabled={isSearching}
-                    className="px-4 py-2 bg-secondary text-secondary-foreground font-bold text-sm rounded-lg border border-border hover:bg-secondary/80 active:bg-secondary/60 transition-colors flex items-center shadow-sm shrink-0 cursor-pointer"
+                    disabled={!canManage || isSearching}
+                    className="px-4 py-2 bg-secondary text-secondary-foreground font-bold text-sm rounded-lg border border-border hover:bg-secondary/80 active:bg-secondary/60 transition-colors flex items-center shadow-sm shrink-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Search className="w-4 h-4 mr-2" />
                     {isSearching ? 'BUSCANDO...' : 'BUSCAR'}
@@ -640,8 +655,9 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
                     <input
                       type="text"
                       value={ipAddress}
+                      disabled={!canManage}
                       onChange={e => { setIpAddress(e.target.value); setHasUnsavedChanges(true); }}
-                      className="w-full text-[15px] font-medium bg-transparent outline-none font-mono"
+                      className="w-full text-[15px] font-medium bg-transparent outline-none font-mono disabled:opacity-60 disabled:cursor-not-allowed"
                       placeholder="192.168.1.100"
                     />
                   </div>
@@ -650,8 +666,9 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
                     <input
                       type="number"
                       value={port}
+                      disabled={!canManage}
                       onChange={e => { setPort(Number(e.target.value)); setHasUnsavedChanges(true); }}
-                      className="w-full text-[15px] font-medium bg-transparent outline-none font-mono"
+                      className="w-full text-[15px] font-medium bg-transparent outline-none font-mono disabled:opacity-60 disabled:cursor-not-allowed"
                       placeholder="9100"
                     />
                   </div>
@@ -687,6 +704,7 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
             <div className="relative flex items-center">
               <select
                 value={paperWidth}
+                disabled={!canManage}
                 onChange={e => {
                   const newWidth = Number(e.target.value);
                   setPaperWidth(newWidth);
@@ -697,7 +715,7 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
                   }
                   setHasUnsavedChanges(true);
                 }}
-                className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer pr-7"
+                className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer pr-7 disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 <option value={80}>80 mm</option>
                 <option value={58}>58 mm</option>
@@ -711,19 +729,22 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
               <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
                 Caracteres por línea ({maxChars} columnas)
               </label>
-              <button
-                type="button"
-                onClick={() => setIsCustomChars(!isCustomChars)}
-                className="text-[11px] font-bold text-primary hover:underline cursor-pointer"
-              >
-                {isCustomChars ? 'Ver lista estándar' : 'Escribir número manual'}
-              </button>
+              {canManage && (
+                <button
+                  type="button"
+                  onClick={() => setIsCustomChars(!isCustomChars)}
+                  className="text-[11px] font-bold text-primary hover:underline cursor-pointer"
+                >
+                  {isCustomChars ? 'Ver lista estándar' : 'Escribir número manual'}
+                </button>
+              )}
             </div>
 
             {!isCustomChars ? (
               <div className="relative flex items-center">
                 <select
                   value={[32, 42, 48, 64].includes(Number(maxChars)) ? Number(maxChars) : 'custom'}
+                  disabled={!canManage}
                   onChange={e => {
                     if (e.target.value === 'custom') {
                       setIsCustomChars(true);
@@ -732,7 +753,7 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
                       setHasUnsavedChanges(true);
                     }
                   }}
-                  className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer pr-7"
+                  className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer pr-7 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   <option value={32}>32 (58mm Portátil)</option>
                   <option value={42}>42 (80mm Genérico)</option>
@@ -749,6 +770,7 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
                   min={20}
                   max={90}
                   value={maxChars}
+                  disabled={!canManage}
                   onChange={e => {
                     const raw = e.target.value;
                     setMaxChars(raw);
@@ -764,16 +786,13 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
                       setMaxChars(Math.round(num));
                     }
                   }}
-                  className="w-full text-[15px] font-bold bg-secondary/50 px-3 py-1.5 rounded-lg border border-border outline-none"
+                  className="w-full text-[15px] font-bold bg-secondary/50 px-3 py-1.5 rounded-lg border border-border outline-none disabled:opacity-60 disabled:cursor-not-allowed"
                   placeholder="Ej. 48"
                 />
-                <span className="text-xs font-bold text-muted-foreground whitespace-nowrap">columnas</span>
               </div>
             )}
           </div>
         </div>
-
-
 
         {/* Vista Previa / Calibrador */}
         <div className="mt-4">
@@ -788,7 +807,9 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
         <div className="mt-8 flex flex-col items-center space-y-4">
           <button
             onClick={handleTestPrint}
-            className="flex items-center justify-center w-full max-w-sm py-3 bg-card border border-border font-bold text-sm rounded-xl shadow-sm hover:bg-muted active:bg-muted/80 transition-colors cursor-pointer"
+            disabled={!canManage}
+            title={!canManage ? "Impresión de prueba no disponible en modo solo lectura" : "Emitir un ticket de prueba en esta impresora"}
+            className="flex items-center justify-center w-full max-w-sm py-3 bg-card border border-border font-bold text-sm rounded-xl shadow-sm hover:bg-muted active:bg-muted/80 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-card"
           >
             <Printer className="w-4 h-4 mr-2" />
             IMPRESIÓN DE PRUEBA
@@ -904,12 +925,16 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
                       <button
                         key={dev.address || idx}
                         onClick={() => {
-                          const chosenAddress = dev.address || dev.name;
+                          const chosenAddress = dev.address;
+                          if (!chosenAddress) {
+                            showToast('Dispositivo sin dirección MAC válida.', 'error');
+                            return;
+                          }
                           setMacAddress(chosenAddress);
                           setBtDeviceObj(dev.device);
                           setHasUnsavedChanges(true);
                           setIsBtModalOpen(false);
-                          showToast(`Impresora seleccionada: ${dev.name}`, 'success');
+                          showToast(`Impresora vinculada: ${dev.name} (${chosenAddress})`, 'success');
                         }}
                         className={`w-full flex items-center justify-between p-3.5 rounded-2xl border text-left transition-all cursor-pointer ${isSelected
                             ? 'bg-indigo-500/10 border-indigo-500/40 text-foreground ring-2 ring-indigo-500/20'

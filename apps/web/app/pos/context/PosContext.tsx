@@ -1,13 +1,14 @@
 "use client";
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, type LocalService } from "../../lib/localDb";
 import { supabase } from "../../lib/supabase";
 import { computeNextDailyTicketNumber, formatTicketHash, parseInternalTicketNum, starsoftDocNumFromTicket } from "../../lib/ticket-sequence";
 import { useRole } from "../../context/RoleContext";
 import { useStore } from "../../context/StoreContext";
-import { silentPrintSaleReceipt, silentPrintClosureReport, resolveActivePrinter } from "../../configuracion/utils/printerEngine";
-import { CheckCircle2, AlertTriangle, XCircle, Printer } from "lucide-react";
+import { silentPrintSaleReceipt, silentPrintClosureReport, resolveActivePrinter, checkDevicePermission, pairActivePrinter } from "../../configuracion/utils/printerEngine";
+import { CheckCircle2, AlertTriangle, XCircle, Printer, RefreshCw } from "lucide-react";
 
 export type Product = {
   id: string;
@@ -132,6 +133,10 @@ interface PosContextProps {
   previewTicketData: any;
   setPreviewTicketData: React.Dispatch<React.SetStateAction<any>>;
   activePrinter: any;
+  isPrinterAuthorized: boolean | null;
+  isPairingPrinter: boolean;
+  handlePairPrinter: () => Promise<void>;
+  refreshPrinterAuth: (printerObj?: any) => Promise<void>;
   
   // Toast
   toast: { message: string; type: 'success' | 'error' | 'warning' } | null;
@@ -161,6 +166,7 @@ const getLimaTodayStr = () => {
 };
 
 export function PosProvider({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
   const { role, username, isHydrated, permissions } = useRole();
   const { activeStore, activeStoreId, isAllStoresMode } = useStore();
 
@@ -514,16 +520,73 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
   const [exitGuardOpen, setExitGuardOpen] = useState(false);
   const [previewTicketData, setPreviewTicketData] = useState<any>(null);
   const [activePrinter, setActivePrinter] = useState<any>(null);
-  
+  const [isPrinterAuthorized, setIsPrinterAuthorized] = useState<boolean | null>(null);
+  const [isPairingPrinter, setIsPairingPrinter] = useState(false);
+
+  const refreshPrinterAuth = useCallback(async (printerObj?: any) => {
+    const p = printerObj || activePrinter;
+    if (!p) {
+      setIsPrinterAuthorized(false);
+      return;
+    }
+    const isAuth = await checkDevicePermission(p);
+    setIsPrinterAuthorized(isAuth);
+  }, [activePrinter]);
+
+  const handlePairPrinter = async () => {
+    if (!activePrinter) {
+      showToast("No hay impresora configurada para esta sucursal", "warning");
+      return;
+    }
+    setIsPairingPrinter(true);
+    const targetDeviceName = activePrinter.mac_address || activePrinter.name || "tu impresora";
+    showToast(`Selecciona "${targetDeviceName}" en la lista y presiona Conectar`, "warning");
+
+    try {
+      const res = await pairActivePrinter(activePrinter);
+      if (res.success) {
+        setIsPrinterAuthorized(true);
+        showToast(`"${activePrinter.name}" conectada y lista en este equipo`, "success");
+      } else if (res.error) {
+        showToast(res.error, "error");
+      }
+    } catch (err: any) {
+      showToast(err?.message || "Error al vincular impresora", "error");
+    } finally {
+      setIsPairingPrinter(false);
+    }
+  };
+
   useEffect(() => {
     async function loadPrinter() {
       try {
         const printer = await resolveActivePrinter(activeStoreId);
-        if (printer) setActivePrinter(printer);
+        if (printer) {
+          setActivePrinter(printer);
+          const isAuth = await checkDevicePermission(printer);
+          setIsPrinterAuthorized(isAuth);
+        } else {
+          setActivePrinter(null);
+          setIsPrinterAuthorized(false);
+        }
       } catch (_) { }
     }
     loadPrinter();
   }, [activeStoreId]);
+
+  useEffect(() => {
+    const handleRecheckAuth = () => {
+      if (activePrinter) {
+        refreshPrinterAuth(activePrinter);
+      }
+    };
+    window.addEventListener('focus', handleRecheckAuth);
+    document.addEventListener('visibilitychange', handleRecheckAuth);
+    return () => {
+      window.removeEventListener('focus', handleRecheckAuth);
+      document.removeEventListener('visibilitychange', handleRecheckAuth);
+    };
+  }, [activePrinter, refreshPrinterAuth]);
 
   // Emission
   const [isEmitting, setIsEmitting] = useState(false);
@@ -534,6 +597,19 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     if (cart.length === 0) return;
+
+    // Si la impresora aún no tiene permiso en este navegador, abrimos el selector directamente con el clic del usuario
+    if (activePrinter && isPrinterAuthorized === false) {
+      const devName = activePrinter?.mac_address || activePrinter?.name || 'Impresora';
+      showToast(`Selecciona "${devName}" en la lista y presiona Conectar`, "warning");
+      try {
+        const pairRes = await pairActivePrinter(activePrinter);
+        if (pairRes.success) {
+          setIsPrinterAuthorized(true);
+        }
+      } catch (_) { }
+    }
+
     setIsEmitting(true);
     try {
       const todayStr = getLimaTodayStr();
@@ -564,10 +640,14 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
           await silentPrintSaleReceipt(saleDataForPrint, true, activeStoreId || undefined);
           showToast(`Impresión finalizada con éxito (${docNum} — 2 copias).`, 'success');
         } catch (err: any) {
-          if (err?.message === "NO_PRINTER_CONFIGURED") {
-            showToast("No hay ninguna impresora por defecto configurada para esta tienda.", "warning");
+          const errMsg = err?.message || '';
+          const devName = activePrinter?.mac_address || activePrinter?.name || 'Impresora';
+          if (errMsg.includes("NO_PRINTER_CONFIGURED")) {
+            showToast("No hay ninguna impresora configurada para esta sucursal.", "warning");
+          } else if (errMsg.includes("PRINTER_NOT_AUTHORIZED_IN_BROWSER") || isPrinterAuthorized === false) {
+            showToast(`Impresora no vinculada en este navegador. Haz clic en el botón amarillo 'Conectar ${devName}' arriba.`, "warning");
           } else {
-            showToast("Error de conexión con la impresora. Verifique que esté encendida.", "error");
+            showToast(`Error de comunicación con "${devName}". Verifique que esté encendida y cercana.`, "error");
           }
         }
       }, 50);
@@ -610,6 +690,18 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
   const deleteDraftTicket = () => setIsClearCartModalOpen(true);
 
   const handleReprint = async (ticket: HistoryTicket) => {
+    // Si la impresora aún no tiene permiso en este navegador, abrimos el selector directamente con el clic del usuario
+    if (activePrinter && isPrinterAuthorized === false) {
+      const devName = activePrinter?.mac_address || activePrinter?.name || 'Impresora';
+      showToast(`Selecciona "${devName}" en la lista y presiona Conectar`, "warning");
+      try {
+        const pairRes = await pairActivePrinter(activePrinter);
+        if (pairRes.success) {
+          setIsPrinterAuthorized(true);
+        }
+      } catch (_) { }
+    }
+
     const lines = typeof ticket.detail === 'string' ? ticket.detail.split('\n').filter(l => l.trim()) : [];
     const reconstructedItems: any[] = lines.map((l: string, idx: number) => {
       let code = "", name = l, quantity = 1, editedPrice = 0, basePrice = 0;
@@ -646,25 +738,52 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
       await silentPrintSaleReceipt(saleDataForPrint, false, activeStoreId || undefined);
       showToast("¡Ticket impreso con éxito!", "success");
     } catch (err: any) {
-      if (err?.message === "NO_PRINTER_CONFIGURED") {
-        showToast("No hay ninguna impresora por defecto configurada para esta tienda.", "warning");
+      const errMsg = err?.message || '';
+      const devName = activePrinter?.mac_address || activePrinter?.name || 'Impresora';
+      if (errMsg.includes("NO_PRINTER_CONFIGURED")) {
+        showToast("No hay ninguna impresora configurada para esta sucursal.", "warning");
+      } else if (errMsg.includes("PRINTER_NOT_AUTHORIZED_IN_BROWSER") || isPrinterAuthorized === false) {
+        showToast(`Impresora no vinculada en este navegador. Haz clic en el botón amarillo 'Conectar ${devName}' arriba.`, "warning");
       } else {
-        showToast("Error de conexión con la impresora. Verifique que esté encendida.", "error");
+        showToast(`Error de comunicación con "${devName}". Verifique que esté encendida y cercana.`, "error");
       }
     }
   };
 
-  const handleBackClick = () => {
+  const handleBackClick = useCallback(() => {
+    if (exitGuardOpen) { setExitGuardOpen(false); return; }
+    if (previewTicketData) { setPreviewTicketData(null); return; }
+    if (isClearCartModalOpen) { setIsClearCartModalOpen(false); return; }
+    if (cajaSummaryOpen) { setCajaSummaryOpen(false); return; }
+    if (qwertyOpen) { setQwertyOpen(false); return; }
+    if (numpadProduct !== null) { setNumpadProduct(null); return; }
+    if (mobileTab === 'cart') { setMobileTab('catalog'); return; }
     if (viewMode === 'SERVICES') { setViewMode('FAMILIES'); return; }
     if (activeFamily !== null) { setActiveFamily(null); setNumpadProduct(null); setSearch(""); setQwertyOpen(false); return; }
-    if (cart.length === 0) { window.location.href = "/hub"; } else { setExitGuardOpen(true); }
-  };
+    if (cart.length === 0) {
+      router.push('/hub');
+    } else {
+      setExitGuardOpen(true);
+    }
+  }, [
+    exitGuardOpen, previewTicketData, isClearCartModalOpen, cajaSummaryOpen,
+    qwertyOpen, numpadProduct, mobileTab, viewMode, activeFamily, cart.length, router
+  ]);
 
-  const handleExitWithoutSaving = () => {
+  const handleExitWithoutSaving = useCallback(() => {
     setCart([]);
     setExitGuardOpen(false);
-    window.location.href = "/hub";
-  };
+    router.push('/hub');
+  }, [router]);
+
+  useEffect(() => {
+    const onAndroidBack = (e: Event) => {
+      e.preventDefault();
+      handleBackClick();
+    };
+    window.addEventListener('goltex:android-back', onAndroidBack);
+    return () => window.removeEventListener('goltex:android-back', onAndroidBack);
+  }, [handleBackClick]);
 
   return (
     <PosContext.Provider value={{
@@ -678,7 +797,8 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
       numpadProduct, setNumpadProduct, numpadCartItemId, setNumpadCartItemId, numpadField, setNumpadField, numpadQty, setNumpadQty, numpadPrice, setNumpadPrice,
       openNumpad, closeNumpad, handleNumpadKey, handleNumpadOk, previewQty, previewPrice, previewSubtotal,
       isCajaOpen, setIsCajaOpen, handleOpenCaja, handleCloseCajaAttempt, confirmCloseCaja, closingCajaLoading, cajaSummaryOpen, setCajaSummaryOpen, cajaSummary,
-      isClearCartModalOpen, setIsClearCartModalOpen, exitGuardOpen, setExitGuardOpen, previewTicketData, setPreviewTicketData, activePrinter,
+      isClearCartModalOpen, setIsClearCartModalOpen, exitGuardOpen, setExitGuardOpen, previewTicketData, setPreviewTicketData, 
+      activePrinter, isPrinterAuthorized, isPairingPrinter, handlePairPrinter, refreshPrinterAuth,
       ticketNumber, isEmitting, handleEmitTicket, deleteDraftTicket, handleReprint, historyTickets, pendingSales, fetchHistory,
       handleBackClick, handleExitWithoutSaving, toast, showToast
     }}>

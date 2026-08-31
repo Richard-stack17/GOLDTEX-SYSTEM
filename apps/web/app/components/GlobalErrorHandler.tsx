@@ -131,6 +131,10 @@ export function GlobalErrorHandler({ children }: { children: ReactNode }) {
     if (!isApkMode) return;
 
     const handleWindowError = (event: ErrorEvent) => {
+      const msg = event.message || event.error?.message || "";
+      if (msg.includes("triggerEvent") || msg.includes("webpack-hmr")) {
+        return;
+      }
       console.error("Global Window Error caught:", event.error || event.message);
       setGlobalError({
         error: event.error || new Error(event.message || "Global Window Error"),

@@ -13,6 +13,7 @@ import PosCart from "./components/PosCart";
 import PosHistory from "./components/PosHistory";
 import PosNumpadModal from "./components/PosNumpadModal";
 import ReceiptPreview from "../components/ReceiptPreview";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
 
 function PosContent() {
   const { role, isHydrated, permissions } = useRole();
@@ -152,24 +153,16 @@ function PosContent() {
       <PosNumpadModal />
 
       {/* Modals */}
-      <Dialog open={exitGuardOpen} onOpenChange={setExitGuardOpen}>
-        <DialogContent className="sm:max-w-md bg-card border-border">
-          <DialogHeader>
-            <DialogTitle className="text-xl font-black">¿Seguro que deseas salir?</DialogTitle>
-          </DialogHeader>
-          <p className="text-muted-foreground text-sm leading-relaxed">
-            Tienes telas en el carrito que no han sido registradas como proforma. Si sales ahora, se perderán estos datos.
-          </p>
-          <div className="flex flex-col sm:flex-row gap-3 mt-2">
-            <Button variant="outline" className="flex-1 h-12 font-bold" onClick={() => setExitGuardOpen(false)}>
-              Cancelar y Seguir Aquí
-            </Button>
-            <Button variant="destructive" className="flex-1 h-12 font-bold" onClick={handleExitWithoutSaving}>
-              Salir sin Guardar
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        isOpen={exitGuardOpen}
+        title="¿Seguro que deseas salir?"
+        description="Tienes telas en el carrito que no han sido registradas como proforma. Si sales ahora, se perderán estos datos."
+        confirmText="Salir sin Guardar"
+        cancelText="Cancelar y Seguir Aquí"
+        onConfirm={handleExitWithoutSaving}
+        onCancel={() => setExitGuardOpen(false)}
+        isDestructive={true}
+      />
 
       <Dialog open={cajaSummaryOpen} onOpenChange={setCajaSummaryOpen}>
         <DialogContent className="sm:max-w-md bg-card border-border">
