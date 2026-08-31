@@ -515,9 +515,62 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
     const pollInterval = setInterval(() => {
       syncCajaStateFromCloud();
       fetchTodayTicketNumber();
-    }, 5000);
+    }, 10000);
 
     return () => clearInterval(pollInterval);
+  }, [activeStoreId, fetchHistory, fetchTodayTicketNumber]);
+
+  // Suscripción WebSocket en Tiempo Real (< 200ms) para Proformas, Cobros y Caja
+  useEffect(() => {
+    if (!activeStoreId) return;
+
+    const channelName = `pos_realtime_${activeStoreId}`;
+    const posChannel = supabase
+      .channel(channelName)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "sales"
+        },
+        () => {
+          fetchHistory();
+          fetchTodayTicketNumber();
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "settings"
+        },
+        () => {
+          const syncCaja = async () => {
+            const today = getLimaTodayStr();
+            try {
+              const { data } = await supabase.from('settings').select('key, value').eq('store_id', activeStoreId).in('key', ['pos_caja_open', 'pos_caja_open_date']);
+              const openSetting = data?.find((s: any) => s.key === 'pos_caja_open');
+              const dateSetting = data?.find((s: any) => s.key === 'pos_caja_open_date');
+              if (dateSetting?.value === today && String(openSetting?.value) === 'true') {
+                setIsCajaOpen(true);
+                localStorage.setItem(`isCajaOpen_${activeStoreId}`, 'true');
+                localStorage.setItem(`cajaOpenDate_${activeStoreId}`, today);
+              } else {
+                setIsCajaOpen(false);
+                localStorage.setItem(`isCajaOpen_${activeStoreId}`, 'false');
+              }
+            } catch (_) { }
+          };
+          syncCaja();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(posChannel);
+    };
   }, [activeStoreId, fetchHistory, fetchTodayTicketNumber]);
 
   // Modals & Misc
@@ -724,16 +777,21 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
   const deleteDraftTicket = () => setIsClearCartModalOpen(true);
 
   const handleReprint = async (ticket: HistoryTicket) => {
-    // Si la impresora aún no tiene permiso en este navegador, abrimos el selector directamente con el clic del usuario
+    // Si la impresora aún no tiene permiso en este dispositivo, intentar vincular
     if (activePrinter && isPrinterAuthorized === false) {
       const devName = activePrinter?.mac_address || activePrinter?.name || 'Impresora';
-      showToast(`Selecciona "${devName}" en la lista y presiona Conectar`, "warning");
       try {
         const pairRes = await pairActivePrinter(activePrinter);
         if (pairRes.success) {
           setIsPrinterAuthorized(true);
+        } else {
+          showToast(`Impresora no vinculada. Haz clic en 'Conectar' arriba.`, "warning");
+          return;
         }
-      } catch (_) { }
+      } catch (_) {
+        showToast(`Impresora no vinculada. Haz clic en 'Conectar' arriba.`, "warning");
+        return;
+      }
     }
 
     const lines = typeof ticket.detail === 'string' ? ticket.detail.split('\n').filter(l => l.trim()) : [];
@@ -777,7 +835,7 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
       if (errMsg.includes("NO_PRINTER_CONFIGURED")) {
         showToast("No hay ninguna impresora configurada para esta sucursal.", "warning");
       } else if (errMsg.includes("PRINTER_NOT_AUTHORIZED_IN_BROWSER") || isPrinterAuthorized === false) {
-        showToast(`Impresora no vinculada en este navegador. Haz clic en el botón amarillo 'Conectar ${devName}' arriba.`, "warning");
+        showToast(`Impresora no vinculada. Haz clic en 'Conectar ${devName}' arriba.`, "warning");
       } else {
         showToast(`Error de comunicación con "${devName}". Verifique que esté encendida y cercana.`, "error");
       }

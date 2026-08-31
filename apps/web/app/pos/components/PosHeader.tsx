@@ -140,16 +140,24 @@ export default function PosHeader() {
         {/* Banner de Alerta Offline (Sutil y no roba espacio a botones) */}
         <NetworkBanner />
 
-        {/* Fila 1: [ <- ] [ 🔍 Buscar familia... ] [ 🌙 Tema ] [ # Ticket ] */}
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" className="w-10 h-10 rounded-xl hover:bg-secondary/80 shrink-0" onClick={handleBackClick}>
-            <ArrowLeft className="w-5 h-5" />
+        {/* Fila 1: [ <- ] [ POS TIENDA 2 ] [ 🔍 Buscar... ] [ 🌙 ] [ # Ticket ] */}
+        <div className="flex items-center gap-1.5 w-full">
+          <Button variant="ghost" size="icon" className="w-9 h-9 rounded-xl hover:bg-secondary/80 shrink-0" onClick={handleBackClick}>
+            <ArrowLeft className="w-4 h-4" />
           </Button>
+          {activeStore && (
+            <div className="flex flex-col text-left shrink-0">
+              <span className="text-[7px] font-black text-muted-foreground uppercase tracking-widest leading-none">POS</span>
+              <span className="text-[9px] font-black text-amber-600 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded mt-0.5 uppercase leading-none truncate max-w-[80px]">
+                {activeStore.name}
+              </span>
+            </div>
+          )}
           <div className="relative flex-1 min-w-0 flex items-center">
-            <Search className="absolute left-3 w-4 h-4 text-muted-foreground pointer-events-none" />
+            <Search className="absolute left-2.5 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
             <Input
               placeholder="Buscar familia..."
-              className="pl-9 h-10 bg-background text-xs rounded-xl border-2 border-border/60 focus-visible:border-primary shadow-sm cursor-pointer w-full"
+              className="pl-8 h-9 bg-background text-xs rounded-xl border-2 border-border/60 focus-visible:border-primary shadow-sm cursor-pointer w-full"
               value={search}
               onClick={() => setQwertyOpen(true)}
               readOnly
@@ -158,39 +166,31 @@ export default function PosHeader() {
           <button
             onClick={toggleTheme}
             title={theme === 'dark' ? 'Modo Claro' : 'Modo Oscuro'}
-            className="flex items-center justify-center w-10 h-10 rounded-xl bg-secondary hover:bg-muted transition-colors border border-border shrink-0"
+            className="flex items-center justify-center w-9 h-9 rounded-xl bg-secondary hover:bg-muted transition-colors border border-border shrink-0"
           >
             {theme === 'dark' ? <Sun className="w-4 h-4 text-yellow-400" /> : <Moon className="w-4 h-4 text-indigo-500" />}
           </button>
-          <div className="bg-emerald-500/10 border border-emerald-500/30 px-2.5 h-10 rounded-xl flex items-center gap-1 shrink-0" title="Próxima proforma">
-            <span className="text-[9px] text-emerald-600 font-bold uppercase">#</span>
-            <span className="text-sm font-black text-emerald-600 leading-none">{ticketNumber}</span>
+          <div className="bg-emerald-500/10 border border-emerald-500/30 px-2 h-9 rounded-xl flex items-center gap-1 shrink-0" title="Próxima proforma">
+            <span className="text-[8px] text-emerald-600 font-bold uppercase">#</span>
+            <span className="text-xs font-black text-emerald-600 leading-none">{ticketNumber}</span>
           </div>
         </div>
 
-        {/* Fila 2: [ POS TIENDA 2 ] [ APERTURAR / CERRAR CAJA ] [ 🖨️ Impresora ] [ 👤 Vendedor ] */}
-        <div className="flex items-center justify-between gap-2 w-full">
-          <div className="flex items-center gap-2 min-w-0">
-            {activeStore && (
-              <div className="flex flex-col text-left shrink-0">
-                <span className="text-[8px] font-black text-muted-foreground uppercase tracking-widest leading-none">POS</span>
-                <span className="text-[10px] font-black text-amber-600 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded mt-0.5 uppercase leading-none truncate max-w-[110px]">
-                  {activeStore.name}
-                </span>
-              </div>
-            )}
+        {/* Fila 2: [ APERTURAR / CERRAR CAJA ] <--- ESPACIO HOLGADO ---> [ 🖨️ Impresora ] [ 👤 Vendedor ] */}
+        <div className="flex items-center justify-between gap-2 w-full pt-0.5">
+          <div className="flex items-center shrink-0">
             {permissions?.pos_open_caja && !isCajaOpen && (
               <button
                 onClick={handleOpenCaja}
-                className="px-3 h-10 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase tracking-wide rounded-xl shadow-sm animate-pulse flex items-center justify-center shrink-0"
+                className="px-3.5 h-9 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase tracking-wide rounded-xl shadow-sm animate-pulse flex items-center justify-center shrink-0"
               >
-                Aperturar
+                Aperturar Caja
               </button>
             )}
             {permissions?.pos_close_caja && isCajaOpen && (
               <button
                 onClick={handleCloseCajaAttempt}
-                className="px-3 h-10 bg-red-600/10 border border-red-500/30 text-red-600 hover:bg-red-600 hover:text-white font-bold text-xs uppercase tracking-wide rounded-xl flex items-center justify-center shrink-0 transition-colors"
+                className="px-3.5 h-9 bg-red-600/10 border border-red-500/30 text-red-600 hover:bg-red-600 hover:text-white font-bold text-xs uppercase tracking-wide rounded-xl flex items-center justify-center shrink-0 transition-colors"
               >
                 Cerrar Caja
               </button>
@@ -204,14 +204,14 @@ export default function PosHeader() {
                   type="button"
                   onClick={handlePairPrinter}
                   disabled={isPairingPrinter}
-                  className="px-2.5 h-10 shrink-0 flex items-center gap-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border-2 border-amber-500 text-amber-900 dark:text-amber-300 font-bold text-xs uppercase tracking-tight shadow-xs transition-all cursor-pointer relative animate-pulse"
+                  className="px-2.5 h-9 shrink-0 flex items-center gap-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border-2 border-amber-500 text-amber-900 dark:text-amber-300 font-bold text-xs uppercase tracking-tight shadow-xs transition-all cursor-pointer relative animate-pulse"
                   title={`Conectar ${deviceDisplayName}`}
                 >
                   {isPairingPrinter ? (
-                    <RefreshCw className="w-4 h-4 animate-spin text-amber-600 shrink-0" />
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-600 shrink-0" />
                   ) : (
                     <div className="relative shrink-0 flex items-center justify-center">
-                      <Printer className="w-4 h-4 text-amber-700 dark:text-amber-300" />
+                      <Printer className="w-3.5 h-3.5 text-amber-700 dark:text-amber-300" />
                       <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-500 ring-2 ring-card" />
                     </div>
                   )}
@@ -224,14 +224,14 @@ export default function PosHeader() {
                   type="button"
                   onClick={handlePairPrinter}
                   disabled={isPairingPrinter}
-                  className="w-10 h-10 shrink-0 flex items-center justify-center rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 transition-all cursor-pointer relative"
+                  className="w-9 h-9 shrink-0 flex items-center justify-center rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 transition-all cursor-pointer relative"
                   title={`Impresora lista: ${deviceDisplayName}`}
                 >
                   {isPairingPrinter ? (
-                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                   ) : (
                     <>
-                      <Printer className="w-4 h-4" />
+                      <Printer className="w-3.5 h-3.5" />
                       <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-background" />
                     </>
                   )}
