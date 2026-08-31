@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { useAndroidBackButton } from "../hooks/useAndroidBackButton";
+import { useDeepLinks } from "../hooks/useDeepLinks";
 
 export function ApkRouteGuard() {
   const router = useRouter();
@@ -12,6 +13,9 @@ export function ApkRouteGuard() {
 
   // Botón físico de retroceso de Android (no-op en web)
   useAndroidBackButton();
+
+  // Escuchar retorno de Deep Links (Google OAuth en Android)
+  useDeepLinks();
 
   useEffect(() => {
     setMounted(true);
@@ -57,6 +61,7 @@ export function ApkRouteGuard() {
         const isAllowed = 
           normalizedPath === '/' ||
           normalizedPath.startsWith('/login') ||
+          normalizedPath.startsWith('/auth') ||
           normalizedPath.startsWith('/hub') ||
           normalizedPath.startsWith('/pos') ||
           normalizedPath.startsWith('/configuracion');

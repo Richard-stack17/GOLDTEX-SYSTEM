@@ -24,7 +24,7 @@ function AuthCallbackContent() {
         return;
       }
 
-      const linkProfileId = searchParams.get('link_profile_id');
+      const linkProfileId = searchParams.get('link_profile_id') || (typeof window !== 'undefined' ? localStorage.getItem('goltex_linking_profile_id') : null);
 
       if (linkProfileId) {
         // MODO VINCULACIÓN: Asignar este email al perfil del usuario actual
@@ -39,6 +39,9 @@ function AuthCallbackContent() {
           console.error('Error al vincular:', updateError);
           setErrorMessage('Error al vincular tu cuenta: ' + updateError.message);
         } else {
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem('goltex_linking_profile_id');
+          }
           // Mostrar pantalla/modal de éxito con confirmación y advertencias de seguridad
           setLinkedSuccessData({ email });
         }

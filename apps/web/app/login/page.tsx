@@ -6,6 +6,7 @@ import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Inpu
 import { Box, Eye, EyeOff } from "lucide-react";
 import { useRole, type Role } from "../context/RoleContext";
 import { supabase } from "../lib/supabase";
+import { isNativeAndroidApp } from "../lib/platform";
 import bcrypt from "bcryptjs";
 
 export default function LoginPage() {
@@ -148,13 +149,46 @@ export default function LoginPage() {
   const handleGoogleLogin = async () => {
     setLoading(true);
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
-        },
-      });
-      if (error) throw error;
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('goltex_linking_profile_id');
+      }
+      const isMobile = isNativeAndroidApp();
+      const redirectBase = isMobile ? 'com.goltex.pos://auth/callback' : `${window.location.origin}/auth/callback`;
+
+      if (isMobile) {
+        const { data, error } = await supabase.auth.signInWithOAuth({
+          provider: 'google',
+          options: {
+            redirectTo: redirectBase,
+            skipBrowserRedirect: true,
+            queryParams: {
+              access_type: 'offline',
+              prompt: 'select_account',
+            },
+          },
+        });
+        if (error) throw error;
+        if (data?.url) {
+          try {
+            const { Browser } = await import('@capacitor/browser');
+            await Browser.open({ url: data.url, windowName: '_system' });
+          } catch (_) {
+            window.open(data.url, '_system') || (window.location.href = data.url);
+          }
+        }
+      } else {
+        const { error } = await supabase.auth.signInWithOAuth({
+          provider: 'google',
+          options: {
+            redirectTo: redirectBase,
+            queryParams: {
+              access_type: 'offline',
+              prompt: 'select_account',
+            },
+          },
+        });
+        if (error) throw error;
+      }
     } catch (err: any) {
       setError(err.message || "Error al iniciar sesión con Google");
       setLoading(false);

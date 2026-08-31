@@ -8,6 +8,7 @@ import { computeNextDailyTicketNumber, formatTicketHash, parseInternalTicketNum,
 import { useRole } from "../../context/RoleContext";
 import { useStore } from "../../context/StoreContext";
 import { silentPrintSaleReceipt, silentPrintClosureReport, resolveActivePrinter, checkDevicePermission, pairActivePrinter } from "../../configuracion/utils/printerEngine";
+import { isNativeAndroidApp } from "../../lib/platform";
 import { CheckCircle2, AlertTriangle, XCircle, Printer, RefreshCw } from "lucide-react";
 
 export type Product = {
@@ -617,13 +618,16 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
     }
     setIsPairingPrinter(true);
     const targetDeviceName = activePrinter.mac_address || activePrinter.name || "tu impresora";
-    showToast(`Selecciona "${targetDeviceName}" en la lista y presiona Conectar`, "warning");
+
+    if (!isNativeAndroidApp()) {
+      showToast(`Selecciona "${targetDeviceName}" en la lista y presiona Conectar`, "warning");
+    }
 
     try {
       const res = await pairActivePrinter(activePrinter);
       if (res.success) {
         setIsPrinterAuthorized(true);
-        showToast(`"${activePrinter.name}" conectada y lista en este equipo`, "success");
+        showToast(`"${activePrinter.name || targetDeviceName}" conectada y lista para imprimir`, "success");
       } else if (res.error) {
         showToast(res.error, "error");
       }

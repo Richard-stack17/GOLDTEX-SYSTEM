@@ -2,6 +2,7 @@
 
 import { supabase } from '../../lib/supabase';
 import { isNativeAndroidApp } from '../../lib/platform';
+export { isNativeAndroidApp };
 
 export interface TicketLine {
   align?: 'center' | 'left' | 'right';
@@ -1515,21 +1516,39 @@ export async function pairActivePrinter(activePrinter: any): Promise<{ success: 
     if (type === 'bluetooth') {
       try {
         const { BluetoothSerial } = await import('@e-is/capacitor-bluetooth-serial');
-        const isEnabledRes = await BluetoothSerial.isEnabled();
-        if (!isEnabledRes?.enabled) {
-          if (typeof (BluetoothSerial as any).enable === 'function') {
-            await (BluetoothSerial as any).enable();
-            const recheck = await BluetoothSerial.isEnabled();
-            if (!recheck?.enabled) {
-              return { success: false, error: 'El Bluetooth no fue activado. Enciéndelo para imprimir.' };
+
+        // 1. Solicitar permisos de Bluetooth en Android (Android 12+ BLUETOOTH_CONNECT / BLUETOOTH_SCAN)
+        if (typeof (BluetoothSerial as any).requestPermissions === 'function') {
+          try {
+            await (BluetoothSerial as any).requestPermissions();
+          } catch (_) { }
+        }
+
+        // 2. Verificar si está encendido y solicitar encenderlo
+        try {
+          const isEnabledRes = await BluetoothSerial.isEnabled();
+          if (!isEnabledRes?.enabled) {
+            if (typeof (BluetoothSerial as any).enable === 'function') {
+              await (BluetoothSerial as any).enable();
+              const recheck = await BluetoothSerial.isEnabled();
+              if (!recheck?.enabled) {
+                return { success: false, error: 'El Bluetooth no fue activado. Enciéndelo para imprimir.' };
+              }
+            } else {
+              return { success: false, error: 'El Bluetooth de tu teléfono está apagado. Actívalo en los ajustes de tu dispositivo.' };
             }
-          } else {
-            return { success: false, error: 'El Bluetooth de tu teléfono está apagado. Actívalo en los ajustes de tu dispositivo.' };
+          }
+        } catch (_) {
+          if (typeof (BluetoothSerial as any).enable === 'function') {
+            try {
+              await (BluetoothSerial as any).enable();
+            } catch (_) { }
           }
         }
+
         return { success: true };
       } catch (err: any) {
-        return { success: false, error: err?.message || 'No se pudo encender el Bluetooth' };
+        return { success: false, error: err?.message || 'No se pudo activar el Bluetooth' };
       }
     }
     return { success: true };

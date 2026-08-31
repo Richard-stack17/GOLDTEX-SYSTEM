@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { X, Lock, CheckCircle2, UserCircle, KeyRound, Mail, AlertTriangle, Contact, Eye, EyeOff } from 'lucide-react';
 import { useRole } from '../../context/RoleContext';
+import { isNativeAndroidApp } from '../../lib/platform';
 import bcrypt from 'bcryptjs';
 
 interface UserProfileModalProps {
@@ -80,13 +81,47 @@ export default function UserProfileModal({ isOpen, onClose }: UserProfileModalPr
   const handleLinkGoogle = async () => {
     setLinkError(null);
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: `${window.location.origin}/auth/callback?link_profile_id=${profileId}`
+      const isMobile = isNativeAndroidApp();
+      if (profileId) {
+        localStorage.setItem('goltex_linking_profile_id', profileId);
+      }
+
+      const redirectBase = isMobile ? 'com.goltex.pos://auth/callback' : `${window.location.origin}/auth/callback?link_profile_id=${profileId}`;
+
+      if (isMobile) {
+        const { data, error } = await supabase.auth.signInWithOAuth({
+          provider: 'google',
+          options: {
+            redirectTo: redirectBase,
+            skipBrowserRedirect: true,
+            queryParams: {
+              access_type: 'offline',
+              prompt: 'select_account',
+            }
+          }
+        });
+        if (error) throw error;
+        if (data?.url) {
+          try {
+            const { Browser } = await import('@capacitor/browser');
+            await Browser.open({ url: data.url, windowName: '_system' });
+          } catch (_) {
+            window.open(data.url, '_system') || (window.location.href = data.url);
+          }
         }
-      });
-      if (error) throw error;
+      } else {
+        const { error } = await supabase.auth.signInWithOAuth({
+          provider: 'google',
+          options: {
+            redirectTo: redirectBase,
+            queryParams: {
+              access_type: 'offline',
+              prompt: 'select_account',
+            }
+          }
+        });
+        if (error) throw error;
+      }
     } catch (e: any) {
       setLinkError("Error al iniciar vinculación: " + (e.message || "Error desconocido"));
     }
