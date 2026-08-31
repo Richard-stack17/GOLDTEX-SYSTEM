@@ -1,15 +1,14 @@
 "use client";
 import React from "react";
 import { Card, CardContent } from "@goltex/ui";
-import { RefreshCw, Printer, Eye, CloudOff, CloudUpload, CloudAlert, Cloud } from "lucide-react";
+import { RefreshCw, Printer, Eye } from "lucide-react";
 import { formatTicketHash, parseInternalTicketNum, starsoftDocNumFromTicket } from "../../lib/ticket-sequence";
 import { usePos } from "../context/PosContext";
 import { useRole } from "../../context/RoleContext";
 
 export default function PosHistory() {
-  const { historyTickets, pendingSales, fetchHistory, setPreviewTicketData, handleReprint, products, activePrinter } = usePos();
+  const { historyTickets, fetchHistory, setPreviewTicketData, handleReprint, products } = usePos();
   const { permissions } = useRole();
-  const isApkMode = process.env.NEXT_PUBLIC_APP_MODE === 'apk';
 
   const starsoftDocNum = (ticket: any) => starsoftDocNumFromTicket(ticket);
 
@@ -151,52 +150,6 @@ export default function PosHistory() {
             </Card>
           );
         })
-      )}
-
-      {isApkMode && pendingSales.length > 0 && (
-        <div className="mt-4 border-t pt-4">
-          <div className="flex items-center justify-between mb-3 px-1">
-            <h3 className="text-sm font-bold flex items-center gap-2 text-muted-foreground">
-              <CloudOff className="w-4 h-4" />
-              Proformas Pendientes ({pendingSales.length})
-            </h3>
-          </div>
-          <div className="flex flex-col gap-2">
-            {pendingSales.map(ps => (
-              <Card key={ps.local_id} className="bg-background border-border shadow-sm rounded-xl overflow-hidden opacity-90">
-                <CardContent className="p-3 flex flex-col gap-1.5">
-                  <div className="flex items-start justify-between">
-                    <div className="flex flex-col min-w-0">
-                      <div className="text-base font-black text-foreground">
-                        {ps.offline_uuid ? 'LOCAL-' + ps.offline_uuid.substring(0, 4).toUpperCase() : 'N/A'}
-                      </div>
-                      <span className="text-[10px] text-muted-foreground font-mono mt-0.5">
-                        En espera de subida
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="text-[10px] font-bold px-1.5 py-0.5 rounded-md uppercase bg-orange-500/20 text-orange-600">
-                        LOCAL
-                      </div>
-                      {ps.sync_status === 'SYNCING' && <span title="Sincronizando..."><CloudUpload className="w-4 h-4 text-blue-500 animate-pulse" /></span>}
-                      {ps.sync_status === 'ERROR' && <span title={ps.sync_error || "Error"}><CloudAlert className="w-4 h-4 text-red-500" /></span>}
-                      {(ps.sync_status === 'PENDING' || !ps.sync_status) && <span title="Pendiente"><CloudOff className="w-4 h-4 text-orange-500" /></span>}
-                      {ps.sync_status === 'SYNCED' && <span title="Sincronizado"><Cloud className="w-4 h-4 text-emerald-500" /></span>}
-                    </div>
-                  </div>
-                  <div className="flex justify-between items-center text-xs mt-0.5">
-                    <span className="text-muted-foreground font-mono">
-                      {new Date(ps.created_at).toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" })}
-                    </span>
-                    <span className="font-black text-sm text-foreground">
-                      S/ {ps.total.toFixed(2)}
-                    </span>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
       )}
     </div>
   );

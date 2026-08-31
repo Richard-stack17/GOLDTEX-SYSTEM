@@ -226,11 +226,11 @@ export function generateTicketLines(saleData: any, maxChars: number): TicketLine
 
   left(separatorThin);
   const sumaRedondeada2Dec = Math.round(sumaExacta * 100) / 100;
-  
+
   // Detección de recargo por Izipay/Tarjeta (solo aplica si la venta viene con transacciones o si fue cobrada con recargo)
   const txs = Array.isArray(saleData.transactions) ? saleData.transactions : [];
   const izipayTx = txs.find((t: any) => t.payment_method === 'IZIPAY');
-  
+
   let surchargeAmt = 0;
   let surchargePct = 0;
 
@@ -253,14 +253,14 @@ export function generateTicketLines(saleData: any, maxChars: number): TicketLine
 
   if (surchargeAmt > 0.01) {
     left(formatLR('Subtotal Items:', `S/ ${sumaRedondeada2Dec.toFixed(2)}`));
-    const recargoLabel = surchargePct > 0 
+    const recargoLabel = surchargePct > 0
       ? `Recargo Izipay (${surchargePct % 1 === 0 ? surchargePct : surchargePct.toFixed(1)}%):`
       : 'Recargo Izipay / Tarj:';
     left(formatLR(recargoLabel, `+ S/ ${surchargeAmt.toFixed(2)}`));
     left(separatorThin);
-    
-    const finalTotalNum = (saleData.total != null && Number(saleData.total) > 0) 
-      ? Number(saleData.total) 
+
+    const finalTotalNum = (saleData.total != null && Number(saleData.total) > 0)
+      ? Number(saleData.total)
       : (sumaRedondeada2Dec + surchargeAmt);
     totalFinalStr = finalTotalNum.toFixed(2);
   } else {
@@ -533,10 +533,33 @@ export class WebBluetoothAdapter implements IPrinterAdapter {
   }
 
   async printTestReceipt(device: any, paperWidth: number, maxChars: number = 48) {
+    let targetDevice = device;
+    if (!targetDevice?.gatt) {
+      const nav = typeof navigator !== 'undefined' ? (navigator as any) : null;
+      if (nav?.bluetooth) {
+        if (typeof nav.bluetooth.getDevices === 'function') {
+          try {
+            const devices = await nav.bluetooth.getDevices();
+            if (devices && devices.length > 0) {
+              targetDevice = devices.find((d: any) => d.name === device?.name) || devices[0];
+            }
+          } catch (_) { }
+        }
+        if (!targetDevice?.gatt) {
+          targetDevice = await nav.bluetooth.requestDevice({
+            acceptAllDevices: true,
+            optionalServices: this.knownServices
+          });
+        }
+      }
+    }
+
+    if (!targetDevice?.gatt) throw new Error('El dispositivo no soporta comunicación GATT o no fue seleccionado.');
+
     const lines = generateTicketLines(DEFAULT_TEST_SALE_DATA, maxChars);
     const uint8 = buildEscPosBytes(lines, maxChars);
 
-    const { server, writeChar } = await this.getWriteCharacteristic(device);
+    const { server, writeChar } = await this.getWriteCharacteristic(targetDevice);
 
     try {
       await this.sendBytes(writeChar, uint8, server);
@@ -564,8 +587,8 @@ export class WebBluetoothAdapter implements IPrinterAdapter {
     }
   }
 
-  async silentPrintSaleReceipt(saleData: any, doubleCopy: boolean = false) {
-    let activePrinter: any = await resolveActivePrinter();
+  async silentPrintSaleReceipt(saleData: any, doubleCopy: boolean = false, printerConfig?: any) {
+    let activePrinter: any = printerConfig || await resolveActivePrinter();
 
     if (!activePrinter) {
       throw new Error("NO_PRINTER_CONFIGURED");
@@ -725,27 +748,49 @@ export class AndroidBluetoothSerialAdapter implements IPrinterAdapter {
     const { BluetoothSerial } = await import('@e-is/capacitor-bluetooth-serial');
     const address = await this.resolveValidMacAddress(addressOrName);
 
-    // 1. Limpieza de socket previo para evitar bloqueos
-    try { await BluetoothSerial.disconnect({ address }); } catch (_) { }
+    // Intentos de conexión con auto-reintento si la impresora está ocupada por otro vendedor
+    const maxRetries = 3;
+    let connected = false;
 
-    // 2. Conectar directamente por RFCOMM Insecure (estándar nativo para impresoras térmicas ESC/POS)
-    try {
-      await BluetoothSerial.connectInsecure({ address });
-    } catch (_) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        await BluetoothSerial.connect({ address });
+        // 1. Limpieza preventiva
+        try { await BluetoothSerial.disconnect({ address }); } catch (_) { }
+
+        // 2. Conexión rápida Insecure / Secure
+        try {
+          await BluetoothSerial.connectInsecure({ address });
+        } catch (_) {
+          await BluetoothSerial.connect({ address });
+        }
+
+        connected = true;
+        break; // Conexión exitosa, salir del bucle de reintento
       } catch (err: any) {
-        throw new Error(`Error al conectar con la impresora Bluetooth (${address}). Verifique que esté encendida.`);
+        const errMsg = (err?.message || String(err)).toLowerCase();
+
+        // Si el Bluetooth está apagado o faltan permisos, abortar de inmediato
+        if (errMsg.includes('disabled') || errMsg.includes('permission') || errMsg.includes('inválid') || errMsg.includes('not valid')) {
+          throw err;
+        }
+
+        // Si falló por canal ocupado o socket bloqueado, esperar a que el otro vendedor libere el canal
+        if (attempt < maxRetries) {
+          const waitMs = attempt === 1 ? 800 : 1200;
+          await new Promise(r => setTimeout(r, waitMs));
+        }
       }
     }
 
-    try {
-      // Breve pausa para estabilizar el canal de datos
-      await new Promise(r => setTimeout(r, 60));
+    if (!connected) {
+      throw new Error(`Error al conectar con la impresora Bluetooth (${address}). Verifique que esté encendida o intente nuevamente.`);
+    }
 
+    // Escritura de bytes garantizada y única (sin riesgo de duplicación)
+    try {
+      await new Promise(r => setTimeout(r, 60));
       const value = Array.from(uint8).map(b => String.fromCharCode(b)).join('');
       await BluetoothSerial.write({ address, value });
-      // Pausa para que la impresora procese los bytes antes de desconectar
       await new Promise(r => setTimeout(r, 400));
     } finally {
       try { await BluetoothSerial.disconnect({ address }); } catch (_) { }
@@ -755,7 +800,7 @@ export class AndroidBluetoothSerialAdapter implements IPrinterAdapter {
   async printTestReceipt(device: any, paperWidth: number, maxChars: number = 48): Promise<void> {
     const lines = generateTicketLines(DEFAULT_TEST_SALE_DATA, maxChars);
     const uint8 = buildEscPosBytes(lines, maxChars);
-    const address = device?.address || device?.name;
+    const address = device?.address || device?.mac_address || device?.macAddress || device?.name;
     if (!address) throw new Error('Dispositivo Bluetooth sin dirección MAC. Vuelve a buscar la impresora.');
     await this.writeBytes(address, uint8);
   }
@@ -786,20 +831,45 @@ export class AndroidBluetoothSerialAdapter implements IPrinterAdapter {
     const lines = generateTicketLines(saleData, maxCharsConfig);
     const uint8 = buildEscPosBytes(lines, maxCharsConfig);
 
-    // 1. Limpieza preventiva
-    try { await BluetoothSerial.disconnect({ address }); } catch (_) { }
+    // Intentos de conexión con auto-reintento si la impresora está ocupada por otro vendedor
+    const maxRetries = 3;
+    let connected = false;
 
-    // 2. Conexión rápida Insecure / Secure
-    try {
-      await BluetoothSerial.connectInsecure({ address });
-    } catch (_) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        await BluetoothSerial.connect({ address });
+        // 1. Limpieza preventiva
+        try { await BluetoothSerial.disconnect({ address }); } catch (_) { }
+
+        // 2. Conexión rápida Insecure / Secure
+        try {
+          await BluetoothSerial.connectInsecure({ address });
+        } catch (_) {
+          await BluetoothSerial.connect({ address });
+        }
+
+        connected = true;
+        break; // Conexión exitosa, salir del bucle de reintento
       } catch (err: any) {
-        throw new Error(`Error al conectar con la impresora Bluetooth (${address}). Verifique que esté encendida.`);
+        const errMsg = (err?.message || String(err)).toLowerCase();
+
+        // Si el Bluetooth está apagado o faltan permisos, abortar de inmediato
+        if (errMsg.includes('disabled') || errMsg.includes('permission') || errMsg.includes('inválid') || errMsg.includes('not valid')) {
+          throw err;
+        }
+
+        // Si la impresora está ocupada por otro teléfono, esperar a que termine y libere el canal
+        if (attempt < maxRetries) {
+          const waitMs = attempt === 1 ? 800 : 1200;
+          await new Promise(r => setTimeout(r, waitMs));
+        }
       }
     }
 
+    if (!connected) {
+      throw new Error(`Error al conectar con la impresora Bluetooth (${address}). Verifique que esté encendida o intente nuevamente.`);
+    }
+
+    // Escritura de bytes atómica y única para esta proforma
     try {
       await new Promise(r => setTimeout(r, 60));
       const value = Array.from(uint8).map(b => String.fromCharCode(b)).join('');
@@ -827,8 +897,28 @@ export class AndroidWifiTcpAdapter implements IPrinterAdapter {
   private async writeBytes(ip: string, port: number, uint8: Uint8Array): Promise<void> {
     const { Socket } = await import('@spryrocks/capacitor-socket-connection-plugin');
     const socket = new Socket();
+    
+    // Auto-reintento si el socket TCP está ocupado por otra transmisión
+    const maxRetries = 3;
+    let connected = false;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        await socket.open(ip, port);
+        connected = true;
+        break;
+      } catch (err: any) {
+        if (attempt < maxRetries) {
+          await new Promise(r => setTimeout(r, 800));
+        }
+      }
+    }
+
+    if (!connected) {
+      throw new Error(`No se pudo conectar a la impresora de red (${ip}:${port}). Verifique su conexión.`);
+    }
+
     try {
-      await socket.open(ip, port);
       await socket.write(uint8);
       await new Promise(r => setTimeout(r, 1200));
     } finally {
@@ -854,24 +944,26 @@ export class AndroidWifiTcpAdapter implements IPrinterAdapter {
     await this.writeBytes(ip, port, uint8);
   }
 
-  async silentPrintSaleReceipt(saleData: any, doubleCopy: boolean = false): Promise<void> {
-    let activePrinter: any = null;
-    try {
-      const { data: printers } = await supabase.from('printers').select('*').eq('is_active', true).order('auto_print', { ascending: false });
-      if (printers && printers.length > 0) {
-        activePrinter = printers.find((p: any) => p.auto_print) || printers[0];
-      }
-    } catch (_) { }
-
+  async silentPrintSaleReceipt(saleData: any, doubleCopy: boolean = false, printerConfig?: any): Promise<void> {
+    let activePrinter: any = printerConfig;
     if (!activePrinter) {
       try {
-        const cached = localStorage.getItem('cached_printer_config');
-        if (cached) activePrinter = JSON.parse(cached);
+        const { data: printers } = await supabase.from('printers').select('*').eq('is_active', true).order('auto_print', { ascending: false });
+        if (printers && printers.length > 0) {
+          activePrinter = printers.find((p: any) => p.auto_print) || printers[0];
+        }
       } catch (_) { }
+
+      if (!activePrinter) {
+        try {
+          const cached = localStorage.getItem('cached_printer_config');
+          if (cached) activePrinter = JSON.parse(cached);
+        } catch (_) { }
+      }
     }
 
     if (!activePrinter) throw new Error('NO_PRINTER_CONFIGURED');
-    if (!activePrinter.ip_address) throw new Error('PRINTER_CONNECTION_ERROR');
+    if (!activePrinter.ip_address && !activePrinter.ipAddress) throw new Error('PRINTER_CONNECTION_ERROR');
 
     const maxCharsConfig = activePrinter.max_chars || (activePrinter.paper_width <= 58 ? 32 : 48);
     const lines = generateTicketLines(saleData, maxCharsConfig);
@@ -1167,15 +1259,20 @@ export const scanBluetoothPrinters = async (): Promise<Array<{ name: string; add
 export const printTestReceipt = (device: any, paperWidth: number, maxChars: number = 48) => getBluetoothAdapter().printTestReceipt(device, paperWidth, maxChars);
 export const printSaleReceipt = (device: any, saleData: any, paperWidth: number, maxChars: number = 48) => getBluetoothAdapter().printSaleReceipt(device, saleData, paperWidth, maxChars);
 
-export const silentPrintSaleReceipt = async (saleData: any, doubleCopy: boolean = false, storeId?: string): Promise<void> => {
-  const activePrinter = await resolveActivePrinter(storeId);
+export const silentPrintSaleReceipt = async (saleData: any, doubleCopy: boolean = false, storeIdOrPrinterConfig?: string | any): Promise<void> => {
+  let activePrinter: any = null;
+  if (typeof storeIdOrPrinterConfig === 'object' && storeIdOrPrinterConfig !== null) {
+    activePrinter = storeIdOrPrinterConfig;
+  } else {
+    activePrinter = await resolveActivePrinter(storeIdOrPrinterConfig);
+  }
   if (!activePrinter) throw new Error('NO_PRINTER_CONFIGURED');
 
   const type = activePrinter.type || activePrinter.connection_type || 'bluetooth';
 
   if (type === 'wifi') {
     if (isNativeAndroidApp()) {
-      return androidWifiAdapter.silentPrintSaleReceipt(saleData, doubleCopy);
+      return androidWifiAdapter.silentPrintSaleReceipt(saleData, doubleCopy, activePrinter);
     } else {
       const maxCharsConfig = activePrinter.max_chars || (activePrinter.paper_width <= 58 ? 32 : 48);
       const lines = generateTicketLines(saleData, maxCharsConfig);
@@ -1245,7 +1342,7 @@ export const silentPrintSaleReceipt = async (saleData: any, doubleCopy: boolean 
   if (isNativeAndroidApp()) {
     return androidBluetoothAdapter.silentPrintSaleReceipt(saleData, doubleCopy, activePrinter);
   }
-  return getBluetoothAdapter().silentPrintSaleReceipt(saleData, doubleCopy);
+  return webBluetoothAdapter.silentPrintSaleReceipt(saleData, doubleCopy, activePrinter);
 };
 
 export const silentPrintClosureReport = async (cajaSummary: any, storeId?: string): Promise<void> => {

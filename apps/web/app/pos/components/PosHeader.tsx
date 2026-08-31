@@ -3,6 +3,7 @@ import React from "react";
 import { Button, Input } from "@goltex/ui";
 import { ArrowLeft, Search, Sun, Moon, Printer, RefreshCw, AlertTriangle } from "lucide-react";
 import AccountSwitcher from "../../components/AccountSwitcher";
+import NetworkIndicator from "../../components/NetworkIndicator";
 import { useTheme } from "../../context/ThemeContext";
 import { useStore } from "../../context/StoreContext";
 import { useRole } from "../../context/RoleContext";
@@ -48,6 +49,7 @@ export default function PosHeader() {
         </div>
 
         <div className="flex items-center justify-end gap-2 shrink-0">
+          <NetworkIndicator />
           {permissions?.pos_open_caja && !isCajaOpen && (
             <button
               onClick={handleOpenCaja}
@@ -160,7 +162,8 @@ export default function PosHeader() {
         </div>
 
         <div className="flex items-center justify-between gap-2">
-          <div>
+          <div className="flex items-center gap-1.5">
+            <NetworkIndicator />
             {permissions?.pos_open_caja && !isCajaOpen && (
               <button
                 onClick={handleOpenCaja}

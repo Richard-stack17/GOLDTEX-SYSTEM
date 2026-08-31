@@ -10,20 +10,11 @@ export function useNetworkStatus() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    // Detección de entorno: ¿Es escritorio o móvil/tablet/APK?
     const isMobileUserAgent = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     const isModernIPad = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
     const isDesktop = !isMobileUserAgent && !isModernIPad;
     setIsDesktopWeb(isDesktop);
 
-    // En la web de escritorio, siempre online. Si la página cargó, hay internet.
-    // La lógica offline-first solo aplica en la tablet/APK.
-    if (isDesktop) {
-      setIsOnline(true);
-      return; // No necesitamos pings ni heartbeats en escritorio
-    }
-
-    // ── Lógica Offline-First (solo para APK/Tablet) ──
     setIsOnline(navigator.onLine);
 
     const checkRealConnectivity = async () => {
@@ -35,14 +26,14 @@ export function useNetworkStatus() {
       try {
         const { error } = await supabase.from('roles').select('id').limit(1);
         
-        if (error && (error.message.includes('Failed to fetch') || error.message.includes('Network'))) {
+        if (error && (error.message.includes('Failed to fetch') || error.message.includes('Network') || error.message.includes('fetch'))) {
           throw new Error('Network timeout');
         }
         
         setIsOnline(true);
         retryCount.current = 0;
       } catch (err) {
-        if (retryCount.current < 3) {
+        if (retryCount.current < 2) {
           const delay = Math.pow(2, retryCount.current) * 1000;
           retryCount.current += 1;
           timeoutRef.current = setTimeout(checkRealConnectivity, delay);
@@ -55,13 +46,14 @@ export function useNetworkStatus() {
     const handleOnline = () => {
       clearTimeout(timeoutRef.current);
       retryCount.current = 0;
+      setIsOnline(true);
       checkRealConnectivity();
     };
 
     const handleOffline = () => {
       clearTimeout(timeoutRef.current);
       retryCount.current = 0;
-      checkRealConnectivity();
+      setIsOnline(false);
     };
 
     window.addEventListener('online', handleOnline);
@@ -70,8 +62,8 @@ export function useNetworkStatus() {
     checkRealConnectivity();
 
     const heartbeat = setInterval(() => {
-       if (navigator.onLine) checkRealConnectivity();
-    }, 30000);
+      if (navigator.onLine) checkRealConnectivity();
+    }, 20000);
 
     return () => {
       window.removeEventListener('online', handleOnline);

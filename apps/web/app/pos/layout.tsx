@@ -29,24 +29,10 @@ export default function PosLayout({ children }: { children: React.ReactNode }) {
     }
   }, [isHydrated, username, role, router]);
 
-  // Sincronización en segundo plano
+  // Sincronización en segundo plano del catálogo
   useEffect(() => {
-    const isApkMode = process.env.NEXT_PUBLIC_APP_MODE === 'apk';
     const handleOnline = async () => {
-      
       await syncCatalog();
-
-      if (isApkMode) {
-        try {
-          const { syncPendingSales } = await import('../lib/localDb');
-          const syncedCount = await syncPendingSales();
-          if (syncedCount > 0) {
-            showToast(`✅ ${syncedCount} ventas offline sincronizadas con éxito.`, 'success');
-          }
-        } catch (err) {
-          console.error("Error en sincronización background apk:", err);
-        }
-      }
     };
 
     if (typeof navigator !== 'undefined' && navigator.onLine) {

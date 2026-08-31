@@ -11,6 +11,7 @@ import {
   requestUsbDevice,
   scanBluetoothPrinters,
   printTestReceipt,
+  silentPrintSaleReceipt,
   usbSerialAdapter,
   printViaThermalHtml,
   generateTicketLines,
@@ -26,8 +27,8 @@ import { useIsNativeAndroid } from '../../lib/platform';
 function Toast({ message, type }: { message: string; type: 'success' | 'error' }) {
   return (
     <div className={`fixed bottom-5 right-5 z-50 inline-flex items-center gap-2 px-4 py-2.5 rounded-full border shadow-lg text-xs font-semibold animate-in fade-in slide-in-from-bottom-4 ${type === 'success'
-        ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-        : 'bg-rose-50 border-rose-200 text-rose-900'
+      ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+      : 'bg-rose-50 border-rose-200 text-rose-900'
       }`}>
       {type === 'success' ? (
         <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-600" />
@@ -121,16 +122,16 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
                   setUsbDeviceObj({ port: ports[0], name: data.mac_address || 'Puerto Serie USB' });
                   setUsbName(data.mac_address || 'Puerto Serie USB');
                 }
-              }).catch(() => {});
+              }).catch(() => { });
             }
-          }).catch(() => {});
+          }).catch(() => { });
         } else if (nav?.serial?.getPorts) {
           nav.serial.getPorts().then((ports: any[]) => {
             if (ports && ports.length > 0) {
               setUsbDeviceObj({ port: ports[0], name: data.mac_address || 'Puerto Serie USB' });
               setUsbName(data.mac_address || 'Puerto Serie USB');
             }
-          }).catch(() => {});
+          }).catch(() => { });
         }
       }
       if (data.type === 'bluetooth' && typeof window !== 'undefined' && !isNativeAndroid) {
@@ -141,7 +142,7 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
               const matched = devices.find((d: any) => d.id === data.mac_address || d.name === data.mac_address) || devices[0];
               if (matched) setBtDeviceObj(matched);
             }
-          }).catch(() => {});
+          }).catch(() => { });
         }
       }
     }
@@ -345,52 +346,34 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
     }
     const currentCols = Number(maxChars) || (paperWidth <= 58 ? 32 : 48);
 
-    if (type === 'bluetooth') {
-      if (!macAddress) {
-        showToast('Debes seleccionar un dispositivo Bluetooth primero', 'error');
-        return;
-      }
-      try {
-        showToast('Enviando ticket de prueba por Bluetooth...', 'success');
-        await printTestReceipt(btDeviceObj || { name: macAddress }, paperWidth, currentCols);
-        showToast('¡Impresión enviada con éxito!', 'success');
-      } catch (error: any) {
-        showToast(error.message, 'error');
-      }
+    if (type === 'bluetooth' && !macAddress && !btDeviceObj) {
+      showToast('Debes seleccionar un dispositivo Bluetooth primero', 'error');
+      return;
+    }
+    if (type === 'wifi' && !ipAddress) {
+      showToast('Debes ingresar la dirección IP de la impresora', 'error');
       return;
     }
 
-    if (type === 'usb') {
-      try {
-        showToast('Enviando ticket de prueba por USB...', 'success');
-        if (usbDeviceObj) {
-          await printTestReceipt(usbDeviceObj, paperWidth, currentCols);
-        } else {
-          const lines = generateTicketLines(DEFAULT_TEST_SALE_DATA, currentCols);
-          printViaThermalHtml(lines, paperWidth);
-        }
-        showToast('¡Impresión enviada con éxito!', 'success');
-      } catch (error: any) {
-        showToast(error.message, 'error');
-      }
-      return;
-    }
+    try {
+      showToast(`Enviando ticket de prueba (${type.toUpperCase()})...`, 'success');
 
-    if (type === 'wifi') {
-      try {
-        if (isNativeAndroid) {
-          showToast('Enviando ticket por WiFi (App Nativa)...', 'success');
-          await printTestReceipt({ ipAddress, port }, paperWidth, currentCols);
-          showToast('¡Impresión enviada con éxito!', 'success');
-        } else {
-          showToast('Abriendo ventana de impresión térmica...', 'success');
-          const lines = generateTicketLines(DEFAULT_TEST_SALE_DATA, currentCols);
-          printViaThermalHtml(lines, paperWidth);
-        }
-      } catch (error: any) {
-        showToast(error.message, 'error');
-      }
-      return;
+      const currentPrinterConfig = {
+        name: name || macAddress || 'Impresora de Prueba',
+        model,
+        type,
+        store_id: storeId,
+        mac_address: macAddress,
+        ip_address: ipAddress,
+        port: Number(port) || 9100,
+        paper_width: Number(paperWidth) || 80,
+        max_chars: currentCols,
+      };
+
+      await silentPrintSaleReceipt(DEFAULT_TEST_SALE_DATA, false, currentPrinterConfig);
+      showToast('¡Impresión de prueba enviada con éxito!', 'success');
+    } catch (error: any) {
+      showToast(error?.message || 'Error al imprimir prueba', 'error');
     }
   };
 
@@ -576,8 +559,8 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
                   onClick={handleBuscar}
                   disabled={!canManage || isSearching}
                   className={`px-4 py-2 font-bold text-sm rounded-lg border transition-colors flex items-center shadow-sm shrink-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${isNativeAndroid
-                      ? 'bg-sky-500 hover:bg-sky-600 text-white border-sky-600 active:bg-sky-700'
-                      : 'bg-secondary text-secondary-foreground border-border hover:bg-secondary/80 active:bg-secondary/60'
+                    ? 'bg-sky-500 hover:bg-sky-600 text-white border-sky-600 active:bg-sky-700'
+                    : 'bg-secondary text-secondary-foreground border-border hover:bg-secondary/80 active:bg-secondary/60'
                     }`}
                 >
                   <Search className="w-4 h-4 mr-2" />
@@ -937,8 +920,8 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
                           showToast(`Impresora vinculada: ${dev.name} (${chosenAddress})`, 'success');
                         }}
                         className={`w-full flex items-center justify-between p-3.5 rounded-2xl border text-left transition-all cursor-pointer ${isSelected
-                            ? 'bg-indigo-500/10 border-indigo-500/40 text-foreground ring-2 ring-indigo-500/20'
-                            : 'bg-secondary/30 border-border hover:bg-secondary/60 text-foreground'
+                          ? 'bg-indigo-500/10 border-indigo-500/40 text-foreground ring-2 ring-indigo-500/20'
+                          : 'bg-secondary/30 border-border hover:bg-secondary/60 text-foreground'
                           }`}
                       >
                         <div className="flex items-center gap-3 min-w-0">

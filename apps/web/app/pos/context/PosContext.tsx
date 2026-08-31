@@ -149,7 +149,6 @@ interface PosContextProps {
   deleteDraftTicket: () => void;
   handleReprint: (ticket: HistoryTicket) => Promise<void>;
   historyTickets: HistoryTicket[];
-  pendingSales: any[];
   fetchHistory: () => Promise<void>;
   
   // Utils
@@ -182,10 +181,16 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
   }, []);
   const [cart, setCart] = useState<CartItem[]>([]);
   
+  // Purgar residuos offline locales al montar el POS
+  useEffect(() => {
+    if (typeof window !== 'undefined' && db?.pending_sales) {
+      db.pending_sales.clear().catch(() => {});
+    }
+  }, []);
+
   const localServices = useLiveQuery(() => db.services.toArray(), [activeStoreId]) || [];
   const localFamilies = useLiveQuery(() => db.families.toArray(), [activeStoreId]) || [];
   const localProductsRaw = useLiveQuery(() => db.products.toArray(), [activeStoreId]) || [];
-  const pendingSales = useLiveQuery(() => db.pending_sales.toArray(), []) || [];
 
   const sortByNumericPrefix = (a: any, b: any) => {
     const valA = `${a.code || ""} ${a.name || ""}`.trim();
@@ -593,10 +598,16 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
 
   const handleEmitTicket = async () => {
     if (!isCajaOpen) {
-      alert("Caja Cerrada. Debe realizar la apertura de caja para emitir tickets.");
+      showToast("Caja Cerrada. Debe realizar la apertura de caja para emitir tickets.", "warning");
       return;
     }
     if (cart.length === 0) return;
+
+    // Validación de Red: Exigir conexión a internet activa antes de proceder
+    if (typeof window !== 'undefined' && !navigator.onLine) {
+      showToast("Sin conexión a internet. Se requiere conexión activa para registrar la proforma en la nube.", "error");
+      return;
+    }
 
     // Si la impresora aún no tiene permiso en este navegador, abrimos el selector directamente con el clic del usuario
     if (activePrinter && isPrinterAuthorized === false) {
@@ -624,65 +635,81 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
         return `${i.code} ${i.name} — ${i.quantity}m × S/ ${i.editedPrice.toFixed(2)}`;
       };
 
-      let localId: number | undefined;
+      // 1. Obtener cliente y vendedor
+      let customerId = "00000000-0000-0000-0000-000000000000";
       try {
-        localId = await db.pending_sales.add({
-          offline_uuid: crypto.randomUUID(), store_id: activeStoreId || '', seller_id: null, cashier_id: null, customer_id: null, total: totalSnapshot, status: 'PENDING', created_at: new Date().toISOString(), items: cartSnapshot, sync_status: 'PENDING', retry_count: 0
-        });
-      } catch (e) { }
+        let custQuery = supabase.from("customers").select("id").eq("business_name", "CLIENTE VARIOS").limit(1);
+        if (activeStoreId) custQuery = custQuery.eq("store_id", activeStoreId);
+        const { data: customerData } = await custQuery;
+        if (customerData && customerData.length > 0) customerId = customerData[0]!.id;
+      } catch (_) { }
 
-      // Notificar de inmediato la emisión e inicio de impresión
-      showToast(`Proforma ${docNum} registrada. Imprimiendo 2 copias...`, 'success');
+      let sellerId: string | null = null;
+      try {
+        const { data: profData } = await supabase.from('profiles').select('id').eq('username', sellerName).maybeSingle();
+        if (profData?.id) sellerId = profData.id;
+      } catch (_) { }
 
+      const rpcPayload = {
+        customer_id: customerId,
+        record_date: todayStr,
+        detail: cartSnapshot.map(formatItemDetail).join('\n'),
+        items: cartSnapshot,
+        total: totalSnapshot,
+        seller_id: sellerId,
+        store_id: activeStoreId
+      };
+
+      // 2. REGISTRAR DIRECTAMENTE EN SUPABASE (LA NUBE)
+      const { data: rpcResult, error: saleError } = await supabase.rpc('emit_pos_ticket', { p_payload: rpcPayload });
+
+      if (saleError || !rpcResult?.success) {
+        console.error("Error al emitir proforma en Supabase:", saleError);
+        const errMsg = saleError?.message || "Error de red: No se pudo registrar la proforma en la nube. Verifica tu conexión.";
+        showToast(errMsg, "error");
+        setIsEmitting(false);
+        return; // ABORTAR: El carrito queda intacto, no se imprime y no avanza el número
+      }
+
+      // 3. Proforma registrada exitosamente en la nube
+      const generatedDocNum = rpcResult?.proforma_number || rpcResult?.invoice_number || docNum;
+      showToast(`Proforma ${generatedDocNum} registrada en la nube. Imprimiendo 2 copias...`, 'success');
+
+      // 4. Imprimir 2 copias
       setTimeout(async () => {
-        const saleDataForPrint = { proforma_number: docNum, customer_name: sellerName, items: cartSnapshot, total: totalSnapshot };
+        const saleDataForPrint = {
+          proforma_number: generatedDocNum,
+          customer_name: sellerName,
+          items: cartSnapshot,
+          total: totalSnapshot
+        };
         try {
           await silentPrintSaleReceipt(saleDataForPrint, true, activeStoreId || undefined);
-          showToast(`Impresión finalizada con éxito (${docNum} — 2 copias).`, 'success');
+          showToast(`Impresión finalizada (${generatedDocNum} — 2 copias).`, 'success');
         } catch (err: any) {
           const errMsg = err?.message || '';
           const devName = activePrinter?.mac_address || activePrinter?.name || 'Impresora';
           if (errMsg.includes("NO_PRINTER_CONFIGURED")) {
             showToast("No hay ninguna impresora configurada para esta sucursal.", "warning");
           } else if (errMsg.includes("PRINTER_NOT_AUTHORIZED_IN_BROWSER") || isPrinterAuthorized === false) {
-            showToast(`Impresora no vinculada en este navegador. Haz clic en el botón amarillo 'Conectar ${devName}' arriba.`, "warning");
+            showToast(`Impresora no vinculada en este navegador. Haz clic en 'Conectar ${devName}' arriba.`, "warning");
           } else {
             showToast(`Error de comunicación con "${devName}". Verifique que esté encendida y cercana.`, "error");
           }
         }
       }, 50);
 
+      // 5. Limpiar carrito y actualizar estado
       setCart([]);
-      setTicketNumber(prev => prev + 1);
+      await fetchTodayTicketNumber();
+      await fetchHistory();
       setRightPanelMode('history');
       setMobileTab('cart');
 
-      (async () => {
-        try {
-          let customerId = "00000000-0000-0000-0000-000000000000";
-          try {
-            let custQuery = supabase.from("customers").select("id").eq("business_name", "CLIENTE VARIOS").limit(1);
-            if (activeStoreId) custQuery = custQuery.eq("store_id", activeStoreId);
-            const { data: customerData } = await custQuery;
-            if (customerData && customerData.length > 0) customerId = customerData[0]!.id;
-          } catch (_) { }
-
-          let sellerId: string | null = null;
-          try {
-            const { data: profData } = await supabase.from('profiles').select('id').eq('username', sellerName).maybeSingle();
-            if (profData?.id) sellerId = profData.id;
-          } catch (_) { }
-
-          const rpcPayload = { customer_id: customerId, record_date: todayStr, detail: cartSnapshot.map(formatItemDetail).join('\n'), items: cartSnapshot, total: totalSnapshot, seller_id: sellerId, store_id: activeStoreId };
-          const { data: rpcResult, error: saleError } = await supabase.rpc('emit_pos_ticket', { p_payload: rpcPayload });
-          if (!saleError && rpcResult?.success) {
-            if (localId) await db.pending_sales.update(localId, { sync_status: 'SYNCED', id: rpcResult.id || undefined, synced_at: new Date().toISOString() });
-            fetchTodayTicketNumber();
-            fetchHistory();
-          }
-        } catch (e) { }
-      })();
-    } catch (err) { } finally {
+    } catch (err: any) {
+      console.error("Error de conexión emitiendo ticket:", err);
+      showToast("Error de conexión: No se pudo comunicar con el servidor. La proforma no fue emitida.", "error");
+    } finally {
       setIsEmitting(false);
     }
   };
@@ -799,7 +826,7 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
       isCajaOpen, setIsCajaOpen, handleOpenCaja, handleCloseCajaAttempt, confirmCloseCaja, closingCajaLoading, cajaSummaryOpen, setCajaSummaryOpen, cajaSummary,
       isClearCartModalOpen, setIsClearCartModalOpen, exitGuardOpen, setExitGuardOpen, previewTicketData, setPreviewTicketData, 
       activePrinter, isPrinterAuthorized, isPairingPrinter, handlePairPrinter, refreshPrinterAuth,
-      ticketNumber, isEmitting, handleEmitTicket, deleteDraftTicket, handleReprint, historyTickets, pendingSales, fetchHistory,
+      ticketNumber, isEmitting, handleEmitTicket, deleteDraftTicket, handleReprint, historyTickets, fetchHistory,
       handleBackClick, handleExitWithoutSaving, toast, showToast
     }}>
       {children}
