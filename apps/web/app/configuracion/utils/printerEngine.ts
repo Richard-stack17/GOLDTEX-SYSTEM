@@ -1264,7 +1264,11 @@ export const scanBluetoothPrinters = async (): Promise<Array<{ name: string; add
 export const printTestReceipt = (device: any, paperWidth: number, maxChars: number = 48) => getBluetoothAdapter().printTestReceipt(device, paperWidth, maxChars);
 export const printSaleReceipt = (device: any, saleData: any, paperWidth: number, maxChars: number = 48) => getBluetoothAdapter().printSaleReceipt(device, saleData, paperWidth, maxChars);
 
-export const silentPrintSaleReceipt = async (saleData: any, doubleCopy: boolean = false, storeIdOrPrinterConfig?: string | any): Promise<void> => {
+export const printTicketLinesDirect = async (
+  lines: TicketLine[],
+  storeIdOrPrinterConfig?: string | any,
+  doubleCopy: boolean = false
+): Promise<void> => {
   let activePrinter: any = null;
   if (typeof storeIdOrPrinterConfig === 'object' && storeIdOrPrinterConfig !== null) {
     activePrinter = storeIdOrPrinterConfig;
@@ -1273,14 +1277,15 @@ export const silentPrintSaleReceipt = async (saleData: any, doubleCopy: boolean 
   }
   if (!activePrinter) throw new Error('NO_PRINTER_CONFIGURED');
 
+  const maxCharsConfig = activePrinter.max_chars || (activePrinter.paper_width <= 58 ? 32 : 48);
   const type = activePrinter.type || activePrinter.connection_type || 'bluetooth';
 
   if (type === 'wifi') {
     if (isNativeAndroidApp()) {
-      return androidWifiAdapter.silentPrintSaleReceipt(saleData, doubleCopy, activePrinter);
+      const uint8 = buildEscPosBytes(lines, maxCharsConfig);
+      await (androidWifiAdapter as any).writeBytes(activePrinter.ip_address, activePrinter.port || 9100, uint8);
+      return;
     } else {
-      const maxCharsConfig = activePrinter.max_chars || (activePrinter.paper_width <= 58 ? 32 : 48);
-      const lines = generateTicketLines(saleData, maxCharsConfig);
       printViaThermalHtml(lines, activePrinter.paper_width || 80);
       return;
     }
@@ -1320,13 +1325,13 @@ export const silentPrintSaleReceipt = async (saleData: any, doubleCopy: boolean 
       } catch (_) { }
     }
 
-    if (!deviceToPrint) {
-      throw new Error('No se encontraron impresoras USB con permisos. Ve a Configuración y vuelve a darle al botón BUSCAR en tu impresora USB.');
-    }
-
-    const maxCharsConfig = activePrinter.max_chars || (activePrinter.paper_width <= 58 ? 32 : 48);
-    const lines = generateTicketLines(saleData, maxCharsConfig);
     const uint8 = buildEscPosBytes(lines, maxCharsConfig);
+
+    if (!deviceToPrint) {
+      console.warn('No se detectó dispositivo USB directo con WebUSB, utilizando impresión térmica HTML del sistema.');
+      printViaThermalHtml(lines, activePrinter.paper_width || 80);
+      return;
+    }
 
     try {
       await usbSerialAdapter.printEscPos(deviceToPrint, uint8);
@@ -1343,106 +1348,101 @@ export const silentPrintSaleReceipt = async (saleData: any, doubleCopy: boolean 
     }
   }
 
-  // Por defecto (bluetooth o fallback general)
-  if (isNativeAndroidApp()) {
-    return androidBluetoothAdapter.silentPrintSaleReceipt(saleData, doubleCopy, activePrinter);
-  }
-  return webBluetoothAdapter.silentPrintSaleReceipt(saleData, doubleCopy, activePrinter);
-};
-
-export const silentPrintClosureReport = async (cajaSummary: any, storeId?: string): Promise<void> => {
-  const activePrinter = await resolveActivePrinter(storeId);
-  if (!activePrinter) throw new Error('NO_PRINTER_CONFIGURED');
-
-  const type = activePrinter.type || activePrinter.connection_type || 'bluetooth';
-
-  if (type === 'wifi') {
-    if (isNativeAndroidApp()) {
-      // Reutiliza la misma lógica del adaptador wifi pero pasamos los bytes manuales
-      const maxCharsConfig = activePrinter.max_chars || (activePrinter.paper_width <= 58 ? 32 : 48);
-      const lines = generateClosureTicketLines(cajaSummary, maxCharsConfig);
-      const uint8 = buildEscPosBytes(lines, maxCharsConfig);
-      await (androidWifiAdapter as any).writeBytes(activePrinter.ip_address, activePrinter.port || 9100, uint8);
-      return;
-    } else {
-      const maxCharsConfig = activePrinter.max_chars || (activePrinter.paper_width <= 58 ? 32 : 48);
-      const lines = generateClosureTicketLines(cajaSummary, maxCharsConfig);
-      printViaThermalHtml(lines, activePrinter.paper_width || 80);
-      return;
-    }
-  }
-
-  if (type === 'usb') {
-    if (isNativeAndroidApp()) {
-      throw new Error('La impresora seleccionada está conectada por cable USB a la PC. Para imprimir desde este teléfono, utiliza una impresora Bluetooth o WiFi.');
-    }
-
-    const nav = typeof window !== 'undefined' ? (navigator as any) : null;
-    let deviceToPrint = null;
-    if (nav?.usb && typeof nav.usb.getDevices === 'function') {
-      try {
-        const devices = await nav.usb.getDevices();
-        if (devices && devices.length > 0) deviceToPrint = { device: devices.find((d: any) => d.productName === activePrinter.mac_address) || devices[0] };
-      } catch (_) { }
-    }
-    if (!deviceToPrint && nav?.serial && typeof nav.serial.getPorts === 'function') {
-      try {
-        const ports = await nav.serial.getPorts();
-        if (ports && ports.length > 0) deviceToPrint = { port: ports[0] };
-      } catch (_) { }
-    }
-    if (!deviceToPrint) throw new Error('No se encontraron impresoras USB con permisos. Ve a Configuración y vuelve a darle al botón BUSCAR en tu impresora USB.');
-
-    const maxCharsConfig = activePrinter.max_chars || (activePrinter.paper_width <= 58 ? 32 : 48);
-    const lines = generateClosureTicketLines(cajaSummary, maxCharsConfig);
-    const uint8 = buildEscPosBytes(lines, maxCharsConfig);
-    await usbSerialAdapter.printEscPos(deviceToPrint, uint8);
-    return;
-  }
-
-  // Bluetooth fallback para reporte
-  const maxCharsConfig = activePrinter.max_chars || (activePrinter.paper_width <= 58 ? 32 : 48);
-  const lines = generateClosureTicketLines(cajaSummary, maxCharsConfig);
+  // Bluetooth (Android o Web)
   const uint8 = buildEscPosBytes(lines, maxCharsConfig);
-
   if (isNativeAndroidApp()) {
     const address = activePrinter.mac_address || activePrinter.address || activePrinter.name;
     if (!address) throw new Error('Dispositivo Bluetooth sin dirección MAC.');
-    return androidBluetoothAdapter.writeRawBytes(address, uint8);
+    await androidBluetoothAdapter.writeRawBytes(address, uint8);
+    if (doubleCopy) {
+      await new Promise(r => setTimeout(r, 350));
+      await androidBluetoothAdapter.writeRawBytes(address, uint8);
+    }
+    return;
   } else {
     // Web Bluetooth API
-    const nav = typeof window !== 'undefined' ? (navigator as any) : null;
-    if (!nav?.bluetooth) throw new Error("PRINTER_CONNECTION_ERROR");
-    let deviceToPrint: any = null;
     try {
-      if (typeof nav.bluetooth.getDevices === 'function') {
-        const devices = await nav.bluetooth.getDevices();
-        if (devices && devices.length > 0) deviceToPrint = devices.find((d: any) => d.name === activePrinter.name) || devices[0];
+      const nav = typeof window !== 'undefined' ? (navigator as any) : null;
+      if (!nav?.bluetooth) {
+        printViaThermalHtml(lines, activePrinter.paper_width || 80);
+        return;
       }
-    } catch (_) { }
-    if (!deviceToPrint) {
-      deviceToPrint = await nav.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: (webBluetoothAdapter as any).knownServices });
-    }
-    if (!deviceToPrint) throw new Error("PRINTER_CONNECTION_ERROR");
-
-    if (!deviceToPrint.gatt.connected) await deviceToPrint.gatt.connect();
-    let writeChar = null;
-    for (const serviceUuid of (webBluetoothAdapter as any).knownServices) {
+      let deviceToPrint: any = null;
       try {
-        const service = await deviceToPrint.gatt.getPrimaryService(serviceUuid);
-        const chars = await service.getCharacteristics();
-        writeChar = chars.find((c: any) => c.properties.write || c.properties.writeWithoutResponse);
-        if (writeChar) break;
+        if (typeof nav.bluetooth.getDevices === 'function') {
+          const devices = await nav.bluetooth.getDevices();
+          if (devices && devices.length > 0) deviceToPrint = devices.find((d: any) => d.name === activePrinter.name) || devices[0];
+        }
       } catch (_) { }
-    }
-    if (!writeChar) throw new Error("No se pudo obtener la interfaz de escritura.");
+      if (!deviceToPrint) {
+        deviceToPrint = await nav.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: (webBluetoothAdapter as any).knownServices });
+      }
+      if (!deviceToPrint) {
+        printViaThermalHtml(lines, activePrinter.paper_width || 80);
+        return;
+      }
 
-    const CHUNK_SIZE = 200;
-    for (let i = 0; i < uint8.length; i += CHUNK_SIZE) {
-      await writeChar.writeValue(uint8.slice(i, i + CHUNK_SIZE));
-      await new Promise(resolve => setTimeout(resolve, 50));
+      if (!deviceToPrint.gatt.connected) await deviceToPrint.gatt.connect();
+      let writeChar = null;
+      for (const serviceUuid of (webBluetoothAdapter as any).knownServices) {
+        try {
+          const service = await deviceToPrint.gatt.getPrimaryService(serviceUuid);
+          const chars = await service.getCharacteristics();
+          writeChar = chars.find((c: any) => c.properties.write || c.properties.writeWithoutResponse);
+          if (writeChar) break;
+        } catch (_) { }
+      }
+      if (!writeChar) {
+        printViaThermalHtml(lines, activePrinter.paper_width || 80);
+        return;
+      }
+
+      const CHUNK_SIZE = 200;
+      for (let i = 0; i < uint8.length; i += CHUNK_SIZE) {
+        await writeChar.writeValue(uint8.slice(i, i + CHUNK_SIZE));
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+
+      if (doubleCopy) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        for (let i = 0; i < uint8.length; i += CHUNK_SIZE) {
+          await writeChar.writeValue(uint8.slice(i, i + CHUNK_SIZE));
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+      }
+    } catch (e) {
+      console.warn('Fallo impresión Bluetooth web, recurriendo a impresión térmica del sistema:', e);
+      printViaThermalHtml(lines, activePrinter.paper_width || 80);
     }
   }
+};
+
+export const silentPrintSaleReceipt = async (saleData: any, doubleCopy: boolean = false, storeIdOrPrinterConfig?: string | any): Promise<void> => {
+  let activePrinter: any = null;
+  if (typeof storeIdOrPrinterConfig === 'object' && storeIdOrPrinterConfig !== null) {
+    activePrinter = storeIdOrPrinterConfig;
+  } else {
+    activePrinter = await resolveActivePrinter(storeIdOrPrinterConfig);
+  }
+  if (!activePrinter) throw new Error('NO_PRINTER_CONFIGURED');
+
+  const maxCharsConfig = activePrinter.max_chars || (activePrinter.paper_width <= 58 ? 32 : 48);
+  const lines = generateTicketLines(saleData, maxCharsConfig);
+  return printTicketLinesDirect(lines, activePrinter, doubleCopy);
+};
+
+export const silentPrintClosureReport = async (cajaSummary: any, storeIdOrPrinterConfig?: string | any): Promise<void> => {
+  let activePrinter: any = null;
+  if (typeof storeIdOrPrinterConfig === 'object' && storeIdOrPrinterConfig !== null) {
+    activePrinter = storeIdOrPrinterConfig;
+  } else {
+    activePrinter = await resolveActivePrinter(storeIdOrPrinterConfig);
+  }
+  if (!activePrinter) throw new Error('NO_PRINTER_CONFIGURED');
+
+  const maxCharsConfig = activePrinter.max_chars || (activePrinter.paper_width <= 58 ? 32 : 48);
+  const lines = generateClosureTicketLines(cajaSummary, maxCharsConfig);
+  return printTicketLinesDirect(lines, activePrinter, false);
 };
 
 // Alias de compatibilidad — mantiene la referencia legacy para imports existentes

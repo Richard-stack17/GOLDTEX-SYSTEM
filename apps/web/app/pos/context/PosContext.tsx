@@ -414,7 +414,7 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
       });
       setCajaSummary({ efectivo: efe, bcp: bcp, bbva: bbva, izipay: izi, total: efe + bcp + bbva + izi });
     } catch (e: any) {
-      alert("Error al obtener resumen: " + e.message);
+      showToast("Error al obtener resumen de caja: " + (e?.message || ""), "error");
       setCajaSummaryOpen(false);
     } finally {
       setClosingCajaLoading(false);
