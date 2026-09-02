@@ -293,11 +293,11 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
     if (product.is_service) {
       setNumpadField("price");
       setNumpadQty("1");
-      setNumpadPrice(existing?.editedPrice.toString() ?? "");
+      setNumpadPrice(existing ? existing.editedPrice.toString() : "0");
     } else {
       setNumpadField("qty");
-      setNumpadQty(existing?.quantity.toString() ?? "");
-      setNumpadPrice(existing?.editedPrice.toString() ?? product.price.toString());
+      setNumpadQty(existing ? existing.quantity.toString() : "");
+      setNumpadPrice(existing ? existing.editedPrice.toString() : "0");
     }
   };
 
@@ -311,12 +311,14 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
       if (key === "DEL") setNumpadQty((p) => p.slice(0, -1));
       else if (key === "." && numpadQty.includes(".")) return;
       else if (numpadQty === "" && key === "0") setNumpadQty("0");
+      else if (numpadQty === "0" && key === ".") setNumpadQty("0.");
       else if (numpadQty === "0" && key !== "0") setNumpadQty(key);
       else if (numpadQty.length < 4) setNumpadQty((p) => p + key);
     } else {
       if (key === "DEL") setNumpadPrice((p) => p.slice(0, -1));
       else if (key === "." && numpadPrice.includes(".")) return;
       else if (numpadPrice === "" && key === "0") setNumpadPrice("0");
+      else if (numpadPrice === "0" && key === ".") setNumpadPrice("0.");
       else if (numpadPrice === "0" && key !== "0") setNumpadPrice(key);
       else if (numpadPrice.length < 7) setNumpadPrice((p) => p + key);
     }
