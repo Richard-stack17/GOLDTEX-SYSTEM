@@ -93,42 +93,60 @@ export default function PosHistory() {
                   </button>
                   <button
                     onClick={() => {
-                      const lines = typeof ticket.detail === 'string' ? ticket.detail.split('\n').filter(l => l.trim()) : [];
-                      const reconstructedItems = lines.map((l: string, idx: number) => {
-                        let code = "";
-                        let name = l;
-                        let quantity = 1;
-                        let editedPrice = 0;
-                        let basePrice = 0;
-
-                        try {
-                          const sepIdx = l.indexOf(' — ');
-                          if (sepIdx !== -1) {
-                            const firstPart = l.substring(0, sepIdx);
-                            const secondPart = l.substring(sepIdx + 3);
-
-                            if (firstPart.includes(': ')) {
-                              const colonIdx = firstPart.indexOf(': ');
-                              code = firstPart.substring(0, colonIdx);
-                              name = firstPart.substring(colonIdx + 2);
-                              const priceMatch = secondPart.match(/S\/\s*([\d.]+)/);
-                              editedPrice = priceMatch ? (parseFloat(priceMatch[1] ?? '0') || 0) : 0;
-                            } else {
-                              const spaceIdx = firstPart.indexOf(' ');
-                              code = spaceIdx > -1 ? firstPart.substring(0, spaceIdx) : '';
-                              name = spaceIdx > -1 ? firstPart.substring(spaceIdx + 1) : firstPart;
-                              const matchedProd = products.find(p => p.code === code);
-                              if (matchedProd) basePrice = matchedProd.price;
-                              const mxIdx = secondPart.indexOf('m × S/ ');
-                              if (mxIdx !== -1) {
-                                quantity = parseFloat(secondPart.substring(0, mxIdx)) || 0;
-                                editedPrice = parseFloat(secondPart.substring(mxIdx + 7)) || 0;
+                      let itemsToPrint: any[] = [];
+                      if (ticket.items && Array.isArray(ticket.items) && ticket.items.length > 0) {
+                        itemsToPrint = ticket.items;
+                      } else {
+                        const reconstructedItems: any[] = [];
+                        const lines = typeof ticket.detail === 'string' ? ticket.detail.split('\n') : [];
+                        for (const rawLine of lines) {
+                          if (!rawLine.trim()) continue;
+                          if (rawLine.startsWith('  ') || rawLine.startsWith('\t')) {
+                            if (reconstructedItems.length > 0) {
+                              const lastItem = reconstructedItems[reconstructedItems.length - 1];
+                              const match = rawLine.trim().match(/^(\d+)\s*x\s*([\d.]+)/i);
+                              if (match) {
+                                if (!lastItem.cuts) lastItem.cuts = [];
+                                lastItem.cuts.push({
+                                  id: crypto.randomUUID(),
+                                  count: parseInt(match[1] ?? '1', 10) || 1,
+                                  meters: parseFloat(match[2] ?? '0') || 0
+                                });
                               }
                             }
+                            continue;
                           }
-                        } catch (e) { }
-                        return { code, name, price: basePrice, editedPrice, quantity };
-                      });
+
+                          let code = "", name = rawLine, quantity = 1, editedPrice = 0, basePrice = 0;
+                          try {
+                            const sepIdx = rawLine.indexOf(' — ');
+                            if (sepIdx !== -1) {
+                              const firstPart = rawLine.substring(0, sepIdx);
+                              const secondPart = rawLine.substring(sepIdx + 3);
+                              if (firstPart.includes(': ')) {
+                                const colonIdx = firstPart.indexOf(': ');
+                                code = firstPart.substring(0, colonIdx);
+                                name = firstPart.substring(colonIdx + 2);
+                                const priceMatch = secondPart.match(/S\/\s*([\d.]+)/);
+                                editedPrice = priceMatch ? (parseFloat(priceMatch[1] ?? '0') || 0) : 0;
+                              } else {
+                                const spaceIdx = firstPart.indexOf(' ');
+                                code = spaceIdx > -1 ? firstPart.substring(0, spaceIdx) : '';
+                                name = spaceIdx > -1 ? firstPart.substring(spaceIdx + 1) : firstPart;
+                                const matchedProd = products.find(p => p.code === code);
+                                if (matchedProd) basePrice = matchedProd.price;
+                                const mxIdx = secondPart.indexOf('m × S/ ');
+                                if (mxIdx !== -1) {
+                                  quantity = parseFloat(secondPart.substring(0, mxIdx)) || 0;
+                                  editedPrice = parseFloat(secondPart.substring(mxIdx + 7)) || 0;
+                                }
+                              }
+                            }
+                          } catch (e) { }
+                          reconstructedItems.push({ code, name, price: basePrice, editedPrice, quantity });
+                        }
+                        itemsToPrint = reconstructedItems;
+                      }
 
                       const atendidoName = permissions?.view_cashier_name ? ((ticket as any).seller?.username || 'ADMIN') : null;
 
@@ -136,7 +154,7 @@ export default function PosHistory() {
                         proforma_number: ticket.proforma_number || ticket.invoice_number || '',
                         cajero: atendidoName,
                         customer_name: "Cliente General",
-                        items: reconstructedItems,
+                        items: itemsToPrint,
                         total: ticket.total
                       };
                       setPreviewTicketData(saleDataForPrint);

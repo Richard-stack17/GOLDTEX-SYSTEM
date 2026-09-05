@@ -29,7 +29,21 @@ export type Family = {
   color?: string;
 };
 
-export type CartItem = Product & { cartItemId: string; quantity: number; editedPrice: number; is_service?: boolean };
+export type FabricCut = {
+  id: string;
+  count: number;
+  meters: number;
+  countStr?: string;
+  metersStr?: string;
+};
+
+export type CartItem = Product & {
+  cartItemId: string;
+  quantity: number;
+  editedPrice: number;
+  is_service?: boolean;
+  cuts?: { id: string; count: number; meters: number }[];
+};
 
 export type SaleStatus = "PENDING" | "COMPLETED" | "CANCELLED";
 export type VoucherType = "TICKET" | "BOLETA" | "FACTURA";
@@ -41,6 +55,7 @@ export type HistoryTicket = {
   internal_ticket_number: number | null;
   total: number;
   detail: string;
+  items?: any[];
   status: SaleStatus;
   created_at: string;
   voucher_type?: VoucherType | null;
@@ -56,21 +71,21 @@ interface PosContextProps {
   setRightPanelMode: (mode: "cart" | "history") => void;
   viewMode: 'FAMILIES' | 'SERVICES';
   setViewMode: (mode: 'FAMILIES' | 'SERVICES') => void;
-  
+
   // Data
   families: Family[];
   products: Product[];
   localServices: any[];
   quickAccessServices: any[];
   otherServices: any[];
-  
+
   // Cart
   cart: CartItem[];
   setCart: React.Dispatch<React.SetStateAction<CartItem[]>>;
   addToCart: (product: Product, quantity: number, price: number) => void;
   removeFromCart: (id: string, e: React.MouseEvent) => void;
   total: number;
-  
+
   // Search
   search: string;
   setSearch: React.Dispatch<React.SetStateAction<string>>;
@@ -79,7 +94,7 @@ interface PosContextProps {
   searchPage: number;
   setSearchPage: React.Dispatch<React.SetStateAction<number>>;
   handleQwertyKey: (key: string) => void;
-  
+
   // Pagination
   familyPage: number;
   setFamilyPage: React.Dispatch<React.SetStateAction<number>>;
@@ -91,22 +106,36 @@ interface PosContextProps {
   combinedSearchResults: any[];
   totalSearchPages: number;
   matchedProducts: Product[];
-  
+
   // Selection
   activeFamily: Family | null;
   setActiveFamily: React.Dispatch<React.SetStateAction<Family | null>>;
-  
+
   // Numpad Modal
   numpadProduct: Product | null;
   setNumpadProduct: React.Dispatch<React.SetStateAction<Product | null>>;
   numpadCartItemId: string | null;
   setNumpadCartItemId: React.Dispatch<React.SetStateAction<string | null>>;
-  numpadField: "qty" | "price";
-  setNumpadField: React.Dispatch<React.SetStateAction<"qty" | "price">>;
+  numpadField: "qty" | "price" | "cut";
+  setNumpadField: React.Dispatch<React.SetStateAction<"qty" | "price" | "cut">>;
   numpadQty: string;
   setNumpadQty: React.Dispatch<React.SetStateAction<string>>;
   numpadPrice: string;
   setNumpadPrice: React.Dispatch<React.SetStateAction<string>>;
+  numpadMode: "direct" | "cuts";
+  setNumpadMode: React.Dispatch<React.SetStateAction<"direct" | "cuts">>;
+  numpadCuts: FabricCut[];
+  setNumpadCuts: React.Dispatch<React.SetStateAction<FabricCut[]>>;
+  activeCutId: string | null;
+  setActiveCutId: React.Dispatch<React.SetStateAction<string | null>>;
+  activeCutField: "count" | "meters";
+  setActiveCutField: React.Dispatch<React.SetStateAction<"count" | "meters">>;
+  addNumpadCut: () => void;
+  removeNumpadCut: (id: string) => void;
+  updateNumpadCutField: (id: string, field: "count" | "meters", strVal: string) => void;
+  selectCutField: (id: string, field: "count" | "meters") => void;
+  isFieldFresh: boolean;
+  setIsFieldFresh: React.Dispatch<React.SetStateAction<boolean>>;
   openNumpad: (product: Product, existing?: CartItem) => void;
   closeNumpad: () => void;
   handleNumpadKey: (key: string) => void;
@@ -114,7 +143,7 @@ interface PosContextProps {
   previewQty: number;
   previewPrice: number;
   previewSubtotal: number;
-  
+
   // Caja
   isCajaOpen: boolean;
   setIsCajaOpen: React.Dispatch<React.SetStateAction<boolean>>;
@@ -125,7 +154,7 @@ interface PosContextProps {
   cajaSummaryOpen: boolean;
   setCajaSummaryOpen: React.Dispatch<React.SetStateAction<boolean>>;
   cajaSummary: any;
-  
+
   // Modals & Misc
   isClearCartModalOpen: boolean;
   setIsClearCartModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
@@ -138,11 +167,11 @@ interface PosContextProps {
   isPairingPrinter: boolean;
   handlePairPrinter: () => Promise<void>;
   refreshPrinterAuth: (printerObj?: any) => Promise<void>;
-  
+
   // Toast
   toast: { message: string; type: 'success' | 'error' | 'warning' } | null;
   showToast: (message: string, type?: 'success' | 'error' | 'warning') => void;
-  
+
   // Ticket Emission
   ticketNumber: number;
   isEmitting: boolean;
@@ -151,7 +180,7 @@ interface PosContextProps {
   handleReprint: (ticket: HistoryTicket) => Promise<void>;
   historyTickets: HistoryTicket[];
   fetchHistory: () => Promise<void>;
-  
+
   // Utils
   handleBackClick: () => void;
   handleExitWithoutSaving: () => void;
@@ -173,7 +202,7 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
   const [mobileTab, setMobileTab] = useState<"catalog" | "cart">("catalog");
   const [rightPanelMode, setRightPanelMode] = useState<"cart" | "history">("cart");
   const [viewMode, setViewMode] = useState<'FAMILIES' | 'SERVICES'>('FAMILIES');
-  
+
   // Toast Notification State
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'warning' = 'error') => {
@@ -181,11 +210,11 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
     setTimeout(() => setToast(null), 4500);
   }, []);
   const [cart, setCart] = useState<CartItem[]>([]);
-  
+
   // Purgar residuos offline locales al montar el POS
   useEffect(() => {
     if (typeof window !== 'undefined' && db?.pending_sales) {
-      db.pending_sales.clear().catch(() => {});
+      db.pending_sales.clear().catch(() => { });
     }
   }, []);
 
@@ -262,7 +291,7 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
       ...matchedFamilies.map((f) => ({ type: "family" as const, data: f })),
       ...matchedProducts.map((p) => ({ type: "product" as const, data: p })),
     ] : [];
-    
+
   const totalSearchPages = Math.ceil(combinedSearchResults.length / searchPageSize);
   const paginatedSearchResults = search ? combinedSearchResults.slice((searchPage - 1) * searchPageSize, searchPage * searchPageSize) : [];
   const searchFamiliesInPage = paginatedSearchResults.filter((i) => i.type === "family").map((i) => i.data as Family);
@@ -283,66 +312,274 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
 
   const [numpadProduct, setNumpadProduct] = useState<Product | null>(null);
   const [numpadCartItemId, setNumpadCartItemId] = useState<string | null>(null);
-  const [numpadField, setNumpadField] = useState<"qty" | "price">("qty");
+  const [numpadField, setNumpadField] = useState<"qty" | "price" | "cut">("qty");
   const [numpadQty, setNumpadQty] = useState<string>("");
   const [numpadPrice, setNumpadPrice] = useState<string>("");
+  const [numpadMode, setNumpadMode] = useState<"direct" | "cuts">("direct");
+  const [numpadCuts, setNumpadCuts] = useState<FabricCut[]>([]);
+  const [activeCutId, setActiveCutId] = useState<string | null>(null);
+  const [activeCutField, setActiveCutField] = useState<"count" | "meters">("meters");
+  const [isFieldFresh, setIsFieldFresh] = useState<boolean>(true);
+
+  const selectCutField = (id: string, field: "count" | "meters") => {
+    setActiveCutId(id);
+    setActiveCutField(field);
+    setNumpadField("cut");
+    setIsFieldFresh(true);
+  };
 
   const openNumpad = (product: Product, existing?: CartItem) => {
     setNumpadProduct(product);
     setNumpadCartItemId(existing?.cartItemId ?? null);
+    setIsFieldFresh(true);
     if (product.is_service) {
+      setNumpadMode("direct");
       setNumpadField("price");
       setNumpadQty("1");
       setNumpadPrice(existing ? existing.editedPrice.toString() : "0");
+      setNumpadCuts([]);
+      setActiveCutId(null);
     } else {
-      setNumpadField("qty");
-      setNumpadQty(existing ? existing.quantity.toString() : "");
       setNumpadPrice(existing ? existing.editedPrice.toString() : "0");
+      if (existing?.cuts && existing.cuts.length > 0) {
+        setNumpadMode("cuts");
+        setNumpadField("cut");
+        const loadedCuts: FabricCut[] = existing.cuts.map((c) => ({
+          ...c,
+          countStr: c.count.toString(),
+          metersStr: c.meters.toString(),
+        }));
+        setNumpadCuts(loadedCuts);
+        setActiveCutId(loadedCuts[0]?.id ?? null);
+        setActiveCutField("meters");
+        setNumpadQty(existing.quantity.toString());
+      } else {
+        setNumpadMode("direct");
+        setNumpadField("qty");
+        const defaultQty = existing ? existing.quantity.toString() : "";
+        setNumpadQty(defaultQty);
+        const initM = existing ? existing.quantity : 1;
+        const initialId = crypto.randomUUID();
+        setNumpadCuts([{ id: initialId, count: 1, meters: initM, countStr: "1", metersStr: initM.toString() }]);
+        setActiveCutId(initialId);
+        setActiveCutField("meters");
+      }
     }
   };
 
   const closeNumpad = () => {
     setNumpadProduct(null);
     setNumpadCartItemId(null);
+    setIsFieldFresh(true);
+  };
+
+  const addNumpadCut = () => {
+    const newId = crypto.randomUUID();
+    const newCut: FabricCut = { id: newId, count: 1, meters: 0, countStr: "1", metersStr: "" };
+    setNumpadCuts((prev) => [...prev, newCut]);
+    setActiveCutId(newId);
+    setActiveCutField("meters");
+    setNumpadField("cut");
+    setIsFieldFresh(true);
+  };
+
+  const removeNumpadCut = (id: string) => {
+    setNumpadCuts((prev) => {
+      const filtered = prev.filter((c) => c.id !== id);
+      if (filtered.length === 0) {
+        const fallbackId = crypto.randomUUID();
+        const fallbackCut: FabricCut = { id: fallbackId, count: 1, meters: 0, countStr: "1", metersStr: "" };
+        setActiveCutId(fallbackId);
+        setActiveCutField("meters");
+        setIsFieldFresh(true);
+        return [fallbackCut];
+      }
+      if (activeCutId === id) {
+        setActiveCutId(filtered[0]?.id ?? null);
+        setIsFieldFresh(true);
+      }
+      return filtered;
+    });
+  };
+
+  const updateNumpadCutField = (id: string, field: "count" | "meters", strVal: string) => {
+    setNumpadCuts((prev) =>
+      prev.map((c) => {
+        if (c.id !== id) return c;
+        if (field === "count") {
+          const num = parseInt(strVal, 10) || 0;
+          return { ...c, count: num, countStr: strVal };
+        } else {
+          const num = parseFloat(strVal) || 0;
+          return { ...c, meters: num, metersStr: strVal };
+        }
+      })
+    );
   };
 
   const handleNumpadKey = (key: string) => {
     if (numpadField === "qty") {
+      if (isFieldFresh) {
+        setIsFieldFresh(false);
+        if (key === "DEL") {
+          setNumpadQty("");
+          return;
+        } else if (key === ".") {
+          setNumpadQty("0.");
+          return;
+        } else {
+          setNumpadQty(key);
+          return;
+        }
+      }
       if (key === "DEL") setNumpadQty((p) => p.slice(0, -1));
       else if (key === "." && numpadQty.includes(".")) return;
       else if (numpadQty === "" && key === "0") setNumpadQty("0");
       else if (numpadQty === "0" && key === ".") setNumpadQty("0.");
       else if (numpadQty === "0" && key !== "0") setNumpadQty(key);
-      else if (numpadQty.length < 4) setNumpadQty((p) => p + key);
-    } else {
+      else if (numpadQty.length < 5) setNumpadQty((p) => p + key);
+    } else if (numpadField === "price") {
+      if (isFieldFresh) {
+        setIsFieldFresh(false);
+        if (key === "DEL") {
+          setNumpadPrice("");
+          return;
+        } else if (key === ".") {
+          setNumpadPrice("0.");
+          return;
+        } else {
+          setNumpadPrice(key);
+          return;
+        }
+      }
       if (key === "DEL") setNumpadPrice((p) => p.slice(0, -1));
       else if (key === "." && numpadPrice.includes(".")) return;
       else if (numpadPrice === "" && key === "0") setNumpadPrice("0");
       else if (numpadPrice === "0" && key === ".") setNumpadPrice("0.");
       else if (numpadPrice === "0" && key !== "0") setNumpadPrice(key);
       else if (numpadPrice.length < 7) setNumpadPrice((p) => p + key);
+    } else if (numpadField === "cut" && activeCutId) {
+      const fresh = isFieldFresh;
+      if (fresh) {
+        setIsFieldFresh(false);
+      }
+
+      setNumpadCuts((prev) =>
+        prev.map((cut) => {
+          if (cut.id !== activeCutId) return cut;
+          if (activeCutField === "count") {
+            let currentStr = cut.countStr ?? (cut.count > 0 ? cut.count.toString() : "");
+
+            // Si el campo acaba de recibir foco, sobreescribir con la primera tecla
+            if (fresh) {
+              if (key === "DEL") currentStr = "";
+              else if (key === ".") return cut;
+              else currentStr = key;
+            } else {
+              if (key === "DEL") currentStr = currentStr.slice(0, -1);
+              else if (key === ".") return cut;
+              else if (currentStr === "" && key === "0") currentStr = "0";
+              else if (currentStr === "0") currentStr = key;
+              else if (currentStr.length < 4) currentStr += key;
+            }
+
+            const newCount = parseInt(currentStr, 10) || 0;
+            return { ...cut, count: newCount, countStr: currentStr };
+          } else {
+            // Metros
+            let currentStr = cut.metersStr ?? (cut.meters > 0 ? cut.meters.toString() : "");
+
+            // Si el campo acaba de recibir foco, sobreescribir con la primera tecla
+            if (fresh) {
+              if (key === "DEL") {
+                currentStr = "";
+              } else if (key === ".") {
+                currentStr = "0.";
+              } else {
+                currentStr = key;
+              }
+            } else {
+              if (key === "DEL") currentStr = currentStr.slice(0, -1);
+              else if (key === "." && currentStr.includes(".")) return cut;
+              else if (currentStr === "" && key === "0") currentStr = "0";
+              else if (currentStr === "0" && key === ".") currentStr = "0.";
+              else if (currentStr === "0" && key !== "0") currentStr = key;
+              else if (currentStr.length < 6) currentStr += key;
+            }
+
+            const newMeters = parseFloat(currentStr) || 0;
+            return { ...cut, meters: newMeters, metersStr: currentStr };
+          }
+        })
+      );
     }
   };
 
   const handleNumpadOk = () => {
     if (!numpadProduct) return;
-    const qty = numpadProduct.is_service ? 1 : parseFloat(numpadQty);
     const price = parseFloat(numpadPrice);
-    if (!isNaN(qty) && qty > 0 && !isNaN(price) && price >= 0) {
-      setCart((prev) => {
-        if (numpadCartItemId) {
-          return prev.map((i) => i.cartItemId === numpadCartItemId ? { ...i, quantity: qty, editedPrice: price } : i);
-        } else {
-          const exists = prev.find((i) => i.id === numpadProduct.id && i.editedPrice === price);
-          if (exists) {
-            return prev.map((i) => i.cartItemId === exists.cartItemId ? { ...i, quantity: i.quantity + qty } : i);
-          }
-          return [...prev, { ...numpadProduct, cartItemId: crypto.randomUUID(), quantity: qty, editedPrice: price }];
-        }
-      });
-      setRightPanelMode("cart");
-      setMobileTab("cart");
+    if (isNaN(price) || price < 0) {
+      showToast("Ingresa un precio válido", "warning");
+      return;
     }
+
+    let qty = 0;
+    let cutsToSave: { id: string; count: number; meters: number }[] | undefined = undefined;
+
+    if (numpadProduct.is_service) {
+      qty = 1;
+    } else if (numpadMode === "cuts") {
+      const validCuts = numpadCuts
+        .filter((c) => (c.count || 0) > 0 && (c.meters || 0) > 0)
+        .map((c) => ({ id: c.id, count: c.count, meters: c.meters }));
+
+      if (validCuts.length === 0) {
+        showToast("Ingresa al menos un corte mayor a 0 metros", "warning");
+        return;
+      }
+      qty = validCuts.reduce((acc, c) => acc + c.count * c.meters, 0);
+      cutsToSave = validCuts;
+    } else {
+      qty = parseFloat(numpadQty);
+      if (isNaN(qty) || qty <= 0) {
+        showToast("Ingresa una cantidad mayor a 0 metros", "warning");
+        return;
+      }
+    }
+
+    setCart((prev) => {
+      if (numpadCartItemId) {
+        return prev.map((i) =>
+          i.cartItemId === numpadCartItemId
+            ? { ...i, quantity: qty, editedPrice: price, cuts: cutsToSave }
+            : i
+        );
+      } else {
+        const exists = prev.find(
+          (i) => i.id === numpadProduct.id && i.editedPrice === price && !i.cuts && !cutsToSave
+        );
+        if (exists) {
+          return prev.map((i) =>
+            i.cartItemId === exists.cartItemId
+              ? { ...i, quantity: i.quantity + qty }
+              : i
+          );
+        }
+        return [
+          ...prev,
+          {
+            ...numpadProduct,
+            cartItemId: crypto.randomUUID(),
+            quantity: qty,
+            editedPrice: price,
+            cuts: cutsToSave,
+          },
+        ];
+      }
+    });
+
+    setRightPanelMode("cart");
+    setMobileTab("cart");
     setNumpadProduct(null);
     setNumpadCartItemId(null);
   };
@@ -351,7 +588,7 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
     e.stopPropagation();
     setCart((prev) => prev.filter((i) => i.cartItemId !== cartItemId));
   };
-  
+
   const addToCart = (product: Product, quantity: number, price: number) => {
     setCart(prev => {
       const exists = prev.find((i) => i.id === product.id && i.editedPrice === price);
@@ -365,7 +602,14 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
   };
 
   const total = cart.reduce((acc, item) => acc + item.editedPrice * item.quantity, 0);
-  const previewQty = numpadProduct?.is_service ? 1 : (parseFloat(numpadQty) || 0);
+  const previewQty = useMemo(() => {
+    if (numpadProduct?.is_service) return 1;
+    if (numpadMode === "cuts") {
+      return numpadCuts.reduce((acc, c) => acc + ((c.count || 0) * (c.meters || 0)), 0);
+    }
+    return parseFloat(numpadQty) || 0;
+  }, [numpadProduct, numpadMode, numpadCuts, numpadQty]);
+
   const previewPrice = parseFloat(numpadPrice) || 0;
   const previewSubtotal = previewQty * previewPrice;
 
@@ -402,7 +646,7 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
       const todayStr = getLimaTodayStr();
       let query = supabase.from('sales').select('transactions(payment_method, amount)').eq('record_date', todayStr).eq('status', 'COMPLETED');
       if (activeStoreId) query = query.eq('store_id', activeStoreId);
-      
+
       const { data, error } = await query;
       if (error) throw error;
       let efe = 0, bcp = 0, bbva = 0, izi = 0;
@@ -463,7 +707,7 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
     if (!activeStoreId) return;
     const todayStr = getLimaTodayStr();
     let query = supabase.from("sales")
-      .select("id, proforma_number, invoice_number, internal_ticket_number, total, detail, status, created_at, seller_id, cashier_id, source_type, store_id")
+      .select("id, proforma_number, invoice_number, internal_ticket_number, total, detail, items, status, created_at, seller_id, cashier_id, source_type, store_id")
       .eq("record_date", todayStr)
       .eq("source_type", "POS")
       .eq("store_id", activeStoreId)
@@ -710,7 +954,12 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
 
       const formatItemDetail = (i: CartItem): string => {
         if (i.is_service) return `${i.code}: ${i.name} — S/ ${i.editedPrice.toFixed(2)}`;
-        return `${i.code} ${i.name} — ${i.quantity}m × S/ ${i.editedPrice.toFixed(2)}`;
+        let text = `${i.code} ${i.name} — ${i.quantity}m × S/ ${i.editedPrice.toFixed(2)}`;
+        if (i.cuts && i.cuts.length > 0) {
+          const cutsStr = i.cuts.map((c) => `  ${c.count}x${c.meters}m (${(c.count * c.meters).toFixed(2)}m)`).join('\n');
+          text += `\n${cutsStr}`;
+        }
+        return text;
       };
 
       // 1. Obtener cliente y vendedor
@@ -819,39 +1068,64 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    const lines = typeof ticket.detail === 'string' ? ticket.detail.split('\n').filter(l => l.trim()) : [];
-    const reconstructedItems: any[] = lines.map((l: string, idx: number) => {
-      let code = "", name = l, quantity = 1, editedPrice = 0, basePrice = 0;
-      try {
-        const sepIdx = l.indexOf(' — ');
-        if (sepIdx !== -1) {
-          const firstPart = l.substring(0, sepIdx);
-          const secondPart = l.substring(sepIdx + 3);
-          if (firstPart.includes(': ')) {
-            const colonIdx = firstPart.indexOf(': ');
-            code = firstPart.substring(0, colonIdx);
-            name = firstPart.substring(colonIdx + 2);
-            const priceMatch = secondPart.match(/S\/\s*([\d.]+)/);
-            editedPrice = priceMatch ? (parseFloat(priceMatch[1] ?? '0') || 0) : 0;
-          } else {
-            const spaceIdx = firstPart.indexOf(' ');
-            code = spaceIdx > -1 ? firstPart.substring(0, spaceIdx) : '';
-            name = spaceIdx > -1 ? firstPart.substring(spaceIdx + 1) : firstPart;
-            const matchedProd = products.find(p => p.code === code);
-            if (matchedProd) basePrice = matchedProd.price;
-            const mxIdx = secondPart.indexOf('m × S/ ');
-            if (mxIdx !== -1) {
-              quantity = parseFloat(secondPart.substring(0, mxIdx)) || 0;
-              editedPrice = parseFloat(secondPart.substring(mxIdx + 7)) || 0;
+    let itemsToPrint: any[] = [];
+    if (ticket.items && Array.isArray(ticket.items) && ticket.items.length > 0) {
+      itemsToPrint = ticket.items;
+    } else {
+      const reconstructedItems: any[] = [];
+      const lines = typeof ticket.detail === 'string' ? ticket.detail.split('\n') : [];
+      for (const rawLine of lines) {
+        if (!rawLine.trim()) continue;
+        if (rawLine.startsWith('  ') || rawLine.startsWith('\t')) {
+          if (reconstructedItems.length > 0) {
+            const lastItem = reconstructedItems[reconstructedItems.length - 1];
+            const match = rawLine.trim().match(/^(\d+)\s*x\s*([\d.]+)/i);
+            if (match) {
+              if (!lastItem.cuts) lastItem.cuts = [];
+              lastItem.cuts.push({
+                id: crypto.randomUUID(),
+                count: parseInt(match[1] ?? '1', 10) || 1,
+                meters: parseFloat(match[2] ?? '0') || 0
+              });
             }
           }
+          continue;
         }
-      } catch (e) { }
-      return { id: String(idx), code, name, price: basePrice, editedPrice, quantity, familyId: "" };
-    });
+
+        let code = "", name = rawLine, quantity = 1, editedPrice = 0, basePrice = 0;
+        try {
+          const sepIdx = rawLine.indexOf(' — ');
+          if (sepIdx !== -1) {
+            const firstPart = rawLine.substring(0, sepIdx);
+            const secondPart = rawLine.substring(sepIdx + 3);
+            if (firstPart.includes(': ')) {
+              const colonIdx = firstPart.indexOf(': ');
+              code = firstPart.substring(0, colonIdx);
+              name = firstPart.substring(colonIdx + 2);
+              const priceMatch = secondPart.match(/S\/\s*([\d.]+)/);
+              editedPrice = priceMatch ? (parseFloat(priceMatch[1] ?? '0') || 0) : 0;
+            } else {
+              const spaceIdx = firstPart.indexOf(' ');
+              code = spaceIdx > -1 ? firstPart.substring(0, spaceIdx) : '';
+              name = spaceIdx > -1 ? firstPart.substring(spaceIdx + 1) : firstPart;
+              const matchedProd = products.find(p => p.code === code);
+              if (matchedProd) basePrice = matchedProd.price;
+              const mxIdx = secondPart.indexOf('m × S/ ');
+              if (mxIdx !== -1) {
+                quantity = parseFloat(secondPart.substring(0, mxIdx)) || 0;
+                editedPrice = parseFloat(secondPart.substring(mxIdx + 7)) || 0;
+              }
+            }
+          }
+        } catch (e) { }
+        reconstructedItems.push({ id: String(reconstructedItems.length), code, name, price: basePrice, editedPrice, quantity, familyId: "" });
+      }
+      itemsToPrint = reconstructedItems;
+    }
+
     try {
       showToast("Conectando con la impresora térmica...", "success");
-      const saleDataForPrint = { proforma_number: ticket.proforma_number || ticket.invoice_number || '', customer_name: "Cliente General", items: reconstructedItems, total: ticket.total };
+      const saleDataForPrint = { proforma_number: ticket.proforma_number || ticket.invoice_number || '', customer_name: "Cliente General", items: itemsToPrint, total: ticket.total };
       await silentPrintSaleReceipt(saleDataForPrint, false, activeStoreId || undefined);
       showToast("¡Ticket impreso con éxito!", "success");
     } catch (err: any) {
@@ -912,9 +1186,11 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
       searchFamiliesInPage, searchProductsInPage, combinedSearchResults, totalSearchPages, matchedProducts,
       activeFamily, setActiveFamily,
       numpadProduct, setNumpadProduct, numpadCartItemId, setNumpadCartItemId, numpadField, setNumpadField, numpadQty, setNumpadQty, numpadPrice, setNumpadPrice,
+      numpadMode, setNumpadMode, numpadCuts, setNumpadCuts, activeCutId, setActiveCutId, activeCutField, setActiveCutField,
+      addNumpadCut, removeNumpadCut, updateNumpadCutField, selectCutField, isFieldFresh, setIsFieldFresh,
       openNumpad, closeNumpad, handleNumpadKey, handleNumpadOk, previewQty, previewPrice, previewSubtotal,
       isCajaOpen, setIsCajaOpen, handleOpenCaja, handleCloseCajaAttempt, confirmCloseCaja, closingCajaLoading, cajaSummaryOpen, setCajaSummaryOpen, cajaSummary,
-      isClearCartModalOpen, setIsClearCartModalOpen, exitGuardOpen, setExitGuardOpen, previewTicketData, setPreviewTicketData, 
+      isClearCartModalOpen, setIsClearCartModalOpen, exitGuardOpen, setExitGuardOpen, previewTicketData, setPreviewTicketData,
       activePrinter, isPrinterAuthorized, isPairingPrinter, handlePairPrinter, refreshPrinterAuth,
       ticketNumber, isEmitting, handleEmitTicket, deleteDraftTicket, handleReprint, historyTickets, fetchHistory,
       handleBackClick, handleExitWithoutSaving, toast, showToast
@@ -922,11 +1198,10 @@ export function PosProvider({ children }: { children: React.ReactNode }) {
       {children}
       {toast && (
         <div className="fixed bottom-4 right-4 z-[9999] animate-in fade-in slide-in-from-bottom-4 duration-300 pointer-events-none max-w-sm">
-          <div className={`px-4 py-3 rounded-2xl shadow-xl flex items-center gap-3 border ${
-            toast.type === 'success' ? 'bg-emerald-600 text-white border-emerald-500' : 
-            toast.type === 'warning' ? 'bg-amber-500 text-white border-amber-400' : 
-            'bg-red-600 text-white border-red-500'
-          }`}>
+          <div className={`px-4 py-3 rounded-2xl shadow-xl flex items-center gap-3 border ${toast.type === 'success' ? 'bg-emerald-600 text-white border-emerald-500' :
+              toast.type === 'warning' ? 'bg-amber-500 text-white border-amber-400' :
+                'bg-red-600 text-white border-red-500'
+            }`}>
             {toast.type === 'success' && <CheckCircle2 className="w-5 h-5 shrink-0" />}
             {toast.type === 'warning' && <AlertTriangle className="w-5 h-5 shrink-0" />}
             {toast.type === 'error' && <XCircle className="w-5 h-5 shrink-0" />}

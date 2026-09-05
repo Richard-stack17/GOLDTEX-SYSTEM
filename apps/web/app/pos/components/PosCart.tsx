@@ -52,8 +52,13 @@ export default function PosCart() {
                             Precio: S/ {item.editedPrice.toFixed(2)}
                           </div>
                         ) : (
-                          <div className="text-muted-foreground font-mono text-[10px] font-bold">
-                            {item.quantity} MTS × S/ {item.editedPrice.toFixed(2)}
+                          <div className="text-muted-foreground font-mono text-[10px] font-bold flex items-center gap-1.5 flex-wrap">
+                            <span>{item.quantity} MTS × S/ {item.editedPrice.toFixed(2)}</span>
+                            {item.cuts && item.cuts.length > 0 && (
+                              <span className="text-[9px] font-sans font-bold bg-primary/10 text-primary px-1.5 py-0.5 rounded-md">
+                                {item.cuts.length} {item.cuts.length === 1 ? 'corte' : 'cortes'}
+                              </span>
+                            )}
                           </div>
                         )}
                         <div className="text-base font-black text-foreground leading-none">

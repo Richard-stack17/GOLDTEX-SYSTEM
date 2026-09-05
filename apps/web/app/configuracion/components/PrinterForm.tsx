@@ -568,6 +568,18 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
                 </button>
               </div>
 
+              {isNativeAndroid && (
+                <div className="mx-5 mb-4 p-3.5 bg-sky-500/10 border border-sky-500/20 rounded-2xl text-xs space-y-1.5">
+                  <div className="flex items-center gap-2 font-bold text-sky-600 dark:text-sky-400">
+                    <Info className="w-4 h-4 shrink-0" />
+                    <span>Vinculación Bluetooth en Celular / APK:</span>
+                  </div>
+                  <p className="text-muted-foreground leading-relaxed">
+                    Al conectar por primera vez, Android solicitará una contraseña de emparejamiento. Las impresoras térmicas usan <strong>0000</strong> o <strong>1234</strong> de fábrica. Solo debes ingresarlo una única vez.
+                  </p>
+                </div>
+              )}
+
               {!isNativeAndroid && (
                 <div className="mx-5 mb-4 p-3.5 bg-blue-500/10 border border-blue-500/20 rounded-2xl text-xs space-y-2">
                   <div className="flex items-center gap-2 font-bold text-blue-600 dark:text-blue-400">

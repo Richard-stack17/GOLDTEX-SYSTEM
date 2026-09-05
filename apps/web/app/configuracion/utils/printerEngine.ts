@@ -220,6 +220,30 @@ export function generateTicketLines(saleData: any, maxChars: number): TicketLine
         safeName = safeName.substring(0, maxNameLen);
       }
       left(`${code}${safeName}${suffixL1}`);
+
+      // Desglose de cortes si existen
+      const cuts = Array.isArray(item.cuts) ? item.cuts : [];
+      if (cuts.length > 0) {
+        const formattedCuts = cuts.map((cut: any) => {
+          const cCount = Number(cut.count) || 1;
+          const cMeters = Number(cut.meters) || 0;
+          const cMStr = Number.isInteger(cMeters) ? `${cMeters}m` : `${cMeters.toFixed(2)}m`;
+          const cSubNum = cCount * cMeters;
+          const cSubStr = Number.isInteger(cSubNum) ? `${cSubNum}m` : `${cSubNum.toFixed(2)}m`;
+          return {
+            leftText: `  ${cCount} x ${cMStr}`,
+            subStr: `(${cSubStr})`
+          };
+        });
+
+        const maxLeftWidth = Math.max(...formattedCuts.map((c: { leftText: string; subStr: string }) => c.leftText.length), 10);
+
+        for (const fc of formattedCuts) {
+          const paddedLeft = fc.leftText.padEnd(maxLeftWidth, ' ');
+          left(`${paddedLeft}   ${fc.subStr}`);
+        }
+      }
+
       left(formatLR(`${qty} M x S/${precioVar}`, `S/ ${Number(itemTotal).toFixed(2)}`));
     }
     left('.'.repeat(maxChars));
