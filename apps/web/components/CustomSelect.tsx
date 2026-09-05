@@ -66,7 +66,7 @@ export function CustomSelect({
   }, [isOpen]);
 
   return (
-    <div className={`relative ${className}`} ref={containerRef}>
+    <div className={`relative ${isOpen ? 'z-50' : 'z-10'} ${className}`} ref={containerRef}>
       {/* Botón Píldora del Selector */}
       <button
         type="button"
@@ -78,7 +78,7 @@ export function CustomSelect({
             : 'border-border bg-card hover:bg-secondary/60 text-foreground'
         } ${disabled ? 'opacity-50 cursor-not-allowed' : ''} ${buttonClassName}`}
       >
-        <div className="flex items-center gap-2 min-w-0 truncate">
+        <div className="flex items-center gap-2 min-w-0 flex-1 truncate">
           {selectedOption ? (
             <>
               {selectedOption.badge && (
@@ -90,14 +90,9 @@ export function CustomSelect({
                   {selectedOption.badge}
                 </span>
               )}
-              <span className="truncate font-semibold text-foreground">
+              <span className="truncate font-semibold text-foreground text-sm">
                 {selectedOption.label}
               </span>
-              {selectedOption.sublabel && (
-                <span className="text-xs text-muted-foreground shrink-0 font-normal">
-                  {selectedOption.sublabel}
-                </span>
-              )}
             </>
           ) : (
             <span className="text-muted-foreground">{placeholder}</span>
@@ -113,13 +108,13 @@ export function CustomSelect({
       {/* Menú Desplegable Flotante (Con apertura inteligente arriba/abajo) */}
       {isOpen && (
         <div
-          className={`absolute left-0 right-0 z-50 min-w-[220px] bg-popover text-popover-foreground border border-border rounded-2xl shadow-2xl p-1.5 space-y-1 animate-in fade-in-0 zoom-in-95 ${
+          className={`absolute left-0 right-0 z-50 min-w-[260px] bg-popover text-popover-foreground border border-border rounded-2xl shadow-2xl p-2 space-y-1 animate-in fade-in-0 zoom-in-95 ${
             openUpwards
               ? 'bottom-full mb-1.5 origin-bottom'
               : 'top-full mt-1.5 origin-top'
           } ${dropdownClassName}`}
         >
-          <div className="max-h-60 overflow-y-auto space-y-0.5 py-0.5">
+          <div className="max-h-80 overflow-y-auto space-y-1 py-0.5 divide-y divide-border/30">
             {options.map((opt) => {
               const isSelected = opt.value === value;
               return (
@@ -133,27 +128,31 @@ export function CustomSelect({
                       setIsOpen(false);
                     }
                   }}
-                  className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-all cursor-pointer ${
+                  className={`w-full flex items-center justify-between p-3 rounded-xl text-left transition-all cursor-pointer ${
                     isSelected
                       ? 'bg-indigo-500/10 border border-indigo-500/30 text-foreground font-bold'
                       : 'hover:bg-secondary/70 border border-transparent text-foreground font-medium'
                   } ${opt.disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
                 >
-                  <div className="flex items-center gap-2 min-w-0 truncate">
-                    {opt.badge && (
-                      <span
-                        className={`px-2 py-0.5 rounded-lg border text-xs font-bold shrink-0 ${
-                          opt.badgeColor || 'bg-secondary text-foreground'
-                        }`}
-                      >
-                        {opt.badge}
+                  <div className="flex flex-col items-start min-w-0 flex-1 pr-2 gap-0.5">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {opt.badge && (
+                        <span
+                          className={`px-2 py-0.5 rounded-md border text-[10px] font-black tracking-wider uppercase shrink-0 ${
+                            opt.badgeColor || 'bg-secondary text-foreground'
+                          }`}
+                        >
+                          {opt.badge}
+                        </span>
+                      )}
+                      <span className={`text-sm ${isSelected ? 'font-bold text-indigo-600 dark:text-indigo-400' : 'font-semibold text-foreground'}`}>
+                        {opt.label}
                       </span>
-                    )}
-                    <span className="text-sm truncate">{opt.label}</span>
+                    </div>
                     {opt.sublabel && (
-                      <span className="text-xs text-muted-foreground shrink-0 font-normal">
+                      <p className="text-xs text-muted-foreground font-normal leading-relaxed text-left">
                         {opt.sublabel}
-                      </span>
+                      </p>
                     )}
                   </div>
                   {isSelected && (

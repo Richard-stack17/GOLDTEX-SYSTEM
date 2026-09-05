@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Printer, Trash2, Search, CheckCircle2, AlertCircle, Loader2, Save, ChevronDown, X, RefreshCw, Wifi, Info } from 'lucide-react';
+import { ArrowLeft, Printer, Trash2, Search, CheckCircle2, AlertCircle, Loader2, Save, ChevronDown, X, RefreshCw, Wifi, Info, SlidersHorizontal, Sparkles } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useRole } from '../../context/RoleContext';
 import { useStore } from '../../context/StoreContext';
@@ -23,6 +23,7 @@ import {
 import ReceiptPreview from '../../components/ReceiptPreview';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
 import { useIsNativeAndroid } from '../../lib/platform';
+import { CustomSelect, CustomSelectOption } from '../../../components/CustomSelect';
 
 function Toast({ message, type }: { message: string; type: 'success' | 'error' }) {
   return (
@@ -377,6 +378,95 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
     }
   };
 
+  const modelOptions: CustomSelectOption[] = [
+    { value: 'Otro modelo', label: 'Otro modelo (ESC/POS Genérico)' },
+    { value: 'Epson TM-T20', label: 'Epson TM-T20' },
+    { value: 'Xprinter XP-58', label: 'Xprinter XP-58 / XP-80' },
+    { value: 'Star Micronics', label: 'Star Micronics' },
+  ];
+
+  const typeOptions: CustomSelectOption[] = [
+    { value: 'bluetooth', label: 'Bluetooth (Inalámbrico)', sublabel: 'Conexión inalámbrica directa' },
+    {
+      value: 'usb',
+      label: 'USB (Cable Directo)',
+      sublabel: isNativeAndroid ? 'Solo disponible en PC / Laptop' : 'Conexión directa por cable a PC',
+      disabled: isNativeAndroid,
+    },
+    {
+      value: 'wifi',
+      label: 'WiFi / Red Local (LAN)',
+      sublabel: isNativeAndroid ? 'Impresión en red local por IP' : 'Solo disponible en App Móvil Android',
+      disabled: !isNativeAndroid,
+    },
+  ];
+
+  const storeOptions: CustomSelectOption[] = [
+    { value: '', label: '-- Selecciona una tienda --', disabled: true },
+    ...stores.map((s) => ({ value: s.id, label: s.name })),
+  ];
+
+  const platformOptions: CustomSelectOption[] = [
+    { value: 'ALL', label: 'Universal (PC / Web y Móvil APK)', sublabel: 'Disponible en todos los dispositivos' },
+    { value: 'WEB', label: 'Exclusiva para PC / Web', sublabel: 'Solo computadoras y navegadores de escritorio' },
+    { value: 'MOBILE', label: 'Exclusiva para Teléfonos Móviles (APK Android)', sublabel: 'Solo celulares y tablets con la app instalada' },
+  ];
+
+  const paperWidthOptions: CustomSelectOption[] = [
+    {
+      value: '80',
+      badge: '80 MM',
+      badgeColor: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30',
+      label: '80 mm (Rollo Estándar de Mostrador)',
+      sublabel: 'Ancho amplio estándar recomendado para ticketeras térmicas de caja',
+    },
+    {
+      value: '58',
+      badge: '58 MM',
+      badgeColor: 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30',
+      label: '58 mm (Rollo Chico / Portátil)',
+      sublabel: 'Ancho compacto para impresoras portátiles bluetooth de mano',
+    },
+  ];
+
+  const maxCharsOptions: CustomSelectOption[] = [
+    {
+      value: '48',
+      badge: '48 COLS',
+      badgeColor: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30',
+      label: 'Estándar 80mm — Font A Grande (Recomendado)',
+      sublabel: 'Letras grandes y legibles (12×24 dots). Formato de máxima claridad forzado por hardware.',
+    },
+    {
+      value: '42',
+      badge: '42 COLS',
+      badgeColor: 'bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/30',
+      label: '80mm — Font A Grande (Márgenes Laterales)',
+      sublabel: 'Letras grandes con margen extra a los costados para evitar cortes en bordes.',
+    },
+    {
+      value: '32',
+      badge: '32 COLS',
+      badgeColor: 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30',
+      label: '58mm — Font A Grande (Ticketeras Móviles)',
+      sublabel: 'Optimizado para rollos estrechos de 58mm en Android o POS de bolsillo.',
+    },
+    {
+      value: '64',
+      badge: '64 COLS',
+      badgeColor: 'bg-purple-500/15 text-purple-700 dark:text-purple-300 border-purple-500/30',
+      label: '80mm — Font B Condensada (Ahorro de Papel)',
+      sublabel: 'Letras pequeñas condensadas (9×17 dots). Entran más datos por línea.',
+    },
+    {
+      value: 'custom',
+      badge: 'A MEDIDA',
+      badgeColor: 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border-indigo-500/30',
+      label: 'Personalizar número exacto de columnas...',
+      sublabel: 'Escribe manualmente cualquier número entre 20 y 90 columnas.',
+    },
+  ];
+
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
       <header className="bg-card border-b border-border px-4 sm:px-6 py-3 sm:py-0 sm:h-16 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm shrink-0">
@@ -444,7 +534,7 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
           </div>
         )}
 
-        <div className="bg-card border border-border rounded-xl shadow-sm divide-y divide-border overflow-hidden">
+        <div className="bg-card border border-border rounded-xl shadow-sm divide-y divide-border">
           <div className="px-5 py-4">
             <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Nombre de la impresora</label>
             <input
@@ -459,87 +549,50 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
 
           <div className="px-5 py-4">
             <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Modelo de la impresora</label>
-            <div className="relative flex items-center">
-              <select
-                value={model}
-                disabled={!canManage}
-                onChange={e => { setModel(e.target.value); setHasUnsavedChanges(true); }}
-                className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer pr-7 disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                <option value="Otro modelo">Otro modelo (ESC/POS Genérico)</option>
-                <option value="Epson TM-T20">Epson TM-T20</option>
-                <option value="Xprinter XP-58">Xprinter XP-58 / XP-80</option>
-                <option value="Star Micronics">Star Micronics</option>
-              </select>
-              <ChevronDown className="absolute right-0 w-4 h-4 text-muted-foreground pointer-events-none shrink-0" />
-            </div>
+            <CustomSelect
+              options={modelOptions}
+              value={model}
+              disabled={!canManage}
+              onChange={val => { setModel(val); setHasUnsavedChanges(true); }}
+            />
           </div>
 
           <div className="px-5 py-4">
             <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Tipo de Conexión</label>
-            <div className="relative flex items-center">
-              <select
-                value={type}
-                disabled={!canManage}
-                onChange={e => { setType(e.target.value); setHasUnsavedChanges(true); }}
-                className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer pr-7 disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                <option value="bluetooth">Bluetooth (Inalámbrico)</option>
-                {isNativeAndroid ? (
-                  <option value="usb" disabled>USB (Solo disponible en PC / Laptop)</option>
-                ) : (
-                  <option value="usb">USB (Cable Directo)</option>
-                )}
-                {isNativeAndroid ? (
-                  <option value="wifi">WiFi / Red Local (LAN)</option>
-                ) : (
-                  <option value="wifi" disabled>WiFi (Solo disponible en App Móvil Android)</option>
-                )}
-              </select>
-              <ChevronDown className="absolute right-0 w-4 h-4 text-muted-foreground pointer-events-none shrink-0" />
-            </div>
+            <CustomSelect
+              options={typeOptions}
+              value={type}
+              disabled={!canManage}
+              onChange={val => { setType(val); setHasUnsavedChanges(true); }}
+            />
           </div>
 
           <div className="px-5 py-4">
             <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Tienda / Sucursal *</label>
-            <div className="relative flex items-center">
-              <select
-                value={storeId || ''}
-                disabled={!canManage}
-                onChange={e => { setStoreId(e.target.value || null); setHasUnsavedChanges(true); }}
-                className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer pr-7 disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                <option value="">-- Selecciona una tienda --</option>
-                {stores.map(s => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-              <ChevronDown className="absolute right-0 w-4 h-4 text-muted-foreground pointer-events-none shrink-0" />
-            </div>
+            <CustomSelect
+              options={storeOptions}
+              value={storeId || ''}
+              placeholder="-- Selecciona una tienda --"
+              disabled={!canManage}
+              onChange={val => { setStoreId(val || null); setHasUnsavedChanges(true); }}
+            />
           </div>
 
           <div className="px-5 py-4">
             <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Plataforma de Compatibilidad</label>
-            <div className="relative flex items-center">
-              <select
-                value={platform}
-                disabled={!canManage}
-                onChange={e => { setPlatform(e.target.value as any); setHasUnsavedChanges(true); }}
-                className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer pr-7 disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                <option value="ALL">Universal (PC / Web y Teléfonos Móviles APK)</option>
-                <option value="WEB">Exclusiva para PC / Web</option>
-                <option value="MOBILE">Exclusiva para Teléfonos Móviles (APK Android)</option>
-              </select>
-              <ChevronDown className="absolute right-0 w-4 h-4 text-muted-foreground pointer-events-none shrink-0" />
-            </div>
+            <CustomSelect
+              options={platformOptions}
+              value={platform}
+              disabled={!canManage}
+              onChange={val => { setPlatform(val as any); setHasUnsavedChanges(true); }}
+            />
             <p className="text-xs text-muted-foreground/70 mt-1.5">
               Determina si esta impresora servirá de respaldo por defecto para PC, para celulares o para ambos.
             </p>
           </div>
         </div>
 
-        <div className="bg-card border border-border rounded-xl shadow-sm divide-y divide-border overflow-hidden">
+        <div className="bg-card border border-border rounded-xl shadow-sm divide-y divide-border">
           {type === 'bluetooth' && (
             <>
               <div className="px-5 py-4 flex items-center justify-between">
@@ -696,96 +749,148 @@ export default function PrinterForm({ printerId }: { printerId?: string }) {
 
           <div className="px-5 py-4">
             <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Ancho de papel</label>
-            <div className="relative flex items-center">
-              <select
-                value={paperWidth}
-                disabled={!canManage}
-                onChange={e => {
-                  const newWidth = Number(e.target.value);
-                  setPaperWidth(newWidth);
-                  if (newWidth === 58) {
-                    setMaxChars(32);
-                  } else if (newWidth === 80 && Number(maxChars) === 32) {
-                    setMaxChars(48);
-                  }
-                  setHasUnsavedChanges(true);
-                }}
-                className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer pr-7 disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                <option value={80}>80 mm</option>
-                <option value={58}>58 mm</option>
-              </select>
-              <ChevronDown className="absolute right-0 w-4 h-4 text-muted-foreground pointer-events-none shrink-0" />
-            </div>
+            <CustomSelect
+              options={paperWidthOptions}
+              value={String(paperWidth)}
+              disabled={!canManage}
+              onChange={val => {
+                const newWidth = Number(val);
+                setPaperWidth(newWidth);
+                if (newWidth === 58) {
+                  setMaxChars(32);
+                } else if (newWidth === 80 && Number(maxChars) === 32) {
+                  setMaxChars(48);
+                }
+                setHasUnsavedChanges(true);
+              }}
+            />
           </div>
 
           <div className="px-5 py-4">
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
-                Caracteres por línea ({maxChars} columnas)
-              </label>
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <div className="flex items-center gap-2">
+                <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                  Tamaño de Letra / Columnas
+                </label>
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-black bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border border-indigo-500/30">
+                  <Sparkles className="w-3 h-3 text-indigo-500 shrink-0" />
+                  {maxChars} COLUMNAS
+                </span>
+              </div>
               {canManage && (
                 <button
                   type="button"
                   onClick={() => setIsCustomChars(!isCustomChars)}
-                  className="text-[11px] font-bold text-primary hover:underline cursor-pointer"
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer border ${
+                    isCustomChars
+                      ? 'bg-secondary text-foreground border-border hover:bg-secondary/80'
+                      : 'bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-500 active:scale-95'
+                  }`}
                 >
-                  {isCustomChars ? 'Ver lista estándar' : 'Escribir número manual'}
+                  <SlidersHorizontal className="w-3.5 h-3.5" />
+                  {isCustomChars ? 'Volver a Modos Estándar' : 'Personalizar Columnas a Medida'}
                 </button>
               )}
             </div>
 
             {!isCustomChars ? (
-              <div className="relative flex items-center">
-                <select
-                  value={[32, 42, 48, 64].includes(Number(maxChars)) ? Number(maxChars) : 'custom'}
-                  disabled={!canManage}
-                  onChange={e => {
-                    if (e.target.value === 'custom') {
-                      setIsCustomChars(true);
-                    } else {
-                      setMaxChars(Number(e.target.value));
-                      setHasUnsavedChanges(true);
-                    }
-                  }}
-                  className="w-full text-[15px] font-medium bg-transparent outline-none appearance-none cursor-pointer pr-7 disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  <option value={32}>32 (58mm Portátil)</option>
-                  <option value={42}>42 (80mm Genérico)</option>
-                  <option value={48}>48 (80mm Font A Estándar)</option>
-                  <option value={64}>64 (80mm Font B Condensada)</option>
-                  <option value="custom">Personalizado...</option>
-                </select>
-                <ChevronDown className="absolute right-0 w-4 h-4 text-muted-foreground pointer-events-none shrink-0" />
-              </div>
-            ) : (
-              <div className="flex items-center gap-3">
-                <input
-                  type="number"
-                  min={20}
-                  max={90}
-                  value={maxChars}
-                  disabled={!canManage}
-                  onChange={e => {
-                    const raw = e.target.value;
-                    setMaxChars(raw);
+              <CustomSelect
+                options={maxCharsOptions}
+                value={[32, 42, 48, 64].includes(Number(maxChars)) ? String(maxChars) : 'custom'}
+                disabled={!canManage}
+                onChange={val => {
+                  if (val === 'custom') {
+                    setIsCustomChars(true);
+                  } else {
+                    setMaxChars(Number(val));
                     setHasUnsavedChanges(true);
-                  }}
-                  onBlur={() => {
-                    const num = Number(maxChars);
-                    if (!maxChars || isNaN(num) || num < 20) {
-                      setMaxChars(20);
-                    } else if (num > 90) {
-                      setMaxChars(90);
-                    } else {
-                      setMaxChars(Math.round(num));
-                    }
-                  }}
-                  className="w-full text-[15px] font-bold bg-secondary/50 px-3 py-1.5 rounded-lg border border-border outline-none disabled:opacity-60 disabled:cursor-not-allowed"
-                  placeholder="Ej. 48"
-                />
+                  }
+                }}
+              />
+            ) : (
+              <div className="space-y-3 p-4 bg-indigo-500/5 rounded-2xl border border-indigo-500/20">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                    <SlidersHorizontal className="w-4 h-4 text-indigo-500 shrink-0" />
+                    Columnas Personalizadas por Línea
+                  </span>
+                  <span className="text-[11px] font-medium text-muted-foreground">Rango permitido: 20 a 90</span>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className="relative flex-1">
+                    <input
+                      type="number"
+                      min={20}
+                      max={90}
+                      value={maxChars}
+                      disabled={!canManage}
+                      onChange={e => {
+                        const raw = e.target.value;
+                        setMaxChars(raw);
+                        setHasUnsavedChanges(true);
+                      }}
+                      onBlur={() => {
+                        const num = Number(maxChars);
+                        if (!maxChars || isNaN(num) || num < 20) {
+                          setMaxChars(20);
+                        } else if (num > 90) {
+                          setMaxChars(90);
+                        } else {
+                          setMaxChars(Math.round(num));
+                        }
+                      }}
+                      className="w-full text-base font-bold bg-background px-4 py-2.5 rounded-xl border border-border focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                      placeholder="Ej. 48"
+                    />
+                    <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-muted-foreground">
+                      columnas
+                    </span>
+                  </div>
+                </div>
+
+                {/* Atajos Rápidos de Columnas */}
+                <div>
+                  <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block mb-1.5">
+                    Atajos rápidos comunes:
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      { cols: 32, label: '32 cols (58mm)' },
+                      { cols: 40, label: '40 cols' },
+                      { cols: 42, label: '42 cols (Margen)' },
+                      { cols: 48, label: '48 cols (Estándar 80mm)' },
+                      { cols: 56, label: '56 cols' },
+                      { cols: 64, label: '64 cols (Condensado)' },
+                    ].map((preset) => (
+                      <button
+                        key={preset.cols}
+                        type="button"
+                        disabled={!canManage}
+                        onClick={() => {
+                          setMaxChars(preset.cols);
+                          setHasUnsavedChanges(true);
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all border cursor-pointer ${
+                          Number(maxChars) === preset.cols
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                            : 'bg-background hover:bg-secondary text-foreground border-border'
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
+
+            <div className="mt-2.5 flex items-start gap-2 p-2.5 rounded-xl bg-secondary/30 border border-border/50 text-[11px] text-muted-foreground">
+              <Info className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+              <span>
+                <strong>Control de Tamaño de Letra:</strong> Al elegir las opciones estándar (48, 42 o 32 columnas), el sistema inyecta la instrucción de hardware <code className="font-mono font-bold text-primary">ESC M 0</code> para forzar la letra grande (Font A 12×24) en cualquier ticketera. Si deseas letra condensada pequeña para ahorrar papel, elige 64 columnas.
+              </span>
+            </div>
           </div>
         </div>
 

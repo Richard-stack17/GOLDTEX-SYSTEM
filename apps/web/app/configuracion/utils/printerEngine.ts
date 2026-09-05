@@ -375,8 +375,19 @@ export function buildEscPosBytes(lines: TicketLine[], maxChars: number = 48): Ui
   const escpos: number[] = [];
 
   // Reset / Init Printer
-  escpos.push(0x1B, 0x40); // ESC @
+  escpos.push(0x1B, 0x40); // ESC @ (Reset a fábrica)
   escpos.push(0x1B, 0x74, 0x00); // Code Page CP437
+  escpos.push(0x1B, 0x32); // ESC 2 (Interlineado estándar de 1/6 pulgada)
+
+  // Forzado explícito de fuente según la configuración de caracteres por línea:
+  // Si se eligió 64 columnas o más, se activa Font B (condensada / ahorro).
+  // Si se eligió 32 (58mm) o 42/48 (80mm), se fuerza Font A (estándar grande 12x24).
+  if (maxChars >= 64) {
+    escpos.push(0x1B, 0x4D, 0x01); // ESC M 1 -> Font B (9x17)
+  } else {
+    escpos.push(0x1B, 0x4D, 0x00); // ESC M 0 -> Font A (12x24)
+    escpos.push(0x1B, 0x21, 0x00); // ESC ! 0 -> Limpiar modos previos y asegurar Font A normal
+  }
 
   for (const line of lines) {
     if (line.align === 'center') escpos.push(0x1B, 0x61, 0x01);
@@ -406,6 +417,12 @@ export function buildEscPosBytes(lines: TicketLine[], maxChars: number = 48): Ui
     if (isTotal) {
       escpos.push(0x1D, 0x21, 0x00); // Reset tamaño normal
       escpos.push(0x1B, 0x45, 0x00); // Reset negrita
+      if (maxChars >= 64) {
+        escpos.push(0x1B, 0x4D, 0x01); // Mantener Font B
+      } else {
+        escpos.push(0x1B, 0x4D, 0x00); // Mantener Font A
+        escpos.push(0x1B, 0x21, 0x00);
+      }
     }
   }
 
@@ -644,7 +661,7 @@ export class WebBluetoothAdapter implements IPrinterAdapter {
         console.warn("Web Bluetooth no autorizado en esta sesión, aplicando impresión térmica del sistema:", reqErr);
         const maxCharsConfig = activePrinter.max_chars || (activePrinter.paper_width <= 58 ? 32 : 48);
         const lines = generateTicketLines(saleData, maxCharsConfig);
-        printViaThermalHtml(lines, activePrinter.paper_width || 80);
+        printViaThermalHtml(lines, activePrinter.paper_width || 80, maxCharsConfig);
         throw new Error(`PRINTER_NOT_AUTHORIZED_IN_BROWSER:${activePrinter.name || 'Impresora'}`);
       }
     }
@@ -652,7 +669,7 @@ export class WebBluetoothAdapter implements IPrinterAdapter {
     if (!deviceToPrint) {
       const maxCharsConfig = activePrinter.max_chars || (activePrinter.paper_width <= 58 ? 32 : 48);
       const lines = generateTicketLines(saleData, maxCharsConfig);
-      printViaThermalHtml(lines, activePrinter.paper_width || 80);
+      printViaThermalHtml(lines, activePrinter.paper_width || 80, maxCharsConfig);
       throw new Error(`PRINTER_NOT_AUTHORIZED_IN_BROWSER:${activePrinter.name || 'Impresora'}`);
     }
 
@@ -668,7 +685,7 @@ export class WebBluetoothAdapter implements IPrinterAdapter {
     } catch (printErr: any) {
       console.warn("Fallo durante transmisión Bluetooth, recurriendo a impresión térmica del sistema:", printErr);
       const lines = generateTicketLines(saleData, maxCharsConfig);
-      printViaThermalHtml(lines, activePrinter.paper_width || 80);
+      printViaThermalHtml(lines, activePrinter.paper_width || 80, maxCharsConfig);
       throw new Error(`PRINTER_COMMUNICATION_ERROR:${activePrinter.name || 'Impresora'}`);
     }
   }
@@ -1122,9 +1139,11 @@ export class WebUsbSerialAdapter {
 }
 
 // ── HTML / SYSTEM PRINT ADAPTER (Universal WiFi / Driver / Network Fallback) ──
-export function printViaThermalHtml(lines: TicketLine[], paperWidth: number = 80) {
+export function printViaThermalHtml(lines: TicketLine[], paperWidth: number = 80, maxChars?: number) {
   const widthMm = paperWidth <= 58 ? 58 : 80;
   const is58 = widthMm === 58;
+  const effectiveCols = maxChars || (is58 ? 32 : 48);
+  const isCondensed = effectiveCols >= 64;
 
   const htmlContent = `
     <!DOCTYPE html>
@@ -1135,27 +1154,38 @@ export function printViaThermalHtml(lines: TicketLine[], paperWidth: number = 80
         <style>
           @page {
             size: ${widthMm}mm auto;
-            margin: 0;
+            margin: 0 !important;
+          }
+          @media print {
+            html, body {
+              width: 100% !important;
+              max-width: ${widthMm}mm !important;
+              margin: 0 auto !important;
+              padding: 0 1.5mm !important;
+            }
           }
           body {
-            font-family: monospace;
-            font-size: ${is58 ? '10px' : '11px'};
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: ${isCondensed ? '10px' : is58 ? '12px' : '13px'};
+            font-weight: 700;
             line-height: 1.25;
             width: ${widthMm}mm;
-            padding: 4mm;
-            margin: 0;
+            padding: 1.5mm;
+            margin: 0 auto;
             color: #000;
             background: #fff;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
           }
           .center { text-align: center; }
           .left { text-align: left; }
           .right { text-align: right; }
-          .bold { font-weight: bold; }
+          .bold { font-weight: 900; }
           .total {
             font-size: ${is58 ? '14px' : '16px'};
             font-weight: 900;
-            border-top: 1px dashed #000;
-            border-bottom: 1px dashed #000;
+            border-top: 1.5px dashed #000;
+            border-bottom: 1.5px dashed #000;
             padding: 3px 0;
             margin: 4px 0;
             display: flex;
@@ -1166,14 +1196,14 @@ export function printViaThermalHtml(lines: TicketLine[], paperWidth: number = 80
             margin: 3px 0;
           }
           .dotted {
-            border-bottom: 1px dotted #888;
+            border-bottom: 1px dotted #666;
             margin: 2px 0;
           }
         </style>
       </head>
       <body>
         ${lines.map(line => {
-    if (line.text === 'PROFORMA') return `<div class="center bold" style="font-size: 13px; letter-spacing: 2px;">PROFORMA</div>`;
+    if (line.text === 'PROFORMA') return `<div class="center bold" style="font-size: 14px; letter-spacing: 2px;">PROFORMA</div>`;
     if (line.text.startsWith('TOTAL')) {
       const parts = line.text.split('S/');
       const label = parts[0]?.trim() || 'TOTAL';
@@ -1310,7 +1340,7 @@ export const printTicketLinesDirect = async (
       await (androidWifiAdapter as any).writeBytes(activePrinter.ip_address, activePrinter.port || 9100, uint8);
       return;
     } else {
-      printViaThermalHtml(lines, activePrinter.paper_width || 80);
+      printViaThermalHtml(lines, activePrinter.paper_width || 80, maxCharsConfig);
       return;
     }
   }
@@ -1353,7 +1383,7 @@ export const printTicketLinesDirect = async (
 
     if (!deviceToPrint) {
       console.warn('No se detectó dispositivo USB directo con WebUSB, utilizando impresión térmica HTML del sistema.');
-      printViaThermalHtml(lines, activePrinter.paper_width || 80);
+      printViaThermalHtml(lines, activePrinter.paper_width || 80, maxCharsConfig);
       return;
     }
 
@@ -1367,7 +1397,7 @@ export const printTicketLinesDirect = async (
       return;
     } catch (usbErr: any) {
       console.warn('Fallo impresión USB directa, recurriendo a impresión térmica del sistema:', usbErr);
-      printViaThermalHtml(lines, activePrinter.paper_width || 80);
+      printViaThermalHtml(lines, activePrinter.paper_width || 80, maxCharsConfig);
       return;
     }
   }
@@ -1388,7 +1418,7 @@ export const printTicketLinesDirect = async (
     try {
       const nav = typeof window !== 'undefined' ? (navigator as any) : null;
       if (!nav?.bluetooth) {
-        printViaThermalHtml(lines, activePrinter.paper_width || 80);
+        printViaThermalHtml(lines, activePrinter.paper_width || 80, maxCharsConfig);
         return;
       }
       let deviceToPrint: any = null;
@@ -1402,7 +1432,7 @@ export const printTicketLinesDirect = async (
         deviceToPrint = await nav.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: (webBluetoothAdapter as any).knownServices });
       }
       if (!deviceToPrint) {
-        printViaThermalHtml(lines, activePrinter.paper_width || 80);
+        printViaThermalHtml(lines, activePrinter.paper_width || 80, maxCharsConfig);
         return;
       }
 
@@ -1417,7 +1447,7 @@ export const printTicketLinesDirect = async (
         } catch (_) { }
       }
       if (!writeChar) {
-        printViaThermalHtml(lines, activePrinter.paper_width || 80);
+        printViaThermalHtml(lines, activePrinter.paper_width || 80, maxCharsConfig);
         return;
       }
 
@@ -1436,7 +1466,7 @@ export const printTicketLinesDirect = async (
       }
     } catch (e) {
       console.warn('Fallo impresión Bluetooth web, recurriendo a impresión térmica del sistema:', e);
-      printViaThermalHtml(lines, activePrinter.paper_width || 80);
+      printViaThermalHtml(lines, activePrinter.paper_width || 80, maxCharsConfig);
     }
   }
 };
